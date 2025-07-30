@@ -319,12 +319,42 @@
     list.forEach((item) => {
       const card = document.createElement('div');
       card.className = 'card collapsed';
+
+      const headerRow = document.createElement('div');
+      headerRow.className = 'card-header';
+
       const titleEl = document.createElement('h3');
       titleEl.textContent = item.title;
       titleEl.onclick = () => {
         card.classList.toggle('collapsed');
       };
-      card.appendChild(titleEl);
+      headerRow.appendChild(titleEl);
+
+      const likeBox = document.createElement('div');
+      likeBox.className = 'like-info';
+
+      const likeCount = document.createElement('span');
+      likeCount.textContent = `❤️ ${item.likes || 0}`;
+
+      const likeBtn = document.createElement('button');
+      likeBtn.className = 'like-btn';
+      likeBtn.textContent = '👍';
+      likeBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          const updated = await api(`/suggestions/${item.id}/vote`, 'POST');
+          likeCount.textContent = `❤️ ${updated.likes}`;
+          renderSuggestions(container);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+
+      likeBox.appendChild(likeCount);
+      likeBox.appendChild(likeBtn);
+      headerRow.appendChild(likeBox);
+
+      card.appendChild(headerRow);
       const details = document.createElement('div');
       details.className = 'card-details';
       if (item.author) {

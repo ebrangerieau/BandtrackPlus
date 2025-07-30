@@ -183,6 +183,22 @@ app.delete('/api/suggestions/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Upvote a suggestion
+app.post('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const ok = await db.incrementSuggestionLikes(id);
+    if (!ok) return res.status(404).json({ error: 'Suggestion not found' });
+    const list = await db.getSuggestions();
+    const updated = list.find((s) => s.id === id);
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to vote' });
+  }
+});
+
 // ----------------- Rehearsal Routes -----------------
 
 // Get all rehearsals
