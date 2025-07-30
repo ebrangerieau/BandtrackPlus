@@ -7,7 +7,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - /volume1/docker/bandtrack:/app
+      - /volume1/docker/bandtrack/bandtrack.db:/app/bandtrack.db
     environment:
       - HOST=0.0.0.0
       - PORT=3000
