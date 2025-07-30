@@ -1167,6 +1167,24 @@
       listDiv.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
         if (cb.checked) selected.push(Number(cb.value));
       });
+      let warn = false;
+      for (const id of selected) {
+        const s = rehearsalsCache.find((r) => r.id === id);
+        if (s) {
+          const levels = Object.values(s.levels || {}).map(Number);
+          const min = levels.length ? Math.min(...levels) : 0;
+          if (min <= 6) {
+            warn = true;
+            break;
+          }
+        }
+      }
+      if (warn &&
+          !confirm(
+            'Ce morceau n\u2019est probablement pas suffisamment r\u00e9p\u00e9t\u00e9. Ajouter quand m\u00eame ?'
+          )) {
+        return;
+      }
       try {
         await api('/performances', 'POST', { name, date: dateVal, songs: selected });
         if (modal.parentNode) {
@@ -1260,6 +1278,24 @@
       listDiv.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
         if (cb.checked) selected.push(Number(cb.value));
       });
+      let warn = false;
+      for (const id of selected) {
+        const s = rehearsalsCache.find((r) => r.id === id);
+        if (s) {
+          const levels = Object.values(s.levels || {}).map(Number);
+          const min = levels.length ? Math.min(...levels) : 0;
+          if (min <= 6) {
+            warn = true;
+            break;
+          }
+        }
+      }
+      if (warn &&
+          !confirm(
+            'Ce morceau n\u2019est probablement pas suffisamment r\u00e9p\u00e9t\u00e9. Enregistrer quand m\u00eame ?'
+          )) {
+        return;
+      }
       try {
         await api(`/performances/${perf.id}`, 'PUT', { name, date: dateVal, songs: selected });
         if (modal.parentNode) {
