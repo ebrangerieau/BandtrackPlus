@@ -146,6 +146,27 @@ app.post('/api/suggestions', requireAuth, async (req, res) => {
   }
 });
 
+// Update an existing suggestion
+app.put('/api/suggestions/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { title, url } = req.body;
+  if (isNaN(id) || !title) {
+    return res.status(400).json({ error: 'Invalid data' });
+  }
+  try {
+    const changes = await db.updateSuggestion(id, title, url || '', req.session.userId);
+    if (changes === 0) {
+      return res.status(403).json({ error: 'Not permitted to update' });
+    }
+    const list = await db.getSuggestions();
+    const updated = list.find((s) => s.id === id);
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update suggestion' });
+  }
+});
+
 // Delete a suggestion
 app.delete('/api/suggestions/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
