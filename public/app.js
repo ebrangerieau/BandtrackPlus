@@ -463,7 +463,11 @@
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn-secondary';
     cancelBtn.textContent = 'Annuler';
-    cancelBtn.onclick = () => document.body.removeChild(modal);
+    cancelBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal); // or use modal.remove();
+      }
+    };
     const okBtn = document.createElement('button');
     okBtn.className = 'btn-primary';
     okBtn.textContent = 'Ajouter';
@@ -475,7 +479,9 @@
       if (!title) return;
       try {
         await api('/suggestions', 'POST', { title, author, youtube });
-        document.body.removeChild(modal);
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal); // or use modal.remove();
+        }
         renderSuggestions(container);
       } catch (err) {
         alert(err.message);
@@ -525,7 +531,11 @@
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn-secondary';
     cancelBtn.textContent = 'Annuler';
-    cancelBtn.onclick = () => document.body.removeChild(modal);
+    cancelBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal); // or use modal.remove();
+      }
+    };
     const okBtn = document.createElement('button');
     okBtn.className = 'btn-primary';
     okBtn.textContent = 'Enregistrer';
@@ -536,7 +546,9 @@
       if (!titleVal) return;
       try {
         await api(`/suggestions/${item.id}`, 'PUT', { title: titleVal, url: urlVal });
-        document.body.removeChild(modal);
+          if (modal.parentNode) {
+            modal.parentNode.removeChild(modal); // or use modal.remove();
+          }
         renderSuggestions(container);
       } catch (err) {
         alert(err.message);
@@ -843,7 +855,11 @@
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn-secondary';
     cancelBtn.textContent = 'Annuler';
-    cancelBtn.onclick = () => document.body.removeChild(modal);
+    cancelBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal); // or use modal.remove();
+      }
+    };
     const okBtn = document.createElement('button');
     okBtn.className = 'btn-primary';
     okBtn.textContent = 'Ajouter';
@@ -856,7 +872,9 @@
       const spotify = inputSp.value.trim();
       try {
         await api('/rehearsals', 'POST', { title, author, youtube, spotify });
-        document.body.removeChild(modal);
+          if (modal.parentNode) {
+            modal.parentNode.removeChild(modal); // or use modal.remove();
+          }
         renderRehearsals(container);
       } catch (err) {
         alert(err.message);
@@ -933,7 +951,11 @@
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn-secondary';
     cancelBtn.textContent = 'Annuler';
-    cancelBtn.onclick = () => document.body.removeChild(modal);
+    cancelBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal); // or use modal.remove();
+      }
+    };
     const okBtn = document.createElement('button');
     okBtn.className = 'btn-primary';
     okBtn.textContent = 'Enregistrer';
@@ -946,7 +968,9 @@
       if (!titleVal) return;
       try {
         await api(`/rehearsals/${song.id}`, 'PUT', { title: titleVal, author: authorVal, youtube: ytVal, spotify: spVal });
-        document.body.removeChild(modal);
+          if (modal.parentNode) {
+            modal.parentNode.removeChild(modal); // or use modal.remove();
+          }
         // Actualiser la page des répétitions
         renderRehearsals(container);
         // Mettre à jour le cache
@@ -1126,7 +1150,11 @@
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn-secondary';
     cancelBtn.textContent = 'Annuler';
-    cancelBtn.onclick = () => document.body.removeChild(modal);
+    cancelBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal); // or use modal.remove();
+      }
+    };
     const okBtn = document.createElement('button');
     okBtn.className = 'btn-primary';
     okBtn.textContent = 'Ajouter';
@@ -1141,7 +1169,9 @@
       });
       try {
         await api('/performances', 'POST', { name, date: dateVal, songs: selected });
-        document.body.removeChild(modal);
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal); // or use modal.remove();
+        }
         renderPerformances(container);
       } catch (err) {
         alert(err.message);
@@ -1213,7 +1243,11 @@
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn-secondary';
     cancelBtn.textContent = 'Annuler';
-    cancelBtn.onclick = () => document.body.removeChild(modal);
+    cancelBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal); // or use modal.remove();
+      }
+    };
     const okBtn = document.createElement('button');
     okBtn.className = 'btn-primary';
     okBtn.textContent = 'Enregistrer';
@@ -1228,7 +1262,9 @@
       });
       try {
         await api(`/performances/${perf.id}`, 'PUT', { name, date: dateVal, songs: selected });
-        document.body.removeChild(modal);
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal); // or use modal.remove();
+        }
         renderPerformances(container);
       } catch (err) {
         alert(err.message);
@@ -1286,7 +1322,11 @@
     const closeBtn = document.createElement('button');
     closeBtn.className = 'btn-secondary';
     closeBtn.textContent = 'Fermer';
-    closeBtn.onclick = () => document.body.removeChild(modal);
+    closeBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal); // or use modal.remove();
+      }
+    };
     closeDiv.appendChild(closeBtn);
     content.appendChild(closeDiv);
     modal.appendChild(content);
@@ -1496,7 +1536,11 @@
     const closeBtn = document.createElement('button');
     closeBtn.className = 'btn-secondary';
     closeBtn.textContent = 'Fermer';
-    closeBtn.onclick = () => document.body.removeChild(modal);
+    closeBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal); // or use modal.remove();
+      }
+    };
     closeDiv.appendChild(closeBtn);
     content.appendChild(closeDiv);
     modal.appendChild(content);
