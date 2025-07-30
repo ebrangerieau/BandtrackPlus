@@ -10,7 +10,7 @@ services:
       # The Python server stores ``bandtrack.db`` in its working directory
       # (/app).  Mounting the volume at /app ensures that the database
       # persists across container restarts along with any uploaded files.
-      - bandtrack-data:/app
+      - /volume1/docker/bandtrack:/app
     environment:
       # Optional: override host/port via environment variables
       - HOST=0.0.0.0
