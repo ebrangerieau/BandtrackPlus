@@ -7,7 +7,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - bandtrack_data:/app
+      - bandtrack_bandtrack_data:/app
     environment:
       - HOST=0.0.0.0
       - PORT=3000
@@ -16,4 +16,4 @@ services:
 volumes:
   bandtrack_data:
     external: true
-    name: bandtrack_data
+    name: bandtrack_bandtrack_data
