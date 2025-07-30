@@ -469,16 +469,21 @@
     }
     list.forEach((song) => {
       const card = document.createElement('div');
-      card.className = 'card';
+      card.className = 'card collapsed';
       const h3 = document.createElement('h3');
       h3.textContent = song.title;
+      h3.onclick = () => {
+        card.classList.toggle('collapsed');
+      };
       card.appendChild(h3);
+      const details = document.createElement('div');
+      details.className = 'card-details';
       // Auteur
       if (song.author) {
         const authorP = document.createElement('p');
         authorP.style.fontStyle = 'italic';
         authorP.textContent = 'Auteur : ' + song.author;
-        card.appendChild(authorP);
+        details.appendChild(authorP);
       }
       // Lien YouTube
       if (song.youtube) {
@@ -487,7 +492,7 @@
         ytLink.target = '_blank';
         ytLink.rel = 'noopener noreferrer';
         ytLink.textContent = song.youtube;
-        card.appendChild(ytLink);
+        details.appendChild(ytLink);
       }
       // Niveau pour utilisateur courant
       const levelWrapper = document.createElement('div');
@@ -521,7 +526,7 @@
       };
       levelWrapper.appendChild(levelLabel);
       levelWrapper.appendChild(range);
-      card.appendChild(levelWrapper);
+      details.appendChild(levelWrapper);
       // Notes pour utilisateur courant
       const notesLabel = document.createElement('label');
       notesLabel.textContent = 'Vos notes';
@@ -534,8 +539,8 @@
           alert(err.message);
         }
       };
-      card.appendChild(notesLabel);
-      card.appendChild(textarea);
+      details.appendChild(notesLabel);
+      details.appendChild(textarea);
 
       // Note audio pour l'utilisateur courant
       const audioSection = document.createElement('div');
@@ -599,7 +604,7 @@
         audioSection.appendChild(uploadBtn);
         audioSection.appendChild(fileInput);
       }
-      card.appendChild(audioSection);
+      details.appendChild(audioSection);
       // Afficher les notes et niveaux des autres membres
       // Filtrer les autres membres en ignorant la casse afin d’éviter de voir
       // apparaître plusieurs fois le même utilisateur (ex : « eric » et « Eric »).
@@ -632,7 +637,7 @@
           }
           othersDiv.appendChild(wrapper);
         });
-        card.appendChild(othersDiv);
+        details.appendChild(othersDiv);
       }
       // Actions (edit/delete) for creator or admin
       if (currentUser && (currentUser.isAdmin || currentUser.id === song.creatorId)) {
@@ -665,8 +670,9 @@
           }
         };
         actions.appendChild(delBtn);
-        card.appendChild(actions);
+        details.appendChild(actions);
       }
+      card.appendChild(details);
       container.appendChild(card);
     });
     // Bouton flottant pour ajouter une répétition

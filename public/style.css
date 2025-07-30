@@ -211,8 +211,13 @@ body, html {
   margin-bottom: 16px;
 }
 
+.card.collapsed .card-details {
+  display: none;
+}
+
 .card h3 {
   margin-top: 0;
+  cursor: pointer;
 }
 
 .actions {
