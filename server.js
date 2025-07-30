@@ -245,6 +245,20 @@ app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Toggle mastered flag on a rehearsal
+app.put('/api/rehearsals/:id/mastered', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const updated = await db.toggleRehearsalMastered(id);
+    if (!updated) return res.status(404).json({ error: 'Rehearsal not found' });
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to toggle mastered' });
+  }
+});
+
 // ----------------- Performance Routes -----------------
 
 // Get all performances

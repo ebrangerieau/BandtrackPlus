@@ -66,11 +66,19 @@ function init() {
       spotify TEXT,
       levels_json TEXT DEFAULT '{}',
       notes_json TEXT DEFAULT '{}',
+      mastered INTEGER NOT NULL DEFAULT 0,
       creator_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (creator_id) REFERENCES users(id)
     );`
   );
+
+  // Ensure mastered column exists on old databases
+  db.all('PRAGMA table_info(rehearsals)', (err, rows) => {
+    if (!err && rows && !rows.find((r) => r.name === 'mastered')) {
+      db.run('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0');
+    }
+  });
 
   // Performances: gigs/presentations containing multiple rehearsal IDs and
   // associated with a creator.  Songs are stored as a JSON array of
@@ -237,8 +245,8 @@ function incrementSuggestionLikes(id) {
 function createRehearsal(title, youtube, spotify, creatorId) {
   return new Promise((resolve, reject) => {
     db.run(
-      'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, creator_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [title, youtube || null, spotify || null, '{}', '{}', creatorId],
+      'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [title, youtube || null, spotify || null, '{}', '{}', 0, creatorId],
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
@@ -253,7 +261,7 @@ function createRehearsal(title, youtube, spotify, creatorId) {
 function getRehearsals() {
   return new Promise((resolve, reject) => {
     db.all(
-      `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.creator_id, r.created_at,
+      `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
               u.username AS creator
        FROM rehearsals r
        JOIN users u ON u.id = r.creator_id
@@ -270,6 +278,7 @@ function getRehearsals() {
               spotify: row.spotify,
               levels: JSON.parse(row.levels_json || '{}'),
               notes: JSON.parse(row.notes_json || '{}'),
+              mastered: !!row.mastered,
               creatorId: row.creator_id,
               creator: row.creator,
             };
@@ -312,6 +321,49 @@ function updateRehearsalUserData(id, username, level, note) {
         );
       }
     );
+  });
+}
+
+/**
+ * Toggles the mastered flag for a rehearsal and returns the updated row.
+ */
+function toggleRehearsalMastered(id) {
+  return new Promise((resolve, reject) => {
+    db.get('SELECT mastered FROM rehearsals WHERE id = ?', [id], (err, row) => {
+      if (err) return reject(err);
+      if (!row) return resolve(null);
+      const newVal = row.mastered ? 0 : 1;
+      db.run(
+        'UPDATE rehearsals SET mastered = ? WHERE id = ?',
+        [newVal, id],
+        function (err) {
+          if (err) return reject(err);
+          db.get(
+            `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
+                    u.username AS creator
+             FROM rehearsals r JOIN users u ON u.id = r.creator_id WHERE r.id = ?`,
+            [id],
+            (err, updated) => {
+              if (err) reject(err);
+              else if (!updated) resolve(null);
+              else {
+                resolve({
+                  id: updated.id,
+                  title: updated.title,
+                  youtube: updated.youtube,
+                  spotify: updated.spotify,
+                  levels: JSON.parse(updated.levels_json || '{}'),
+                  notes: JSON.parse(updated.notes_json || '{}'),
+                  mastered: !!updated.mastered,
+                  creatorId: updated.creator_id,
+                  creator: updated.creator,
+                });
+              }
+            }
+          );
+        }
+      );
+    });
   });
 }
 
@@ -463,6 +515,7 @@ module.exports = {
   createRehearsal,
   getRehearsals,
   updateRehearsalUserData,
+  toggleRehearsalMastered,
   createPerformance,
   getPerformances,
   getPerformance,
