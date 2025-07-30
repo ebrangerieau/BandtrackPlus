@@ -7,13 +7,8 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - bandtrack_bandtrack-data:/app
+      - /volume1/docker/bandtrack:/app
     environment:
       - HOST=0.0.0.0
       - PORT=3000
     restart: unless-stopped
-
-volumes:
-  bandtrack_data:
-    external: true
-    name: bandtrack_bandtrack-data
