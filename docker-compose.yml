@@ -15,6 +15,5 @@ services:
 
 volumes:
   bandtrack_data:
-    name: bandtrack_data
     external: true
-    driver: local
+    name: bandtrack_data
