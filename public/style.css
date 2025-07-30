@@ -220,6 +220,25 @@ body, html {
   cursor: pointer;
 }
 
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.like-info {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.like-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+}
+
 .actions {
   margin-top: 10px;
   display: flex;

@@ -33,17 +33,27 @@ function init() {
   );
 
   // Suggestions: simple list of song suggestions with an optional URL and
-  // the user who created it.
+  // the user who created it.  Each suggestion also stores a number of likes
+  // used to rank the items.
   db.run(
     `CREATE TABLE IF NOT EXISTS suggestions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       url TEXT,
+      likes INTEGER NOT NULL DEFAULT 0,
       creator_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (creator_id) REFERENCES users(id)
     );`
   );
+
+  // Ensure the likes column exists on existing databases.  Older versions of
+  // the schema may not have it, so we attempt to add it and ignore errors.
+  db.all('PRAGMA table_info(suggestions)', (err, rows) => {
+    if (!err && rows && !rows.find((r) => r.name === 'likes')) {
+      db.run('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0');
+    }
+  });
 
   // Rehearsals: songs worked on during practice.  Levels and notes are stored
   // as JSON strings keyed by username so that each user can set their own
@@ -158,10 +168,10 @@ function createSuggestion(title, url, creatorId) {
 function getSuggestions() {
   return new Promise((resolve, reject) => {
     db.all(
-      `SELECT s.id, s.title, s.url, s.creator_id, s.created_at, u.username AS creator
+      `SELECT s.id, s.title, s.url, s.likes, s.creator_id, s.created_at, u.username AS creator
        FROM suggestions s
        JOIN users u ON u.id = s.creator_id
-       ORDER BY s.created_at ASC`,
+       ORDER BY s.likes DESC, s.created_at ASC`,
       (err, rows) => {
         if (err) reject(err);
         else resolve(rows);
@@ -199,6 +209,23 @@ function updateSuggestion(id, title, url, userId) {
       function (err) {
         if (err) reject(err);
         else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
+ * Increments the like counter for a suggestion.  Resolves to true if a row was
+ * updated.
+ */
+function incrementSuggestionLikes(id) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE suggestions SET likes = likes + 1 WHERE id = ?',
+      [id],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
       }
     );
   });
@@ -432,6 +459,7 @@ module.exports = {
   getSuggestions,
   deleteSuggestion,
   updateSuggestion,
+  incrementSuggestionLikes,
   createRehearsal,
   getRehearsals,
   updateRehearsalUserData,

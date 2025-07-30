@@ -113,6 +113,7 @@ def init_db():
                author TEXT,
                youtube TEXT,
                url TEXT,
+               likes INTEGER NOT NULL DEFAULT 0,
                creator_id INTEGER NOT NULL,
                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                FOREIGN KEY (creator_id) REFERENCES users(id)
@@ -200,6 +201,8 @@ def init_db():
             cur.execute('ALTER TABLE suggestions ADD COLUMN author TEXT')
         if 'youtube' not in s_columns:
             cur.execute('ALTER TABLE suggestions ADD COLUMN youtube TEXT')
+        if 'likes' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0')
         # Keep existing url column intact for backward compatibility
         conn.commit()
         conn.close()
@@ -498,11 +501,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         return self.api_create_suggestion(body, user)
                     raise NotImplementedError
                 # e.g. /api/suggestions/{id}
-                if len(parts) == 4:
+                if len(parts) >= 4:
                     try:
                         sug_id = int(parts[3])
                     except ValueError:
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    if len(parts) == 5 and parts[4] == 'vote' and method == 'POST':
+                        return self.api_vote_suggestion_id(sug_id)
                     if method == 'DELETE':
                         return self.api_delete_suggestion_id(sug_id, user)
                     else:
@@ -701,10 +706,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.creator_id, s.created_at, u.username AS creator
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at, u.username AS creator
                FROM suggestions s
                JOIN users u ON u.id = s.creator_id
-               ORDER BY s.created_at ASC'''
+               ORDER BY s.likes DESC, s.created_at ASC'''
         )
         rows = [dict(row) for row in cur.fetchall()]
         conn.close()
@@ -719,6 +724,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'creatorId': r['creator_id'],
                 'creator': r['creator'],
                 'createdAt': r['created_at'],
+                'likes': r['likes'],
             }
             result.append(entry)
         send_json(self, HTTPStatus.OK, result)
@@ -755,6 +761,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'creatorId': row['creator_id'],
                 'creator': row['creator'],
                 'createdAt': row['created_at'],
+                'likes': row['likes'],
             }
             send_json(self, HTTPStatus.CREATED, result)
         else:
@@ -950,6 +957,39 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
+
+    def api_vote_suggestion_id(self, sug_id: int):
+        """Increment likes for a suggestion and return the updated row."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('UPDATE suggestions SET likes = likes + 1 WHERE id = ?', (sug_id,))
+        if cur.rowcount == 0:
+            conn.commit()
+            conn.close()
+            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+        cur.execute(
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at,
+                      u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
+               WHERE s.id = ?''',
+            (sug_id,)
+        )
+        row = cur.fetchone()
+        conn.commit()
+        conn.close()
+        if row:
+            result = {
+                'id': row['id'],
+                'title': row['title'],
+                'author': row['author'],
+                'youtube': row['youtube'] or row['url'],
+                'creatorId': row['creator_id'],
+                'creator': row['creator'],
+                'createdAt': row['created_at'],
+                'likes': row['likes'],
+            }
+            send_json(self, HTTPStatus.OK, result)
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
     def api_update_rehearsal_id(self, rehearsal_id: int, body: dict, user: dict):
         """Update a rehearsal by ID.  This method handles two scenarios:
