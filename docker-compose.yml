@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  bandtrack:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount a persistent volume for the SQLite database so data persists.
+      # The Python server stores ``bandtrack.db`` in its working directory
+      # (/app).  Mounting the volume at /app ensures that the database
+      # persists across container restarts along with any uploaded files.
+      - bandtrack-data:/app
+    environment:
+      # Optional: override host/port via environment variables
+      - HOST=0.0.0.0
+      - PORT=3000
+
+volumes:
+  bandtrack-data:
+    driver: local

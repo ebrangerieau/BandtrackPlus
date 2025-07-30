@@ -1,0 +1,1267 @@
+#!/usr/bin/env python3
+"""
+bandtrack-server/server.py
+==========================
+
+This module implements a simple HTTP server in pure Python to provide a
+centralised backend for the BandTrack application.  It serves both the
+frontend files (the SPA in the ``public`` directory) and a JSON API
+under the ``/api`` prefix.  The design follows the architecture proposed
+for replacing the original ``localStorage`` implementation with a
+database-backed server and cookie‑based session management.  By using
+only the Python standard library, the server avoids any external
+dependencies and is suitable for containerised environments where
+internet access is unavailable.
+
+Key features
+------------
+
+* Users can register and login.  Passwords are salted and hashed using
+  PBKDF2 with SHA‑256 for security.  Sessions are stored in a
+  ``sessions`` table and identified via a randomly generated cookie.
+* Suggestions, rehearsals and performances are persisted in a SQLite
+  database (`bandtrack.db`) with the same structure as the earlier
+  Node/Express prototype.
+* A single settings row stores the group name and dark mode flag, which
+  are applied at load time for all users.
+* The API endpoints mirror those used by the frontend so that the
+  existing JavaScript code (in ``public/app.js``) can remain largely
+  unchanged.  The only notable difference is that cookie names and
+  expiration behaviour are handled here.
+* Static files are served from the ``public`` directory for any path
+  outside of ``/api``.  Unknown paths fall back to ``index.html`` to
+  support client‑side routing in the SPA.
+
+Usage
+-----
+
+Running the server is as simple as executing this file with Python:
+
+```
+python3 server.py
+```
+
+The server listens on port 3000 by default.  You can override the port
+by setting the ``PORT`` environment variable or passing ``--port`` on
+the command line.  Example:
+
+```
+python3 server.py --port 8080
+```
+
+The server automatically creates the database and tables on first run,
+and inserts a default settings row if none exists.  Data persists in
+``bandtrack.db`` across restarts.
+
+Note: Because this server runs on the same domain as the frontend, no
+CORS headers are necessary.  The session cookie is marked ``HttpOnly``
+and ``SameSite=Lax`` to mitigate cross‑site scripting and request
+forgery attacks.  HTTPS termination should be handled by an upstream
+proxy in production.
+"""
+
+import argparse
+import json
+import os
+import sqlite3
+import secrets
+import hashlib
+import hmac
+import time
+import datetime
+import urllib.parse
+import mimetypes
+from http import HTTPStatus
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+#############################
+# Database initialisation
+#############################
+
+DB_FILENAME = os.path.join(os.path.dirname(__file__), 'bandtrack.db')
+
+def get_db_connection():
+    """Return a new database connection.  SQLite connections are not
+    thread‑safe by default when used from multiple threads (as in
+    ``ThreadingHTTPServer``).  Consequently, each request handler
+    obtains its own connection.  ``check_same_thread=False`` allows
+    connections to be shared across threads safely."""
+    conn = sqlite3.connect(DB_FILENAME, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    """Create tables if they do not already exist and insert the
+    default settings row.  This function is idempotent."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Users table: store username, salt and password hash
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS users (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               username TEXT NOT NULL UNIQUE,
+               salt BLOB NOT NULL,
+               password_hash BLOB NOT NULL,
+               is_admin INTEGER NOT NULL DEFAULT 0
+           );'''
+    )
+    # Suggestions: simple list of suggestions with optional URL and creator
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS suggestions (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               title TEXT NOT NULL,
+               author TEXT,
+               youtube TEXT,
+               url TEXT,
+               creator_id INTEGER NOT NULL,
+               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+               FOREIGN KEY (creator_id) REFERENCES users(id)
+           );'''
+    )
+    # Rehearsals: store levels and notes per user as JSON strings.  Include
+    # optional author, YouTube/Spotify links and audio notes JSON.  The
+    # ``audio_notes_json`` field stores base64‑encoded audio notes per user.
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS rehearsals (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               title TEXT NOT NULL,
+               author TEXT,
+               youtube TEXT,
+               spotify TEXT,
+               levels_json TEXT DEFAULT '{}',
+               notes_json TEXT DEFAULT '{}',
+               audio_notes_json TEXT DEFAULT '{}',
+               creator_id INTEGER NOT NULL,
+               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+               FOREIGN KEY (creator_id) REFERENCES users(id)
+           );'''
+    )
+    # Performances: contains name, date and a JSON array of rehearsal IDs
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS performances (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               name TEXT NOT NULL,
+               date TEXT NOT NULL,
+               songs_json TEXT DEFAULT '[]',
+               creator_id INTEGER NOT NULL,
+               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+               FOREIGN KEY (creator_id) REFERENCES users(id)
+           );'''
+    )
+    # Settings: single row with group name and dark mode flag
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS settings (
+               id INTEGER PRIMARY KEY CHECK(id=1),
+               group_name TEXT NOT NULL,
+               dark_mode INTEGER NOT NULL DEFAULT 0,
+               template TEXT NOT NULL DEFAULT 'classic'
+           );'''
+    )
+    # Insert default settings row if missing
+    cur.execute('SELECT COUNT(*) FROM settings')
+    if cur.fetchone()[0] == 0:
+        cur.execute(
+            'INSERT INTO settings (id, group_name, dark_mode, template) VALUES (1, ?, 0, ?)',
+            ('Groupe de musique', 'classic')
+        )
+    # Sessions: store session token, associated user and expiry timestamp (epoch)
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS sessions (
+               token TEXT PRIMARY KEY,
+               user_id INTEGER NOT NULL,
+               expires_at INTEGER NOT NULL,
+               FOREIGN KEY (user_id) REFERENCES users(id)
+           );'''
+    )
+    conn.commit()
+    conn.close()
+
+    # Ensure additional columns are present in existing databases.  SQLite
+    # will raise an OperationalError if a column already exists; we
+    # silently ignore such errors.  Users table: is_admin
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(users)')
+        columns = [row['name'] for row in cur.fetchall()]
+        if 'is_admin' not in columns:
+            cur.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0')
+            conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    # Suggestions table: ensure 'author' and 'youtube' columns exist
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(suggestions)')
+        s_columns = [row['name'] for row in cur.fetchall()]
+        if 'author' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN author TEXT')
+        if 'youtube' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN youtube TEXT')
+        # Keep existing url column intact for backward compatibility
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    # Rehearsals table: ensure 'author' and 'audio_notes_json' columns exist
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(rehearsals)')
+        r_columns = [row['name'] for row in cur.fetchall()]
+        if 'author' not in r_columns:
+            cur.execute('ALTER TABLE rehearsals ADD COLUMN author TEXT')
+        if 'audio_notes_json' not in r_columns:
+            cur.execute("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    # Settings table: ensure 'template' column exists.  The design selector
+    # requires a template field to be persisted.  If absent, add it with
+    # a default value 'classic'.
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(settings)')
+        settings_columns = [row['name'] for row in cur.fetchall()]
+        if 'template' not in settings_columns:
+            cur.execute("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
+            conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+#############################
+# Helper functions
+#############################
+
+def hash_password(password: str, salt: bytes | None = None) -> tuple[bytes, bytes]:
+    """Hash a password with PBKDF2.  If ``salt`` is None, a new 16‑byte salt
+    is generated.  Returns a tuple of (salt, password_hash)."""
+    if salt is None:
+        salt = os.urandom(16)
+    # Use PBKDF2 with SHA‑256 and 100_000 iterations (reasonable trade‑off)
+    hashed = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100_000)
+    return salt, hashed
+
+def verify_password(password: str, salt: bytes, expected_hash: bytes) -> bool:
+    """Verify a password against a stored salt and hash."""
+    salt, hashed = hash_password(password, salt)
+    # Constant‑time comparison to avoid timing attacks
+    return hmac.compare_digest(hashed, expected_hash)
+
+def generate_session(user_id: int, duration_seconds: int = 7 * 24 * 3600) -> str:
+    """Create a new session token for a user, store it in the database, and
+    return the token.  ``duration_seconds`` controls the cookie's
+    lifetime; default is one week."""
+    token = secrets.token_hex(32)
+    expires_at = int(time.time()) + duration_seconds
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)',
+        (token, user_id, expires_at)
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+def get_user_by_session(token: str) -> dict | None:
+    """Retrieve the user associated with a session token.  Returns a dict
+    representing the user row or ``None`` if the session is invalid or
+    expired.  Expired sessions are removed from the database."""
+    if not token:
+        return None
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Remove expired sessions
+    cur.execute('DELETE FROM sessions WHERE expires_at <= ?', (int(time.time()),))
+    # Fetch the session
+    cur.execute(
+        'SELECT user_id FROM sessions WHERE token = ?',
+        (token,)
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.commit()
+        conn.close()
+        return None
+    user_id = row['user_id']
+    # Extend session expiry on each use (sliding window)
+    new_expires = int(time.time()) + 7 * 24 * 3600
+    cur.execute(
+        'UPDATE sessions SET expires_at = ? WHERE token = ?',
+        (new_expires, token)
+    )
+    # Fetch the user along with admin flag
+    cur.execute(
+        'SELECT id, username, is_admin FROM users WHERE id = ?',
+        (user_id,)
+    )
+    user_row = cur.fetchone()
+    conn.commit()
+    conn.close()
+    if user_row:
+        return {
+            'id': user_row['id'],
+            'username': user_row['username'],
+            'is_admin': bool(user_row['is_admin']),
+        }
+    return None
+
+def delete_session(token: str) -> None:
+    """Invalidate a session by removing it from the database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM sessions WHERE token = ?', (token,))
+    conn.commit()
+    conn.close()
+
+def read_request_body(handler: BaseHTTPRequestHandler) -> bytes:
+    """Read and return the request body for the current request.  If the
+    Content‑Length header is missing or invalid, returns empty bytes."""
+    try:
+        length = int(handler.headers.get('Content-Length', 0))
+    except ValueError:
+        return b''
+    return handler.rfile.read(length) if length > 0 else b''
+
+def send_json(handler: BaseHTTPRequestHandler, status: int, data: dict, *, cookies: list[tuple[str, str, dict]] = None) -> None:
+    """Serialize ``data`` to JSON and send it in the response with the given
+    HTTP status code.  ``cookies`` can be a list of tuples in the form
+    ``(name, value, options)`` where options is a dict of cookie
+    attributes (expires, path, samesite, httponly, etc.)."""
+    payload = json.dumps(data).encode('utf-8')
+    handler.send_response(status)
+    handler.send_header('Content-Type', 'application/json; charset=utf-8')
+    handler.send_header('Content-Length', str(len(payload)))
+    if cookies:
+        for (name, value, opts) in cookies:
+            cookie_parts = [f"{name}={value}"]
+            if 'expires' in opts:
+                # HTTP cookie format for expires: Wdy, DD Mon YYYY HH:MM:SS GMT
+                exp_ts = opts['expires']
+                if isinstance(exp_ts, int):
+                    exp_dt = datetime.datetime.utcfromtimestamp(exp_ts)
+                else:
+                    exp_dt = exp_ts
+                cookie_parts.append('Expires=' + exp_dt.strftime('%a, %d %b %Y %H:%M:%S GMT'))
+            if 'path' in opts:
+                cookie_parts.append(f"Path={opts['path']}")
+            if 'samesite' in opts:
+                cookie_parts.append(f"SameSite={opts['samesite']}")
+            if opts.get('httponly'):
+                cookie_parts.append('HttpOnly')
+            if opts.get('secure'):
+                cookie_parts.append('Secure')
+            handler.send_header('Set-Cookie', '; '.join(cookie_parts))
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+def send_text_file(handler: BaseHTTPRequestHandler, filepath: str) -> None:
+    """Serve a static file from disk.  Sets an appropriate MIME type.
+    If the file is not found, a 404 response is sent instead."""
+    if not os.path.isfile(filepath):
+        handler.send_error(HTTPStatus.NOT_FOUND)
+        return
+    # Guess content type
+    mime, _ = mimetypes.guess_type(filepath)
+    if not mime:
+        mime = 'application/octet-stream'
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        handler.send_response(HTTPStatus.OK)
+        handler.send_header('Content-Type', mime)
+        handler.send_header('Content-Length', str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+    except OSError:
+        handler.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+
+#############################
+# HTTP request handler
+#############################
+
+class BandTrackHandler(BaseHTTPRequestHandler):
+    """Request handler implementing both API and static file serving."""
+
+    server_version = 'BandTrack/1.0'
+
+    def do_OPTIONS(self):  # noqa: N802 (matching http.server naming)
+        """Handle CORS preflight requests if needed.  Since the server and
+        client run on the same origin in our deployment, CORS is not
+        strictly necessary.  However, we respond to OPTIONS with a 200
+        status to be conservative."""
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.send_header('Allow', 'OPTIONS, GET, POST, PUT, DELETE')
+        self.end_headers()
+
+    def do_GET(self):  # noqa: N802
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path.startswith('/api/'):
+            self.handle_api_request('GET', path, urllib.parse.parse_qs(parsed.query))
+        else:
+            # Serve static file.  Remove leading '/' and normalise path
+            local_path = path.lstrip('/') or 'index.html'
+            static_root = os.path.join(os.path.dirname(__file__), 'public')
+            # Prevent directory traversal
+            normalized = os.path.normpath(os.path.join(static_root, local_path))
+            if not normalized.startswith(static_root):
+                self.send_error(HTTPStatus.FORBIDDEN)
+                return
+            if os.path.isdir(normalized):
+                normalized = os.path.join(normalized, 'index.html')
+            # Fall back to index.html for client routing (e.g. /performances)
+            if not os.path.isfile(normalized):
+                normalized = os.path.join(static_root, 'index.html')
+            send_text_file(self, normalized)
+
+    def do_POST(self):  # noqa: N802
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith('/api/'):
+            self.handle_api_request('POST', parsed.path, urllib.parse.parse_qs(parsed.query))
+        else:
+            self.send_error(HTTPStatus.NOT_FOUND)
+
+    def do_PUT(self):  # noqa: N802
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith('/api/'):
+            self.handle_api_request('PUT', parsed.path, urllib.parse.parse_qs(parsed.query))
+        else:
+            self.send_error(HTTPStatus.NOT_FOUND)
+
+    def do_DELETE(self):  # noqa: N802
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith('/api/'):
+            self.handle_api_request('DELETE', parsed.path, urllib.parse.parse_qs(parsed.query))
+        else:
+            self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_api_request(self, method: str, path: str, query: dict[str, list[str]]):
+        """Dispatch API requests based on the path and HTTP method."""
+        # Parse JSON body if present.  HTTP methods that typically carry
+        # a body include POST, PUT and DELETE.  We intentionally
+        # include DELETE here because curl and fetch may send JSON
+        # payloads with DELETE requests even though the RFC does not
+        # require servers to accept them.  For other methods we ignore
+        # the body.
+        if method in ('POST', 'PUT', 'DELETE'):
+            body_bytes = read_request_body(self)
+            try:
+                body = json.loads(body_bytes.decode('utf-8')) if body_bytes else {}
+            except json.JSONDecodeError:
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid JSON'})
+                return
+        else:
+            body = {}
+
+        # Authentication: obtain current user via session cookie
+        cookie_header = self.headers.get('Cookie', '')
+        cookies = {}
+        for part in cookie_header.split(';'):
+            if '=' in part:
+                name, value = part.strip().split('=', 1)
+                cookies[name] = value
+        session_token = cookies.get('session_id')
+        user = get_user_by_session(session_token)
+
+        # Route handling
+        try:
+            # Authentication routes that do not require an existing session
+            if path == '/api/register' and method == 'POST':
+                return self.api_register(body)
+            if path == '/api/login' and method == 'POST':
+                return self.api_login(body)
+            if path == '/api/logout' and method == 'POST':
+                return self.api_logout(session_token)
+            if path == '/api/me' and method == 'GET':
+                return self.api_me(user)
+
+            # Remaining routes require authentication
+            if user is None:
+                raise PermissionError
+
+            # Suggestions
+            if path.startswith('/api/suggestions'):
+                parts = path.split('/')
+                # e.g. /api/suggestions or /api/suggestions/
+                if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
+                    if method == 'GET':
+                        return self.api_get_suggestions()
+                    if method == 'POST':
+                        return self.api_create_suggestion(body, user)
+                    raise NotImplementedError
+                # e.g. /api/suggestions/{id}
+                if len(parts) == 4:
+                    try:
+                        sug_id = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    if method == 'DELETE':
+                        return self.api_delete_suggestion_id(sug_id, user)
+                    else:
+                        raise NotImplementedError
+                # any other variation
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+
+            # Rehearsals
+            if path.startswith('/api/rehearsals'):
+                parts = path.split('/')
+                if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
+                    if method == 'GET':
+                        return self.api_get_rehearsals()
+                    if method == 'POST':
+                        return self.api_create_rehearsal(body, user)
+                    raise NotImplementedError
+                if len(parts) == 4:
+                    try:
+                        reh_id = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    if method == 'PUT':
+                        return self.api_update_rehearsal_id(reh_id, body, user)
+                    if method == 'DELETE':
+                        return self.api_delete_rehearsal_id(reh_id, user)
+                    else:
+                        raise NotImplementedError
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+
+            # Performances
+            if path.startswith('/api/performances'):
+                parts = path.split('/')
+                if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
+                    if method == 'GET':
+                        return self.api_get_performances()
+                    if method == 'POST':
+                        return self.api_create_performance(body, user)
+                    raise NotImplementedError
+                if len(parts) == 4:
+                    try:
+                        perf_id = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    if method == 'PUT':
+                        return self.api_update_performance_id(perf_id, body, user)
+                    if method == 'DELETE':
+                        return self.api_delete_performance_id(perf_id, user)
+                    else:
+                        raise NotImplementedError
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+
+            # Settings
+            if path == '/api/settings':
+                if method == 'GET':
+                    return self.api_get_settings()
+                if method == 'PUT':
+                    return self.api_update_settings(body, user)
+                raise NotImplementedError
+
+            # Users management (admin only)
+            if path.startswith('/api/users'):
+                # Ensure user is authenticated and admin
+                if not user or not user.get('is_admin'):
+                    raise PermissionError
+                parts = path.split('/')
+                # GET /api/users
+                if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
+                    if method == 'GET':
+                        return self.api_get_users()
+                    raise NotImplementedError
+                # PUT /api/users/{id}
+                if len(parts) == 4:
+                    try:
+                        uid = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid user id'})
+                    if method == 'PUT':
+                        return self.api_update_user_id(uid, body, user)
+                    else:
+                        raise NotImplementedError
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+
+            # Unknown path
+            self.send_error(HTTPStatus.NOT_FOUND)
+        except PermissionError:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
+        except NotImplementedError:
+            self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
+        except Exception as exc:
+            # Log the error on server side and return 500
+            print(f"Internal server error: {exc}")
+            send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Internal server error'})
+
+    #############################
+    # API endpoint handlers
+    #############################
+
+    def api_register(self, body: dict):
+        username = (body.get('username') or '').strip()
+        # Normalize the username to lower‑case to avoid duplicate accounts
+        # differing only by case.  Trimming is performed above.
+        username = username.lower()
+        password = body.get('password') or ''
+        if not username or not password:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Username and password are required'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Check if a user already exists (case‑insensitive)
+        cur.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', (username,))
+        if cur.fetchone():
+            conn.close()
+            send_json(self, HTTPStatus.CONFLICT, {'error': 'User already exists'})
+            return
+        # Determine if this is the first user; if so, grant admin rights
+        cur.execute('SELECT COUNT(*) FROM users')
+        count = cur.fetchone()[0]
+        is_admin = 1 if count == 0 else 0
+        salt, pwd_hash = hash_password(password)
+        cur.execute(
+            'INSERT INTO users (username, salt, password_hash, is_admin) VALUES (?, ?, ?, ?)',
+            (username, salt, pwd_hash, is_admin)
+        )
+        conn.commit()
+        conn.close()
+        send_json(self, HTTPStatus.CREATED, {'message': 'User created'})
+
+    def api_login(self, body: dict):
+        username = (body.get('username') or '').strip().lower()
+        password = body.get('password') or ''
+        if not username or not password:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Username and password are required'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Perform a case‑insensitive lookup for the username
+        cur.execute('SELECT id, username, salt, password_hash, is_admin FROM users WHERE LOWER(username) = LOWER(?)', (username,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
+            return
+        salt = row['salt']
+        pwd_hash = row['password_hash']
+        if not verify_password(password, salt, pwd_hash):
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
+            return
+        # Generate session; row['id'] holds the user's ID.  The row also
+        # contains the canonical username from the database, which may
+        # differ in case from the input.  We return this canonical
+        # username in the response so the client uses a consistent
+        # representation.
+        token = generate_session(row['id'])
+        expires_ts = int(time.time()) + 7 * 24 * 3600
+        send_json(
+            self,
+            HTTPStatus.OK,
+            {
+                'message': 'Logged in',
+                'user': {
+                    'id': row['id'],
+                    'username': row['username'],
+                    'isAdmin': bool(row['is_admin']),
+                },
+            },
+            cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+        )
+
+    def api_logout(self, session_token: str):
+        if session_token:
+            delete_session(session_token)
+        # Clear cookie by setting expiration in the past
+        past_ts = int(time.time()) - 3600
+        send_json(
+            self,
+            HTTPStatus.OK,
+            {'message': 'Logged out'},
+            cookies=[('session_id', '', {'expires': past_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+        )
+
+    def api_me(self, user: dict | None):
+        if not user:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
+            return
+        send_json(self, HTTPStatus.OK, {
+            'id': user['id'],
+            'username': user['username'],
+            'isAdmin': bool(user.get('is_admin')),
+        })
+
+    def api_get_suggestions(self):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.creator_id, s.created_at, u.username AS creator
+               FROM suggestions s
+               JOIN users u ON u.id = s.creator_id
+               ORDER BY s.created_at ASC'''
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        conn.close()
+        # Rename fields to camelCase and include author and youtube
+        result = []
+        for r in rows:
+            entry = {
+                'id': r['id'],
+                'title': r['title'],
+                'author': r['author'],
+                'youtube': r['youtube'] or r['url'],
+                'creatorId': r['creator_id'],
+                'creator': r['creator'],
+                'createdAt': r['created_at'],
+            }
+            result.append(entry)
+        send_json(self, HTTPStatus.OK, result)
+
+    def api_create_suggestion(self, body: dict, user: dict):
+        title = (body.get('title') or '').strip()
+        author = (body.get('author') or '').strip() or None
+        youtube = (body.get('youtube') or body.get('url') or '').strip() or None
+        if not title:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO suggestions (title, author, youtube, url, creator_id) VALUES (?, ?, ?, ?, ?)',
+            (title, author, youtube, youtube, user['id'])
+        )
+        suggestion_id = cur.lastrowid
+        # Retrieve the created row with creator username and timestamp
+        cur.execute(
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.creator_id, s.created_at, u.username AS creator
+               FROM suggestions s JOIN users u ON u.id = s.creator_id WHERE s.id = ?''',
+            (suggestion_id,)
+        )
+        row = cur.fetchone()
+        conn.commit()
+        conn.close()
+        if row:
+            result = {
+                'id': row['id'],
+                'title': row['title'],
+                'author': row['author'],
+                'youtube': row['youtube'] or row['url'],
+                'creatorId': row['creator_id'],
+                'creator': row['creator'],
+                'createdAt': row['created_at'],
+            }
+            send_json(self, HTTPStatus.CREATED, result)
+        else:
+            send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Failed to fetch created suggestion'})
+
+    def api_delete_suggestion(self, body: dict, user: dict):
+        """Delete a suggestion using a JSON body.  The body should contain
+        an ``id`` field specifying the suggestion to delete.  Deletion
+        is permitted for the suggestion's creator or for an admin user."""
+        try:
+            sug_id = int(body.get('id'))
+        except (TypeError, ValueError):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid suggestion id'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if user.get('is_admin'):
+            cur.execute('DELETE FROM suggestions WHERE id = ?', (sug_id,))
+        else:
+            cur.execute('DELETE FROM suggestions WHERE id = ? AND creator_id = ?', (sug_id, user['id']))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        if deleted:
+            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
+
+    def api_get_rehearsals(self):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.audio_notes_json, r.levels_json, r.notes_json, r.creator_id, r.created_at, u.username AS creator
+               FROM rehearsals r JOIN users u ON u.id = r.creator_id ORDER BY r.created_at ASC'''
+        )
+        rows = []
+        for row in cur.fetchall():
+            levels = json.loads(row['levels_json'] or '{}')
+            notes = json.loads(row['notes_json'] or '{}')
+            audio_notes = json.loads(row['audio_notes_json'] or '{}')
+            rows.append({
+                'id': row['id'],
+                'title': row['title'],
+                'author': row['author'],
+                'youtube': row['youtube'],
+                'spotify': row['spotify'],
+                'audioNotes': audio_notes,
+                'levels': levels,
+                'notes': notes,
+                'creatorId': row['creator_id'],
+                'creator': row['creator'],
+                'createdAt': row['created_at'],
+            })
+        conn.close()
+        send_json(self, HTTPStatus.OK, rows)
+
+    def api_create_rehearsal(self, body: dict, user: dict):
+        title = (body.get('title') or '').strip()
+        author = (body.get('author') or '').strip() or None
+        youtube = (body.get('youtube') or '').strip() or None
+        spotify = (body.get('spotify') or '').strip() or None
+        if not title:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO rehearsals (title, author, youtube, spotify, levels_json, notes_json, audio_notes_json, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (title, author, youtube, spotify, json.dumps({}), json.dumps({}), json.dumps({}), user['id'])
+        )
+        rehearsal_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        send_json(self, HTTPStatus.CREATED, {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify})
+
+    def api_update_rehearsal(self, body: dict, user: dict):
+        """Backward‑compatible endpoint for updating a rehearsal.  The
+        incoming body must contain an ``id`` field and may include
+        ``level``, ``note``, ``title``, ``youtube`` or ``spotify``.
+        Delegates to ``api_update_rehearsal_id`` for the actual logic."""
+        try:
+            rehearsal_id = int(body.get('id'))
+        except (TypeError, ValueError):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid rehearsal id'})
+            return
+        return self.api_update_rehearsal_id(rehearsal_id, body, user)
+
+    def api_get_performances(self):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            '''SELECT p.id, p.name, p.date, p.songs_json, p.creator_id, u.username AS creator
+               FROM performances p JOIN users u ON u.id = p.creator_id ORDER BY p.date ASC'''
+        )
+        result = []
+        for row in cur.fetchall():
+            result.append({
+                'id': row['id'],
+                'name': row['name'],
+                'date': row['date'],
+                'songs': json.loads(row['songs_json'] or '[]'),
+                'creatorId': row['creator_id'],
+                'creator': row['creator'],
+            })
+        conn.close()
+        # Return the list directly to align with the Express API
+        send_json(self, HTTPStatus.OK, result)
+
+    def api_create_performance(self, body: dict, user: dict):
+        name = (body.get('name') or '').strip()
+        date = (body.get('date') or '').strip()
+        songs = body.get('songs') or []
+        if not name or not date:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
+            return
+        # Validate songs: ensure list of ints
+        try:
+            songs_list = [int(s) for s in songs]
+        except (TypeError, ValueError):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO performances (name, date, songs_json, creator_id) VALUES (?, ?, ?, ?)',
+            (name, date, json.dumps(songs_list), user['id'])
+        )
+        perf_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        send_json(self, HTTPStatus.CREATED, {'id': perf_id, 'name': name, 'date': date, 'songs': songs_list})
+
+    def api_update_performance(self, body: dict, user: dict):
+        try:
+            perf_id = int(body.get('id'))
+        except (TypeError, ValueError):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid performance id'})
+            return
+        name = (body.get('name') or '').strip()
+        date = (body.get('date') or '').strip()
+        songs = body.get('songs') or []
+        if not name or not date:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
+            return
+        try:
+            songs_list = [int(s) for s in songs]
+        except (TypeError, ValueError):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Allow update if current user is creator or an admin
+        if user.get('is_admin'):
+            cur.execute(
+                'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ?',
+                (name, date, json.dumps(songs_list), perf_id)
+            )
+        else:
+            cur.execute(
+                'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND creator_id = ?',
+                (name, date, json.dumps(songs_list), perf_id, user['id'])
+            )
+        updated = cur.rowcount
+        conn.commit()
+        conn.close()
+        if updated:
+            send_json(self, HTTPStatus.OK, {'message': 'Updated'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+
+    # ------------------------------------------------------------------
+    # Helper methods to support REST paths with IDs (e.g. /api/suggestions/1)
+    # The following functions are wrappers around the body‑based methods
+    # above, allowing the id to be passed as a separate argument.  They
+    # match the signatures used when parsing dynamic segments in
+    # ``handle_api_request``.
+
+    def api_delete_suggestion_id(self, sug_id: int, user: dict):
+        """Delete a suggestion by ID.  The suggestion can be removed by its
+        creator or by an administrator.  Returns 404 if the suggestion
+        does not exist or the user lacks the necessary privileges."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Allow deletion if the user is the creator OR an admin
+        if user.get('is_admin'):
+            cur.execute('DELETE FROM suggestions WHERE id = ?', (sug_id,))
+        else:
+            cur.execute('DELETE FROM suggestions WHERE id = ? AND creator_id = ?', (sug_id, user['id']))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        if deleted:
+            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
+
+    def api_update_rehearsal_id(self, rehearsal_id: int, body: dict, user: dict):
+        """Update a rehearsal by ID.  This method handles two scenarios:
+
+        * Updating the current user's level and/or note for the rehearsal
+          (fields ``level`` and ``note`` in the body).  This is allowed
+          for any authenticated user.
+        * Editing the rehearsal's metadata (fields ``title``, ``youtube``
+          and ``spotify``).  This is only permitted if the requester is
+          the creator of the rehearsal or an administrator.
+
+        Both operations may be combined in a single request.  If no
+        updatable fields are provided, a 400 response is returned.
+        """
+        # Determine which fields are being updated
+        title = body.get('title')
+        author = body.get('author')
+        youtube = body.get('youtube')
+        spotify = body.get('spotify')
+        level = body.get('level')
+        note = body.get('note')
+        audio_b64 = body.get('audio')
+        # If nothing to update, return error
+        if all(v is None for v in (title, author, youtube, spotify, level, note, audio_b64)):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing to update'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Fetch current rehearsal record including author and audio notes JSON
+        cur.execute(
+            'SELECT title, author, youtube, spotify, levels_json, notes_json, audio_notes_json, creator_id '
+            'FROM rehearsals WHERE id = ?',
+            (rehearsal_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+            return
+        # Prepare modifications
+        updated_metadata = False
+        # Check if we need to update metadata
+        if any(v is not None for v in (title, author, youtube, spotify)):
+            # Only creator or admin can modify metadata
+            if not (user.get('is_admin') or user['id'] == row['creator_id']):
+                conn.close()
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal details'})
+                return
+            # Use current values if None provided
+            new_title = (title or row['title']).strip() if title is not None else row['title']
+            new_author = (author or '').strip() if author is not None else row['author']
+            new_author = new_author or None
+            new_youtube = (youtube or '').strip() if youtube is not None else row['youtube']
+            new_youtube = new_youtube or None
+            new_spotify = (spotify or '').strip() if spotify is not None else row['spotify']
+            new_spotify = new_spotify or None
+            # Update the row
+            cur.execute(
+                'UPDATE rehearsals SET title = ?, author = ?, youtube = ?, spotify = ? WHERE id = ?',
+                (new_title, new_author, new_youtube, new_spotify, rehearsal_id)
+            )
+            updated_metadata = cur.rowcount > 0
+        # Update level/note/audio if provided
+        updated_levels_notes_audio = False
+        if level is not None or note is not None or audio_b64 is not None:
+            # Parse JSON fields
+            levels = json.loads(row['levels_json'] or '{}')
+            notes = json.loads(row['notes_json'] or '{}')
+            audio_notes = json.loads(row['audio_notes_json'] or '{}')
+            if level is not None:
+                try:
+                    level_val = float(level)
+                except (TypeError, ValueError):
+                    conn.close()
+                    send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid level'})
+                    return
+                levels[user['username']] = max(0, min(10, level_val))
+            if note is not None:
+                notes[user['username']] = str(note)
+            if audio_b64 is not None:
+                # Accept empty string to clear audio
+                if audio_b64 == '':
+                    if user['username'] in audio_notes:
+                        audio_notes.pop(user['username'], None)
+                else:
+                    audio_notes[user['username']] = str(audio_b64)
+            cur.execute(
+                'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ?',
+                (json.dumps(levels), json.dumps(notes), json.dumps(audio_notes), rehearsal_id)
+            )
+            updated_levels_notes_audio = cur.rowcount > 0
+        conn.commit()
+        conn.close()
+        if updated_metadata or updated_levels_notes_audio:
+            send_json(self, HTTPStatus.OK, {'message': 'Updated'})
+        else:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing was updated'})
+
+    def api_update_performance_id(self, perf_id: int, body: dict, user: dict):
+        """Update name, date and songs for a performance if owned by user."""
+        name = (body.get('name') or '').strip()
+        date = (body.get('date') or '').strip()
+        songs = body.get('songs') or []
+        if not name or not date:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
+            return
+        try:
+            songs_list = [int(s) for s in songs]
+        except (TypeError, ValueError):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Allow update if user is creator or admin
+        if user.get('is_admin'):
+            cur.execute(
+                'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ?',
+                (name, date, json.dumps(songs_list), perf_id)
+            )
+        else:
+            cur.execute(
+                'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND creator_id = ?',
+                (name, date, json.dumps(songs_list), perf_id, user['id'])
+            )
+        updated = cur.rowcount
+        conn.commit()
+        conn.close()
+        if updated:
+            send_json(self, HTTPStatus.OK, {'message': 'Updated'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+
+    def api_delete_performance_id(self, perf_id: int, user: dict):
+        """Delete a performance by ID.  The performance can be removed by its
+        creator or by an administrator."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if user.get('is_admin'):
+            cur.execute('DELETE FROM performances WHERE id = ?', (perf_id,))
+        else:
+            cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ?', (perf_id, user['id']))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        if deleted:
+            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+
+    def api_delete_rehearsal_id(self, rehearsal_id: int, user: dict):
+        """Delete a rehearsal by ID.  The rehearsal may be removed by its
+        creator or by an admin.  When a rehearsal is deleted, any
+        performances referencing it will have the rehearsal ID removed
+        from their song lists.  If no performances contain the ID, no
+        changes occur.  If the user lacks permission or the rehearsal
+        does not exist, a 404 is returned."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Fetch creator_id to check permissions
+        cur.execute('SELECT creator_id FROM rehearsals WHERE id = ?', (rehearsal_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+            return
+        creator_id = row['creator_id']
+        if not (user.get('is_admin') or user['id'] == creator_id):
+            conn.close()
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to delete rehearsal'})
+            return
+        # Remove the rehearsal ID from all performances
+        cur.execute('SELECT id, songs_json FROM performances')
+        performances_to_update = []
+        for perf in cur.fetchall():
+            songs = json.loads(perf['songs_json'] or '[]')
+            if rehearsal_id in songs:
+                songs = [sid for sid in songs if sid != rehearsal_id]
+                performances_to_update.append((json.dumps(songs), perf['id']))
+        for songs_json, perf_id in performances_to_update:
+            cur.execute('UPDATE performances SET songs_json = ? WHERE id = ?', (songs_json, perf_id))
+        # Now delete the rehearsal itself
+        cur.execute('DELETE FROM rehearsals WHERE id = ?', (rehearsal_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        if deleted:
+            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found or not owned'})
+
+    def api_delete_performance(self, body: dict, user: dict):
+        try:
+            perf_id = int(body.get('id'))
+        except (TypeError, ValueError):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid performance id'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            'DELETE FROM performances WHERE id = ? AND creator_id = ?',
+            (perf_id, user['id'])
+        )
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        if deleted:
+            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+
+    def api_get_settings(self):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT group_name, dark_mode, template FROM settings WHERE id = 1')
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Settings not found'})
+            return
+        send_json(self, HTTPStatus.OK, {
+            'groupName': row['group_name'],
+            'darkMode': bool(row['dark_mode']),
+            'template': row['template'] or 'classic'
+        })
+
+    def api_update_settings(self, body: dict, user: dict):
+        group_name = (body.get('groupName') or '').strip()
+        dark_mode = body.get('darkMode')
+        template = body.get('template')
+        if not group_name or dark_mode is None:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'groupName and darkMode are required'})
+            return
+        # If template is provided, ensure it is a non-empty string
+        if template is not None:
+            template = (str(template).strip() or 'classic')
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if template is None:
+            cur.execute(
+                'UPDATE settings SET group_name = ?, dark_mode = ? WHERE id = 1',
+                (group_name, 1 if bool(dark_mode) else 0)
+            )
+        else:
+            cur.execute(
+                'UPDATE settings SET group_name = ?, dark_mode = ?, template = ? WHERE id = 1',
+                (group_name, 1 if bool(dark_mode) else 0, template)
+            )
+        conn.commit()
+        conn.close()
+        send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
+
+    # ------------------------------------------------------------------
+    # Users management (admin only)
+
+    def api_get_users(self):
+        """Return a list of all users with their admin status.  Accessible
+        only to administrators."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT id, username, is_admin FROM users ORDER BY username ASC')
+        users = []
+        for row in cur.fetchall():
+            users.append({
+                'id': row['id'],
+                'username': row['username'],
+                'isAdmin': bool(row['is_admin']),
+            })
+        conn.close()
+        send_json(self, HTTPStatus.OK, users)
+
+    def api_update_user_id(self, uid: int, body: dict, current_user: dict):
+        """Update a user's admin status.  Only administrators can call this
+        endpoint.  The body should contain ``isAdmin`` (boolean).  An
+        administrator cannot demote themselves to avoid accidental
+        lockouts."""
+        if 'isAdmin' not in body:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'isAdmin is required'})
+            return
+        is_admin_val = 1 if bool(body.get('isAdmin')) else 0
+        # Prevent administrators from removing their own admin rights
+        if uid == current_user['id'] and is_admin_val == 0:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Cannot demote yourself'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('UPDATE users SET is_admin = ? WHERE id = ?', (is_admin_val, uid))
+        updated = cur.rowcount
+        conn.commit()
+        conn.close()
+        if updated:
+            send_json(self, HTTPStatus.OK, {'message': 'User updated'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})
+
+#############################
+# Server entry point
+#############################
+
+def run_server(host: str = '0.0.0.0', port: int = 3000):
+    init_db()
+    server = ThreadingHTTPServer((host, port), BandTrackHandler)
+    print(f"BandTrack server running on http://{host}:{port} (Ctrl-C to stop)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down server...")
+        server.server_close()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Run BandTrack backend server.')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 3000)), help='Port to bind the server on')
+    parser.add_argument('--host', type=str, default=os.environ.get('HOST', '0.0.0.0'), help='Host/IP to bind the server on')
+    args = parser.parse_args()
+    run_server(args.host, args.port)
