@@ -188,6 +188,23 @@ function deleteSuggestion(id, userId) {
 }
 
 /**
+ * Updates a suggestion title and URL if the user is the creator.
+ * Resolves with the number of updated rows (0 or 1).
+ */
+function updateSuggestion(id, title, url, userId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE suggestions SET title = ?, url = ? WHERE id = ? AND creator_id = ?',
+      [title, url, id, userId],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
  * Creates a rehearsal.  The levels and notes JSON are initially empty.
  */
 function createRehearsal(title, youtube, spotify, creatorId) {
@@ -414,6 +431,7 @@ module.exports = {
   createSuggestion,
   getSuggestions,
   deleteSuggestion,
+  updateSuggestion,
   createRehearsal,
   getRehearsals,
   updateRehearsalUserData,

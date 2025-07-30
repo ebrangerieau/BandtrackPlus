@@ -318,38 +318,51 @@
     // Afficher la liste
     list.forEach((item) => {
       const card = document.createElement('div');
-      card.className = 'card';
-      // Titre et auteur
-      const title = document.createElement('h3');
-      title.textContent = item.title;
-      card.appendChild(title);
+      card.className = 'card collapsed';
+      const titleEl = document.createElement('h3');
+      titleEl.textContent = item.title;
+      titleEl.onclick = () => {
+        card.classList.toggle('collapsed');
+      };
+      card.appendChild(titleEl);
+      const details = document.createElement('div');
+      details.className = 'card-details';
       if (item.author) {
         const authP = document.createElement('p');
         authP.style.fontStyle = 'italic';
         authP.textContent = 'Auteur : ' + item.author;
-        card.appendChild(authP);
+        details.appendChild(authP);
       }
-      // Lien YouTube (si disponible)
-      const yt = item.youtube;
+      const yt = item.youtube || item.url;
       if (yt) {
         const link = document.createElement('a');
         link.href = yt;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
         link.textContent = yt;
-        card.appendChild(link);
+        details.appendChild(link);
       }
       const addedBy = document.createElement('p');
       addedBy.style.fontSize = '12px';
       addedBy.style.color = 'var(--text-color)';
       addedBy.textContent = `Ajouté par ${item.creator}`;
-      card.appendChild(addedBy);
-      // Bouton de suppression disponible pour l’auteur ou un administrateur
+      details.appendChild(addedBy);
       if (currentUser && (currentUser.isAdmin || item.creatorId === currentUser.id || item.creator === currentUser.username)) {
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-secondary';
+        editBtn.textContent = 'Modifier';
+        editBtn.onclick = (e) => {
+          e.stopPropagation();
+          showEditSuggestionModal(item, container);
+        };
+        actions.appendChild(editBtn);
         const delBtn = document.createElement('button');
         delBtn.className = 'btn-danger';
         delBtn.textContent = 'Supprimer';
-        delBtn.onclick = async () => {
+        delBtn.onclick = async (e) => {
+          e.stopPropagation();
           if (!confirm('Supprimer cette suggestion ?')) return;
           try {
             await api(`/suggestions/${item.id}`, 'DELETE');
@@ -358,8 +371,10 @@
             alert(err.message);
           }
         };
-        card.appendChild(delBtn);
+        actions.appendChild(delBtn);
+        details.appendChild(actions);
       }
+      card.appendChild(details);
       container.appendChild(card);
     });
     // Bouton flottant pour ajouter une suggestion
@@ -430,6 +445,67 @@
       if (!title) return;
       try {
         await api('/suggestions', 'POST', { title, author, youtube });
+        document.body.removeChild(modal);
+        renderSuggestions(container);
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    content.appendChild(actions);
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    setTimeout(() => inputTitle.focus(), 50);
+  }
+
+  /**
+   * Display a modal to edit an existing suggestion.
+   */
+  function showEditSuggestionModal(item, container) {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Modifier la suggestion';
+    content.appendChild(h3);
+    const form = document.createElement('form');
+    form.onsubmit = (e) => e.preventDefault();
+    const labelTitle = document.createElement('label');
+    labelTitle.textContent = 'Titre';
+    const inputTitle = document.createElement('input');
+    inputTitle.type = 'text';
+    inputTitle.required = true;
+    inputTitle.style.width = '100%';
+    inputTitle.value = item.title;
+    const labelYt = document.createElement('label');
+    labelYt.textContent = 'Lien YouTube';
+    const inputYt = document.createElement('input');
+    inputYt.type = 'url';
+    inputYt.style.width = '100%';
+    inputYt.value = item.youtube || item.url || '';
+    form.appendChild(labelTitle);
+    form.appendChild(inputTitle);
+    form.appendChild(labelYt);
+    form.appendChild(inputYt);
+    content.appendChild(form);
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.onclick = () => document.body.removeChild(modal);
+    const okBtn = document.createElement('button');
+    okBtn.className = 'btn-primary';
+    okBtn.textContent = 'Enregistrer';
+    okBtn.onclick = async (e) => {
+      e.preventDefault();
+      const titleVal = inputTitle.value.trim();
+      const urlVal = inputYt.value.trim();
+      if (!titleVal) return;
+      try {
+        await api(`/suggestions/${item.id}`, 'PUT', { title: titleVal, url: urlVal });
         document.body.removeChild(modal);
         renderSuggestions(container);
       } catch (err) {
@@ -902,14 +978,18 @@
       }
       arr.forEach((perf) => {
         const card = document.createElement('div');
-        card.className = 'card';
+        card.className = 'card collapsed';
         const h3 = document.createElement('h3');
         h3.textContent = perf.name;
+        h3.onclick = () => {
+          card.classList.toggle('collapsed');
+        };
         card.appendChild(h3);
+        const details = document.createElement('div');
+        details.className = 'card-details';
         const dateP = document.createElement('p');
         dateP.textContent = 'Date : ' + perf.date;
-        card.appendChild(dateP);
-        // Liste des morceaux
+        details.appendChild(dateP);
         if (perf.songs && perf.songs.length > 0) {
           const ul = document.createElement('ul');
           perf.songs.forEach((id) => {
@@ -918,13 +998,11 @@
             li.textContent = reh ? reh.title : '—';
             ul.appendChild(li);
           });
-          card.appendChild(ul);
+          details.appendChild(ul);
         }
-        // Actions (modification/suppression) disponibles pour le créateur ou un administrateur
         if (currentUser && (currentUser.isAdmin || currentUser.id === perf.creatorId)) {
           const actions = document.createElement('div');
           actions.className = 'actions';
-          // Modifier
           const editBtn = document.createElement('button');
           editBtn.className = 'btn-secondary';
           editBtn.textContent = 'Modifier';
@@ -933,7 +1011,6 @@
             showEditPerformanceModal(perf, container);
           };
           actions.appendChild(editBtn);
-          // Supprimer
           const delBtn = document.createElement('button');
           delBtn.className = 'btn-danger';
           delBtn.textContent = 'Supprimer';
@@ -948,13 +1025,9 @@
             }
           };
           actions.appendChild(delBtn);
-          card.appendChild(actions);
+          details.appendChild(actions);
         }
-        // Clic sur la carte pour afficher le détail
-        card.onclick = (e) => {
-          if (e.target.tagName.toLowerCase() === 'button') return;
-          showPerformanceDetail(perf);
-        };
+        card.appendChild(details);
         container.appendChild(card);
       });
     }
