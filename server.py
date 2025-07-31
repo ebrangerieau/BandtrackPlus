@@ -389,6 +389,93 @@ def send_text_file(handler: BaseHTTPRequestHandler, filepath: str) -> None:
     except OSError:
         handler.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
 
+def move_suggestion_to_rehearsal(sug_id: int):
+    """Create a rehearsal from a suggestion and remove the suggestion."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT title, author, youtube, url, creator_id FROM suggestions WHERE id = ?',
+        (sug_id,)
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    yt = row['youtube'] or row['url']
+    cur.execute(
+        'INSERT INTO rehearsals (title, author, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        (row['title'], row['author'], yt, None, json.dumps({}), json.dumps({}), json.dumps({}), 0, row['creator_id']),
+    )
+    new_id = cur.lastrowid
+    cur.execute(
+        '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.audio_notes_json,
+                  r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
+                  u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
+           WHERE r.id = ?''',
+        (new_id,),
+    )
+    new_row = cur.fetchone()
+    cur.execute('DELETE FROM suggestions WHERE id = ?', (sug_id,))
+    conn.commit()
+    conn.close()
+    if not new_row:
+        return None
+    return {
+        'id': new_row['id'],
+        'title': new_row['title'],
+        'author': new_row['author'],
+        'youtube': new_row['youtube'],
+        'spotify': new_row['spotify'],
+        'audioNotes': json.loads(new_row['audio_notes_json'] or '{}'),
+        'levels': json.loads(new_row['levels_json'] or '{}'),
+        'notes': json.loads(new_row['notes_json'] or '{}'),
+        'mastered': bool(new_row['mastered']),
+        'creatorId': new_row['creator_id'],
+        'creator': new_row['creator'],
+        'createdAt': new_row['created_at'],
+    }
+
+def move_rehearsal_to_suggestion(reh_id: int):
+    """Create a suggestion from a rehearsal and remove the rehearsal."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT title, author, youtube, creator_id FROM rehearsals WHERE id = ?',
+        (reh_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    cur.execute(
+        'INSERT INTO suggestions (title, author, youtube, url, likes, creator_id) VALUES (?, ?, ?, ?, 0, ?)',
+        (row['title'], row['author'], row['youtube'], row['youtube'], row['creator_id']),
+    )
+    new_id = cur.lastrowid
+    cur.execute(
+        '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at,
+                  u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
+           WHERE s.id = ?''',
+        (new_id,),
+    )
+    new_row = cur.fetchone()
+    cur.execute('DELETE FROM rehearsals WHERE id = ?', (reh_id,))
+    conn.commit()
+    conn.close()
+    if not new_row:
+        return None
+    return {
+        'id': new_row['id'],
+        'title': new_row['title'],
+        'author': new_row['author'],
+        'youtube': new_row['youtube'] or new_row['url'],
+        'creatorId': new_row['creator_id'],
+        'creator': new_row['creator'],
+        'createdAt': new_row['created_at'],
+        'likes': new_row['likes'],
+    }
+
 #############################
 # HTTP request handler
 #############################
@@ -509,6 +596,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         sug_id = int(parts[3])
                     except ValueError:
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    if len(parts) == 5 and parts[4] == 'to-rehearsal' and method == 'POST':
+                        return self.api_move_suggestion_to_rehearsal_id(sug_id)
                     if len(parts) == 5 and parts[4] == 'vote':
                         if method == 'POST':
                             return self.api_vote_suggestion_id(sug_id)
@@ -551,6 +640,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     except ValueError:
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
                     return self.api_toggle_rehearsal_mastered(reh_id)
+                if len(parts) == 5 and parts[4] == 'to-suggestion' and method == 'POST':
+                    try:
+                        reh_id = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    return self.api_move_rehearsal_to_suggestion_id(reh_id)
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
 
@@ -1225,6 +1320,22 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             )
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+
+    def api_move_suggestion_to_rehearsal_id(self, sug_id: int):
+        """Move a suggestion to rehearsals."""
+        result = move_suggestion_to_rehearsal(sug_id)
+        if result is None:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+        else:
+            send_json(self, HTTPStatus.OK, result)
+
+    def api_move_rehearsal_to_suggestion_id(self, reh_id: int):
+        """Move a rehearsal back to suggestions."""
+        result = move_rehearsal_to_suggestion(reh_id)
+        if result is None:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+        else:
+            send_json(self, HTTPStatus.OK, result)
 
     def api_update_performance_id(self, perf_id: int, body: dict, user: dict):
         """Update name, date and songs for a performance if owned by user."""

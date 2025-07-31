@@ -403,6 +403,20 @@
           showEditSuggestionModal(item, container);
         };
         actions.appendChild(editBtn);
+        const toRehBtn = document.createElement('button');
+        toRehBtn.className = 'btn-primary';
+        toRehBtn.textContent = 'Passer en répétition';
+        toRehBtn.onclick = async (e) => {
+          e.stopPropagation();
+          try {
+            await api(`/suggestions/${item.id}/to-rehearsal`, 'POST');
+            rehearsalsCache = await api('/rehearsals');
+            renderSuggestions(container);
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        actions.appendChild(toRehBtn);
         const delBtn = document.createElement('button');
         delBtn.className = 'btn-danger';
         delBtn.textContent = 'Supprimer';
@@ -799,6 +813,19 @@
           showEditRehearsalModal(song, container);
         };
         actions.appendChild(editBtn);
+        const toSugBtn = document.createElement('button');
+        toSugBtn.className = 'btn-primary';
+        toSugBtn.textContent = 'Remettre dans J\u2019aime';
+        toSugBtn.onclick = async (e) => {
+          e.stopPropagation();
+          try {
+            await api(`/rehearsals/${song.id}/to-suggestion`, 'POST');
+            renderRehearsals(container);
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        actions.appendChild(toSugBtn);
         // Delete button
         const delBtn = document.createElement('button');
         delBtn.className = 'btn-danger';

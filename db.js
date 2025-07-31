@@ -549,12 +549,100 @@ function updatePerformance(id, name, date, songs, userId) {
  */
 function deletePerformance(id, userId) {
   return new Promise((resolve, reject) => {
-    db.run(
+  db.run(
       'DELETE FROM performances WHERE id = ? AND creator_id = ?',
       [id, userId],
       function (err) {
         if (err) reject(err);
         else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
+ * Moves a suggestion to the rehearsals table. Returns the created rehearsal
+ * row or null if the suggestion does not exist.
+ */
+function moveSuggestionToRehearsal(id) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT id, title, url, creator_id FROM suggestions WHERE id = ?',
+      [id],
+      (err, row) => {
+        if (err) return reject(err);
+        if (!row) return resolve(null);
+        db.run(
+          'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [row.title, row.url || null, null, '{}', '{}', 0, row.creator_id],
+          function (err2) {
+            if (err2) return reject(err2);
+            const newId = this.lastID;
+            db.run('DELETE FROM suggestions WHERE id = ?', [id], (err3) => {
+              if (err3) return reject(err3);
+              db.get(
+                `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
+                        u.username AS creator
+                 FROM rehearsals r JOIN users u ON u.id = r.creator_id WHERE r.id = ?`,
+                [newId],
+                (err4, rrow) => {
+                  if (err4) reject(err4);
+                  else if (!rrow) resolve(null);
+                  else {
+                    resolve({
+                      id: rrow.id,
+                      title: rrow.title,
+                      youtube: rrow.youtube,
+                      spotify: rrow.spotify,
+                      levels: JSON.parse(rrow.levels_json || '{}'),
+                      notes: JSON.parse(rrow.notes_json || '{}'),
+                      mastered: !!rrow.mastered,
+                      creatorId: rrow.creator_id,
+                      creator: rrow.creator,
+                    });
+                  }
+                }
+              );
+            });
+          }
+        );
+      }
+    );
+  });
+}
+
+/**
+ * Moves a rehearsal back to the suggestions table. Returns the created
+ * suggestion row or null if the rehearsal does not exist.
+ */
+function moveRehearsalToSuggestion(id) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT id, title, youtube, creator_id FROM rehearsals WHERE id = ?',
+      [id],
+      (err, row) => {
+        if (err) return reject(err);
+        if (!row) return resolve(null);
+        db.run(
+          'INSERT INTO suggestions (title, url, creator_id) VALUES (?, ?, ?)',
+          [row.title, row.youtube || null, row.creator_id],
+          function (err2) {
+            if (err2) return reject(err2);
+            const newId = this.lastID;
+            db.run('DELETE FROM rehearsals WHERE id = ?', [id], (err3) => {
+              if (err3) return reject(err3);
+              db.get(
+                `SELECT s.id, s.title, s.url, s.likes, s.creator_id, s.created_at, u.username AS creator
+                 FROM suggestions s JOIN users u ON u.id = s.creator_id WHERE s.id = ?`,
+                [newId],
+                (err4, srow) => {
+                  if (err4) reject(err4);
+                  else resolve(srow || null);
+                }
+              );
+            });
+          }
+        );
       }
     );
   });
@@ -613,4 +701,6 @@ module.exports = {
   deletePerformance,
   getSettings,
   updateSettings,
+  moveSuggestionToRehearsal,
+  moveRehearsalToSuggestion,
 };
