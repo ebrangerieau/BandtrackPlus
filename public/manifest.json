@@ -1,0 +1,15 @@
+{
+  "name": "BandTrack",
+  "short_name": "BandTrack",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#222222",
+  "icons": [
+    {
+      "src": "Logobt.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
