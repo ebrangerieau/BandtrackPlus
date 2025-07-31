@@ -515,6 +515,13 @@
     inputTitle.required = true;
     inputTitle.style.width = '100%';
     inputTitle.value = item.title;
+    const labelAuthor = document.createElement('label');
+    labelAuthor.textContent = 'Auteur';
+    const inputAuthor = document.createElement('input');
+    inputAuthor.type = 'text';
+    inputAuthor.style.width = '100%';
+    inputAuthor.value = item.author || '';
+
     const labelYt = document.createElement('label');
     labelYt.textContent = 'Lien YouTube';
     const inputYt = document.createElement('input');
@@ -523,6 +530,8 @@
     inputYt.value = item.youtube || item.url || '';
     form.appendChild(labelTitle);
     form.appendChild(inputTitle);
+    form.appendChild(labelAuthor);
+    form.appendChild(inputAuthor);
     form.appendChild(labelYt);
     form.appendChild(inputYt);
     content.appendChild(form);
@@ -542,13 +551,18 @@
     okBtn.onclick = async (e) => {
       e.preventDefault();
       const titleVal = inputTitle.value.trim();
+      const authorVal = inputAuthor.value.trim();
       const urlVal = inputYt.value.trim();
       if (!titleVal) return;
       try {
-        await api(`/suggestions/${item.id}`, 'PUT', { title: titleVal, url: urlVal });
-          if (modal.parentNode) {
-            modal.parentNode.removeChild(modal); // or use modal.remove();
-          }
+        await api(`/suggestions/${item.id}`, 'PUT', {
+          title: titleVal,
+          author: authorVal,
+          url: urlVal,
+        });
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal); // or use modal.remove();
+        }
         renderSuggestions(container);
       } catch (err) {
         alert(err.message);
