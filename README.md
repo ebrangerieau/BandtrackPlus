@@ -32,3 +32,6 @@ npm start
 - `POST /api/rehearsals/:id/to-suggestion` – remettre un morceau de répétition dans la liste J’aime.
 - `GET /api/settings` renvoie maintenant aussi `nextRehearsalDate` et `nextRehearsalLocation` pour afficher
   la prochaine répétition sur la page d'accueil.
+
+Les serveurs Node.js et Python gèrent tous deux ces champs et mettent à jour
+automatiquement les anciennes bases de données au démarrage.
