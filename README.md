@@ -8,6 +8,10 @@ serveur Node.js via une API REST.
 ## Fonctions principales
 - Authentification des utilisateurs
 - Suggestions de morceaux
+  - Les utilisateurs peuvent voter pour ou retirer leur vote sur une suggestion
+    via les boutons "👍" et "👎". Le compteur global est incrémenté ou
+    décrémenté mais ne peut jamais devenir inférieur au nombre de likes
+    ajoutés par l'utilisateur lui‑même.
 - Suivi des répétitions
 - Gestion des prestations
 - Paramètres du groupe (nom, mode sombre)

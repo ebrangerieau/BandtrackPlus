@@ -350,8 +350,23 @@
         }
       };
 
+      const dislikeBtn = document.createElement('button');
+      dislikeBtn.className = 'like-btn';
+      dislikeBtn.textContent = '👎';
+      dislikeBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          const updated = await api(`/suggestions/${item.id}/vote`, 'DELETE');
+          likeCount.textContent = `❤️ ${updated.likes}`;
+          renderSuggestions(container);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+
       likeBox.appendChild(likeCount);
       likeBox.appendChild(likeBtn);
+      likeBox.appendChild(dislikeBtn);
       headerRow.appendChild(likeBox);
 
       card.appendChild(headerRow);

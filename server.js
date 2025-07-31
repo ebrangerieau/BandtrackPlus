@@ -188,7 +188,7 @@ app.post('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    const ok = await db.incrementSuggestionLikes(id);
+    const ok = await db.incrementSuggestionLikes(id, req.session.userId);
     if (!ok) return res.status(404).json({ error: 'Suggestion not found' });
     const list = await db.getSuggestions();
     const updated = list.find((s) => s.id === id);
@@ -196,6 +196,22 @@ app.post('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to vote' });
+  }
+});
+
+// Remove a vote from a suggestion by the current user
+app.delete('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const ok = await db.decrementUserSuggestionLikes(id, req.session.userId);
+    if (!ok) return res.status(400).json({ error: 'No vote to remove' });
+    const list = await db.getSuggestions();
+    const updated = list.find((s) => s.id === id);
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to remove vote' });
   }
 });
 
