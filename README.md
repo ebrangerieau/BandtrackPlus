@@ -17,8 +17,8 @@ serveur Node.js via une API REST.
 - Conversion suggestions \<-> répétitions
 - Gestion des prestations
 - Paramètres du groupe (nom, mode sombre)
-- Écran d'accueil après connexion indiquant la prochaine prestation et la
-  date de la prochaine répétition
+- Écran d'accueil (rubrique « Accueil » dans la barre de navigation) indiquant
+  la prochaine prestation et la date de la prochaine répétition
 
 Pour démarrer le serveur localement:
 ```bash

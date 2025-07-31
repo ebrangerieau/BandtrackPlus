@@ -18,7 +18,7 @@
 (() => {
   // Utilisateur et page courants
   let currentUser = null;
-  let currentPage = 'suggestions';
+  let currentPage = 'home';
 
   // Cache des répétitions pour éviter de relancer trop souvent la requête
   let rehearsalsCache = [];
@@ -223,7 +223,8 @@
           // Après l’inscription, récupère la session pour obtenir
           // l’identifiant et le nom d’utilisateur normalisé.
           await checkSession();
-          renderHome(app);
+          currentPage = 'home';
+          renderMain(app);
         } catch (err) {
           errorDiv.textContent = err.message;
         }
@@ -240,7 +241,8 @@
           // Après la connexion, interroge le serveur pour récupérer
           // l’utilisateur courant et appliquer le thème.
           await checkSession();
-          renderHome(app);
+          currentPage = 'home';
+          renderMain(app);
         } catch (err) {
           errorDiv.textContent = err.message;
         }
@@ -291,11 +293,6 @@
       : 'Prochaine répétition : —';
     container.appendChild(rehP);
 
-    const btn = document.createElement('button');
-    btn.className = 'btn-primary';
-    btn.textContent = 'Entrer dans BandTrack';
-    btn.onclick = () => renderMain(app);
-    container.appendChild(btn);
   }
 
   /**
@@ -313,6 +310,7 @@
     const nav = document.createElement('div');
     nav.className = 'nav-bar';
     const navItems = [
+      { key: 'home', label: 'Accueil' },
       { key: 'suggestions', label: 'J’aime' },
       { key: 'rehearsals', label: 'Répétitions' },
       { key: 'performances', label: 'Prestations' },
@@ -332,7 +330,9 @@
     });
     app.appendChild(nav);
     // Rendu de la page en fonction de currentPage
-    if (currentPage === 'suggestions') {
+    if (currentPage === 'home') {
+      renderHome(pageDiv);
+    } else if (currentPage === 'suggestions') {
       renderSuggestions(pageDiv);
     } else if (currentPage === 'rehearsals') {
       renderRehearsals(pageDiv);
