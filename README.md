@@ -30,5 +30,5 @@ npm start
 
 - `POST /api/suggestions/:id/to-rehearsal` – déplacer une suggestion dans les répétitions.
 - `POST /api/rehearsals/:id/to-suggestion` – remettre un morceau de répétition dans la liste J’aime.
-- `GET /api/settings` renvoie maintenant aussi `nextRehearsalDate` pour afficher
+- `GET /api/settings` renvoie maintenant aussi `nextRehearsalDate` et `nextRehearsalLocation` pour afficher
   la prochaine répétition sur la page d'accueil.
