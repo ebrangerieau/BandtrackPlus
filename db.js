@@ -47,6 +47,19 @@ function init() {
     );`
   );
 
+  // Votes per user on suggestions. Keeps track of how many times each
+  // user voted for a specific suggestion so we can decrement later.
+  db.run(
+    `CREATE TABLE IF NOT EXISTS suggestion_votes (
+      suggestion_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (suggestion_id, user_id),
+      FOREIGN KEY (suggestion_id) REFERENCES suggestions(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );`
+  );
+
   // Ensure the likes column exists on existing databases.  Older versions of
   // the schema may not have it, so we attempt to add it and ignore errors.
   db.all('PRAGMA table_info(suggestions)', (err, rows) => {
@@ -226,17 +239,91 @@ function updateSuggestion(id, title, url, userId) {
  * Increments the like counter for a suggestion.  Resolves to true if a row was
  * updated.
  */
-function incrementSuggestionLikes(id) {
+// --------------------------- Suggestion Likes ---------------------------
+
+/**
+ * Increments like counters for a suggestion by a specific user.
+ * Both the global like count and the user's vote record are updated.
+ * Resolves to true if the suggestion exists.
+ */
+function incrementUserSuggestionLikes(suggestionId, userId) {
   return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE suggestions SET likes = likes + 1 WHERE id = ?',
-      [id],
-      function (err) {
-        if (err) reject(err);
-        else resolve(this.changes > 0);
+    db.serialize(() => {
+      db.run(
+        'UPDATE suggestions SET likes = likes + 1 WHERE id = ?',
+        [suggestionId],
+        function (err) {
+          if (err) return reject(err);
+          if (this.changes === 0) return resolve(false);
+          db.run(
+            `INSERT INTO suggestion_votes (suggestion_id, user_id, count)
+             VALUES (?, ?, 1)
+             ON CONFLICT(suggestion_id, user_id)
+             DO UPDATE SET count = count + 1`,
+            [suggestionId, userId],
+            function (err2) {
+              if (err2) reject(err2);
+              else resolve(true);
+            }
+          );
+        }
+      );
+    });
+  });
+}
+
+/**
+ * Decrements like counters for a suggestion by the user if they previously
+ * voted.  Returns true if a like was removed.
+ */
+function decrementUserSuggestionLikes(suggestionId, userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT count FROM suggestion_votes WHERE suggestion_id = ? AND user_id = ?',
+      [suggestionId, userId],
+      (err, row) => {
+        if (err) return reject(err);
+        if (!row || row.count <= 0) return resolve(false);
+        db.serialize(() => {
+          db.run(
+            'UPDATE suggestions SET likes = likes - 1 WHERE id = ?',
+            [suggestionId]
+          );
+          db.run(
+            'UPDATE suggestion_votes SET count = count - 1 WHERE suggestion_id = ? AND user_id = ?',
+            [suggestionId, userId],
+            function (err2) {
+              if (err2) reject(err2);
+              else resolve(true);
+            }
+          );
+        });
       }
     );
   });
+}
+
+/**
+ * Retrieves the number of likes a given user added to a suggestion.
+ */
+function getUserSuggestionLikes(suggestionId, userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT count FROM suggestion_votes WHERE suggestion_id = ? AND user_id = ?',
+      [suggestionId, userId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row ? row.count : 0);
+      }
+    );
+  });
+}
+
+/**
+ * Backwards compatibility helper. Delegates to incrementUserSuggestionLikes.
+ */
+function incrementSuggestionLikes(id, userId) {
+  return incrementUserSuggestionLikes(id, userId);
 }
 
 /**
@@ -511,6 +598,9 @@ module.exports = {
   getSuggestions,
   deleteSuggestion,
   updateSuggestion,
+  incrementUserSuggestionLikes,
+  decrementUserSuggestionLikes,
+  getUserSuggestionLikes,
   incrementSuggestionLikes,
   createRehearsal,
   getRehearsals,
