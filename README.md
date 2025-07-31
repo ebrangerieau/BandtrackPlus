@@ -17,6 +17,8 @@ serveur Node.js via une API REST.
 - Conversion suggestions \<-> répétitions
 - Gestion des prestations
 - Paramètres du groupe (nom, mode sombre)
+- Écran d'accueil après connexion indiquant la prochaine prestation et la
+  date de la prochaine répétition
 
 Pour démarrer le serveur localement:
 ```bash
@@ -28,3 +30,5 @@ npm start
 
 - `POST /api/suggestions/:id/to-rehearsal` – déplacer une suggestion dans les répétitions.
 - `POST /api/rehearsals/:id/to-suggestion` – remettre un morceau de répétition dans la liste J’aime.
+- `GET /api/settings` renvoie maintenant aussi `nextRehearsalDate` pour afficher
+  la prochaine répétition sur la page d'accueil.

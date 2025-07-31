@@ -163,6 +163,29 @@ body, html {
   cursor: pointer;
 }
 
+/* Page d'accueil après connexion */
+.home-container {
+  max-width: 400px;
+  margin: 60px auto;
+  padding: 20px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.home-container button {
+  padding: 10px 20px;
+  margin-top: 20px;
+  background-color: var(--primary-color);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
 /* Barre de navigation en bas de page */
 .nav-bar {
   position: fixed;
