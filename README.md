@@ -26,6 +26,12 @@ npm install
 npm start
 ```
 
+### Progressive Web App
+
+Un fichier `manifest.json` et un `service-worker.js` ont été ajoutés dans le
+dossier `public`. Le service worker met en cache les fichiers statiques afin de
+permettre l'installation de l'application et son fonctionnement hors ligne.
+
 ### Endpoints ajoutés
 
 - `POST /api/suggestions/:id/to-rehearsal` – déplacer une suggestion dans les répétitions.
