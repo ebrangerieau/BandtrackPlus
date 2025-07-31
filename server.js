@@ -215,6 +215,20 @@ app.delete('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
   }
 });
 
+// Convert a suggestion into a rehearsal
+app.post('/api/suggestions/:id/to-rehearsal', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const created = await db.moveSuggestionToRehearsal(id);
+    if (!created) return res.status(404).json({ error: 'Suggestion not found' });
+    res.json(created);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to convert suggestion' });
+  }
+});
+
 // ----------------- Rehearsal Routes -----------------
 
 // Get all rehearsals
@@ -272,6 +286,20 @@ app.put('/api/rehearsals/:id/mastered', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to toggle mastered' });
+  }
+});
+
+// Convert a rehearsal back to a suggestion
+app.post('/api/rehearsals/:id/to-suggestion', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const created = await db.moveRehearsalToSuggestion(id);
+    if (!created) return res.status(404).json({ error: 'Rehearsal not found' });
+    res.json(created);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to convert rehearsal' });
   }
 });
 

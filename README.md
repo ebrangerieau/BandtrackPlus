@@ -14,6 +14,7 @@ serveur Node.js via une API REST.
     ajoutés par l'utilisateur lui‑même.
   - Les suggestions peuvent être modifiées par leur auteur ou un administrateur.
 - Suivi des répétitions
+- Conversion suggestions \<-> répétitions
 - Gestion des prestations
 - Paramètres du groupe (nom, mode sombre)
 
@@ -22,3 +23,8 @@ Pour démarrer le serveur localement:
 npm install
 npm start
 ```
+
+### Endpoints ajoutés
+
+- `POST /api/suggestions/:id/to-rehearsal` – déplacer une suggestion dans les répétitions.
+- `POST /api/rehearsals/:id/to-suggestion` – remettre un morceau de répétition dans la liste J’aime.
