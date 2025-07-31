@@ -509,8 +509,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         sug_id = int(parts[3])
                     except ValueError:
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    if len(parts) == 5 and parts[4] == 'vote' and method == 'POST':
-                        return self.api_vote_suggestion_id(sug_id)
+                    if len(parts) == 5 and parts[4] == 'vote':
+                        if method == 'POST':
+                            return self.api_vote_suggestion_id(sug_id)
+                        if method == 'DELETE':
+                            return self.api_unvote_suggestion_id(sug_id)
+                        raise NotImplementedError
                     if method == 'DELETE':
                         return self.api_delete_suggestion_id(sug_id, user)
                     else:
@@ -973,6 +977,44 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('UPDATE suggestions SET likes = likes + 1 WHERE id = ?', (sug_id,))
+        if cur.rowcount == 0:
+            conn.commit()
+            conn.close()
+            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+        cur.execute(
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at,
+                      u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
+               WHERE s.id = ?''',
+            (sug_id,)
+        )
+        row = cur.fetchone()
+        conn.commit()
+        conn.close()
+        if row:
+            result = {
+                'id': row['id'],
+                'title': row['title'],
+                'author': row['author'],
+                'youtube': row['youtube'] or row['url'],
+                'creatorId': row['creator_id'],
+                'creator': row['creator'],
+                'createdAt': row['created_at'],
+                'likes': row['likes'],
+            }
+            send_json(self, HTTPStatus.OK, result)
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+
+    def api_unvote_suggestion_id(self, sug_id: int):
+        """Decrement likes for a suggestion and return the updated row."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            'UPDATE suggestions '
+            'SET likes = CASE WHEN likes > 0 THEN likes - 1 ELSE 0 END '
+            'WHERE id = ?',
+            (sug_id,)
+        )
         if cur.rowcount == 0:
             conn.commit()
             conn.close()
