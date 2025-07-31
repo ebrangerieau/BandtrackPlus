@@ -515,6 +515,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         if method == 'DELETE':
                             return self.api_unvote_suggestion_id(sug_id)
                         raise NotImplementedError
+                    if method == 'PUT':
+                        return self.api_update_suggestion_id(sug_id, body, user)
                     if method == 'DELETE':
                         return self.api_delete_suggestion_id(sug_id, user)
                     else:
@@ -803,6 +805,16 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
 
+    def api_update_suggestion(self, body: dict, user: dict):
+        """Backward-compatible endpoint for updating a suggestion.
+        The body must include ``id`` and ``title`` fields."""
+        try:
+            sug_id = int(body.get('id'))
+        except (TypeError, ValueError):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid suggestion id'})
+            return
+        return self.api_update_suggestion_id(sug_id, body, user)
+
     def api_get_rehearsals(self):
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1042,6 +1054,34 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.OK, result)
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+
+    def api_update_suggestion_id(self, sug_id: int, body: dict, user: dict):
+        """Update a suggestion's title and optional fields by ID."""
+        title = (body.get('title') or '').strip()
+        author = (body.get('author') or '').strip() or None
+        youtube = (body.get('youtube') or body.get('url') or '').strip() or None
+        if not title:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if user.get('is_admin'):
+            cur.execute(
+                'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ? WHERE id = ?',
+                (title, author, youtube, youtube, sug_id),
+            )
+        else:
+            cur.execute(
+                'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ? WHERE id = ? AND creator_id = ?',
+                (title, author, youtube, youtube, sug_id, user['id']),
+            )
+        updated = cur.rowcount
+        conn.commit()
+        conn.close()
+        if updated:
+            send_json(self, HTTPStatus.OK, {'message': 'Updated'})
+        else:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
 
     def api_update_rehearsal_id(self, rehearsal_id: int, body: dict, user: dict):
         """Update a rehearsal by ID.  This method handles two scenarios:

@@ -12,6 +12,7 @@ serveur Node.js via une API REST.
     via les boutons "👍" et "👎". Le compteur global est incrémenté ou
     décrémenté mais ne peut jamais devenir inférieur au nombre de likes
     ajoutés par l'utilisateur lui‑même.
+  - Les suggestions peuvent être modifiées par leur auteur ou un administrateur.
 - Suivi des répétitions
 - Gestion des prestations
 - Paramètres du groupe (nom, mode sombre)
