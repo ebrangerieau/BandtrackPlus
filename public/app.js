@@ -280,16 +280,18 @@
     perfP.textContent = nextPerfText;
     container.appendChild(perfP);
 
-    let nextRehearsal = '';
+    let nextRehearsalDate = '';
+    let nextRehearsalLocation = '';
     try {
       const settings = await api('/settings');
-      nextRehearsal = settings.nextRehearsalDate || '';
+      nextRehearsalDate = settings.nextRehearsalDate || '';
+      nextRehearsalLocation = settings.nextRehearsalLocation || '';
     } catch (err) {
       // ignore
     }
     const rehP = document.createElement('p');
-    rehP.textContent = nextRehearsal
-      ? `Prochaine répétition : ${nextRehearsal}`
+    rehP.textContent = nextRehearsalDate
+      ? `Prochaine répétition : ${nextRehearsalDate}${nextRehearsalLocation ? ' – ' + nextRehearsalLocation : ''}`
       : 'Prochaine répétition : —';
     container.appendChild(rehP);
 
@@ -1745,6 +1747,54 @@
     modeDiv.appendChild(modeLabel);
     modeDiv.appendChild(modeCheckbox);
     container.appendChild(modeDiv);
+
+    // Prochaine répétition (date/heure)
+    const labelDate = document.createElement('label');
+    labelDate.textContent = 'Prochaine répétition (date/heure)';
+    labelDate.style.marginTop = '20px';
+    const inputDate = document.createElement('input');
+    inputDate.type = 'datetime-local';
+    inputDate.value = settings.nextRehearsalDate || '';
+    inputDate.style.width = '100%';
+    inputDate.onchange = async () => {
+      try {
+        await api('/settings', 'PUT', {
+          groupName: inputName.value,
+          darkMode: modeCheckbox.checked,
+          template: settings.template,
+          nextRehearsalDate: inputDate.value,
+          nextRehearsalLocation: inputLocation.value,
+        });
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    container.appendChild(labelDate);
+    container.appendChild(inputDate);
+
+    // Lieu de la prochaine répétition
+    const labelLocation = document.createElement('label');
+    labelLocation.textContent = 'Lieu de la prochaine répétition';
+    labelLocation.style.marginTop = '12px';
+    const inputLocation = document.createElement('input');
+    inputLocation.type = 'text';
+    inputLocation.value = settings.nextRehearsalLocation || '';
+    inputLocation.style.width = '100%';
+    inputLocation.onchange = async () => {
+      try {
+        await api('/settings', 'PUT', {
+          groupName: inputName.value,
+          darkMode: modeCheckbox.checked,
+          template: settings.template,
+          nextRehearsalDate: inputDate.value,
+          nextRehearsalLocation: inputLocation.value,
+        });
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    container.appendChild(labelLocation);
+    container.appendChild(inputLocation);
 
     // Sélecteur de template (design)
     const templateDiv = document.createElement('div');

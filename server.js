@@ -396,12 +396,13 @@ app.get('/api/settings', requireAuth, async (req, res) => {
 
 // Update settings
 app.put('/api/settings', requireAuth, async (req, res) => {
-  const { groupName, darkMode, nextRehearsalDate } = req.body;
+  const { groupName, darkMode, nextRehearsalDate, nextRehearsalLocation } = req.body;
   try {
     await db.updateSettings({
       groupName: groupName || 'Groupe de musique',
       darkMode: !!darkMode,
       nextRehearsalDate: nextRehearsalDate || '',
+      nextRehearsalLocation: nextRehearsalLocation || '',
     });
     const updated = await db.getSettings();
     res.json(updated);
