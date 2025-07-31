@@ -150,20 +150,24 @@ def init_db():
                FOREIGN KEY (creator_id) REFERENCES users(id)
            );'''
     )
-    # Settings: single row with group name and dark mode flag
+    # Settings: single row with group name, dark mode flag and optional
+    # next rehearsal info.  "template" selects the UI theme.
     cur.execute(
         '''CREATE TABLE IF NOT EXISTS settings (
                id INTEGER PRIMARY KEY CHECK(id=1),
                group_name TEXT NOT NULL,
                dark_mode INTEGER NOT NULL DEFAULT 0,
-               template TEXT NOT NULL DEFAULT 'classic'
+               template TEXT NOT NULL DEFAULT 'classic',
+               next_rehearsal_date TEXT,
+               next_rehearsal_location TEXT
            );'''
     )
     # Insert default settings row if missing
     cur.execute('SELECT COUNT(*) FROM settings')
     if cur.fetchone()[0] == 0:
         cur.execute(
-            'INSERT INTO settings (id, group_name, dark_mode, template) VALUES (1, ?, 0, ?)',
+            'INSERT INTO settings (id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) '
+            "VALUES (1, ?, 0, ?, '', '')",
             ('Groupe de musique', 'classic')
         )
     # Sessions: store session token, associated user and expiry timestamp (epoch)
@@ -226,9 +230,8 @@ def init_db():
     except Exception:
         pass
 
-    # Settings table: ensure 'template' column exists.  The design selector
-    # requires a template field to be persisted.  If absent, add it with
-    # a default value 'classic'.
+    # Settings table: ensure newer columns exist.  Older databases may lack
+    # the "template" or next rehearsal fields, so add them if missing.
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -236,7 +239,11 @@ def init_db():
         settings_columns = [row['name'] for row in cur.fetchall()]
         if 'template' not in settings_columns:
             cur.execute("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
-            conn.commit()
+        if 'next_rehearsal_date' not in settings_columns:
+            cur.execute('ALTER TABLE settings ADD COLUMN next_rehearsal_date TEXT')
+        if 'next_rehearsal_location' not in settings_columns:
+            cur.execute('ALTER TABLE settings ADD COLUMN next_rehearsal_location TEXT')
+        conn.commit()
         conn.close()
     except Exception:
         pass
@@ -1452,7 +1459,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
     def api_get_settings(self):
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT group_name, dark_mode, template FROM settings WHERE id = 1')
+        cur.execute('SELECT group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location FROM settings WHERE id = 1')
         row = cur.fetchone()
         conn.close()
         if not row:
@@ -1461,13 +1468,17 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         send_json(self, HTTPStatus.OK, {
             'groupName': row['group_name'],
             'darkMode': bool(row['dark_mode']),
-            'template': row['template'] or 'classic'
+            'template': row['template'] or 'classic',
+            'nextRehearsalDate': row['next_rehearsal_date'] or '',
+            'nextRehearsalLocation': row['next_rehearsal_location'] or ''
         })
 
     def api_update_settings(self, body: dict, user: dict):
         group_name = (body.get('groupName') or '').strip()
         dark_mode = body.get('darkMode')
         template = body.get('template')
+        next_date = (body.get('nextRehearsalDate') or '').strip()
+        next_loc = (body.get('nextRehearsalLocation') or '').strip()
         if not group_name or dark_mode is None:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'groupName and darkMode are required'})
             return
@@ -1478,13 +1489,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         cur = conn.cursor()
         if template is None:
             cur.execute(
-                'UPDATE settings SET group_name = ?, dark_mode = ? WHERE id = 1',
-                (group_name, 1 if bool(dark_mode) else 0)
+                'UPDATE settings SET group_name = ?, dark_mode = ?, next_rehearsal_date = ?, next_rehearsal_location = ? WHERE id = 1',
+                (group_name, 1 if bool(dark_mode) else 0, next_date, next_loc)
             )
         else:
             cur.execute(
-                'UPDATE settings SET group_name = ?, dark_mode = ?, template = ? WHERE id = 1',
-                (group_name, 1 if bool(dark_mode) else 0, template)
+                'UPDATE settings SET group_name = ?, dark_mode = ?, template = ?, next_rehearsal_date = ?, next_rehearsal_location = ? WHERE id = 1',
+                (group_name, 1 if bool(dark_mode) else 0, template, next_date, next_loc)
             )
         conn.commit()
         conn.close()
