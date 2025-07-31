@@ -108,26 +108,34 @@ function init() {
     );`
   );
 
-  // Settings: stores a single row with group name and dark mode flag.  We
-  // insert the default row if the table is empty.
+  // Settings: stores a single row with group name, dark mode flag and next
+  // rehearsal date.  We insert the default row if the table is empty.
   db.run(
     `CREATE TABLE IF NOT EXISTS settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       group_name TEXT NOT NULL,
-      dark_mode INTEGER NOT NULL DEFAULT 0
+      dark_mode INTEGER NOT NULL DEFAULT 0,
+      next_rehearsal_date TEXT
     );`,
     () => {
       // Insert default row if not present
       db.get('SELECT COUNT(*) AS count FROM settings', (err, row) => {
         if (!err && row && row.count === 0) {
           db.run(
-            'INSERT INTO settings (id, group_name, dark_mode) VALUES (1, ?, 0)',
+            'INSERT INTO settings (id, group_name, dark_mode, next_rehearsal_date) VALUES (1, ?, 0, '')',
             ['Groupe de musique']
           );
         }
       });
     }
   );
+
+  // Ensure next_rehearsal_date column exists on old databases
+  db.all('PRAGMA table_info(settings)', (err, rows) => {
+    if (!err && rows && !rows.find((r) => r.name === 'next_rehearsal_date')) {
+      db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_date TEXT');
+    }
+  });
 }
 
 /**
@@ -653,23 +661,30 @@ function moveRehearsalToSuggestion(id) {
  */
 function getSettings() {
   return new Promise((resolve, reject) => {
-    db.get('SELECT group_name, dark_mode FROM settings WHERE id = 1', (err, row) => {
-      if (err) reject(err);
-      else {
-        resolve({ groupName: row.group_name, darkMode: !!row.dark_mode });
+    db.get(
+      'SELECT group_name, dark_mode, next_rehearsal_date FROM settings WHERE id = 1',
+      (err, row) => {
+        if (err) reject(err);
+        else {
+          resolve({
+            groupName: row.group_name,
+            darkMode: !!row.dark_mode,
+            nextRehearsalDate: row.next_rehearsal_date || '',
+          });
+        }
       }
-    });
+    );
   });
 }
 
 /**
  * Updates settings.  Accepts groupName and darkMode (boolean).
  */
-function updateSettings({ groupName, darkMode }) {
+function updateSettings({ groupName, darkMode, nextRehearsalDate }) {
   return new Promise((resolve, reject) => {
     db.run(
-      'UPDATE settings SET group_name = ?, dark_mode = ? WHERE id = 1',
-      [groupName, darkMode ? 1 : 0],
+      'UPDATE settings SET group_name = ?, dark_mode = ?, next_rehearsal_date = ? WHERE id = 1',
+      [groupName, darkMode ? 1 : 0, nextRehearsalDate],
       function (err) {
         if (err) reject(err);
         else resolve();

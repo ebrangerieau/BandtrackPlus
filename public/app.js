@@ -223,7 +223,7 @@
           // Après l’inscription, récupère la session pour obtenir
           // l’identifiant et le nom d’utilisateur normalisé.
           await checkSession();
-          renderMain(app);
+          renderHome(app);
         } catch (err) {
           errorDiv.textContent = err.message;
         }
@@ -240,13 +240,62 @@
           // Après la connexion, interroge le serveur pour récupérer
           // l’utilisateur courant et appliquer le thème.
           await checkSession();
-          renderMain(app);
+          renderHome(app);
         } catch (err) {
           errorDiv.textContent = err.message;
         }
       }
     }
     draw();
+  }
+
+  /**
+   * Page d'accueil après la connexion. Affiche la prochaine prestation et la
+   * date de la prochaine répétition, puis propose un bouton pour entrer dans
+   * l'application principale.
+   * @param {HTMLElement} app
+   */
+  async function renderHome(app) {
+    app.innerHTML = '';
+    const container = document.createElement('div');
+    container.className = 'home-container';
+    app.appendChild(container);
+
+    let nextPerfText = 'Aucune prestation prévue';
+    try {
+      const list = await api('/performances');
+      const today = new Date().toISOString().split('T')[0];
+      const upcoming = list.filter((p) => p.date >= today);
+      upcoming.sort((a, b) => a.date.localeCompare(b.date));
+      if (upcoming.length > 0) {
+        const p = upcoming[0];
+        nextPerfText = `Prochaine prestation : ${p.name} (${p.date})`;
+      }
+    } catch (err) {
+      nextPerfText = 'Impossible de récupérer les prestations';
+    }
+    const perfP = document.createElement('p');
+    perfP.textContent = nextPerfText;
+    container.appendChild(perfP);
+
+    let nextRehearsal = '';
+    try {
+      const settings = await api('/settings');
+      nextRehearsal = settings.nextRehearsalDate || '';
+    } catch (err) {
+      // ignore
+    }
+    const rehP = document.createElement('p');
+    rehP.textContent = nextRehearsal
+      ? `Prochaine répétition : ${nextRehearsal}`
+      : 'Prochaine répétition : —';
+    container.appendChild(rehP);
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-primary';
+    btn.textContent = 'Entrer dans BandTrack';
+    btn.onclick = () => renderMain(app);
+    container.appendChild(btn);
   }
 
   /**
