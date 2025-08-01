@@ -26,6 +26,20 @@ npm install
 npm start
 ```
 
+### Serveur Python
+
+Une implémentation équivalente du backend est également fournie en Python. Elle se
+lance simplement avec la commande :
+
+```bash
+python3 server.py --port 3000
+```
+
+Contrairement à la version Node.js, ce serveur ne dépend d'aucun module
+externe : il s'appuie uniquement sur la bibliothèque standard de Python et
+crée automatiquement la base de données au premier lancement. Les points
+d'accès REST restent identiques au serveur Node.js.
+
 ### Progressive Web App
 
 Un fichier `manifest.json` et un `service-worker.js` ont été ajoutés dans le
