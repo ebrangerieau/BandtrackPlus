@@ -26,6 +26,13 @@ npm install
 npm start
 ```
 
+### Sessions persistantes
+
+Les sessions Express utilisent le module `connect-sqlite3` et sont
+enregistrées dans le fichier `bandtrack.db`. Aucune configuration
+supplémentaire n'est nécessaire : la table `sessions` est créée
+automatiquement au démarrage du serveur.
+
 ### Serveur Python
 
 Une implémentation équivalente du backend est également fournie en Python. Elle se

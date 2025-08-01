@@ -1,6 +1,7 @@
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
+const SQLiteStore = require('connect-sqlite3')(session);
 const bcrypt = require('bcryptjs');
 
 // Import database helpers
@@ -20,6 +21,7 @@ app.use(express.json());
 // `saveUninitialized: false` reduce unnecessary session persistence.
 app.use(
   session({
+    store: new SQLiteStore({ db: 'bandtrack.db', dir: __dirname }),
     secret: process.env.SESSION_SECRET || 'bandtrack_secret',
     resave: false,
     saveUninitialized: false,
