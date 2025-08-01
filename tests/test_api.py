@@ -1,0 +1,126 @@
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import json
+import threading
+import http.client
+import time
+import server
+
+
+def start_test_server(tmp_db_path):
+    server.DB_FILENAME = str(tmp_db_path)
+    server.init_db()
+    httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.BandTrackHandler)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    # Give server time to start
+    time.sleep(0.1)
+    return httpd, thread, port
+
+
+def stop_test_server(httpd, thread):
+    httpd.shutdown()
+    thread.join()
+
+
+def request(method, port, path, body=None, headers=None):
+    conn = http.client.HTTPConnection("127.0.0.1", port)
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers = {"Content-Type": "application/json", **(headers or {})}
+    conn.request(method, path, data, headers or {})
+    res = conn.getresponse()
+    res_body = res.read()
+    status = res.status
+    resp_headers = dict(res.getheaders())
+    conn.close()
+    return status, resp_headers, res_body
+
+
+def extract_cookie(headers):
+    cookie = headers.get("Set-Cookie")
+    if not cookie:
+        return None
+    return cookie.split(";", 1)[0]
+
+
+def test_register_and_login(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        status, headers, _ = request(
+            "POST",
+            port,
+            "/api/register",
+            {"username": "alice", "password": "secret"},
+        )
+        assert status == 201
+        status, headers, _ = request(
+            "POST",
+            port,
+            "/api/login",
+            {"username": "alice", "password": "secret"},
+        )
+        assert status == 200
+        cookie = extract_cookie(headers)
+        assert cookie and cookie.startswith("session_id=")
+    finally:
+        stop_test_server(httpd, thread)
+
+
+def test_suggestions_crud(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        request("POST", port, "/api/register", {"username": "bob", "password": "pw"})
+        status, headers, _ = request("POST", port, "/api/login", {"username": "bob", "password": "pw"})
+        cookie = extract_cookie(headers)
+        headers = {"Cookie": cookie}
+
+        status, _, body = request("POST", port, "/api/suggestions", {"title": "Song"}, headers)
+        assert status == 201
+        sug_id = json.loads(body)["id"]
+
+        status, _, body = request("GET", port, "/api/suggestions", headers=headers)
+        assert status == 200
+        suggestions = json.loads(body)
+        assert len(suggestions) == 1
+
+        status, _, _ = request("PUT", port, f"/api/suggestions/{sug_id}", {"title": "Song2"}, headers)
+        assert status == 200
+        status, _, body = request("GET", port, "/api/suggestions", headers=headers)
+        assert json.loads(body)[0]["title"] == "Song2"
+
+        status, _, _ = request("DELETE", port, f"/api/suggestions/{sug_id}", headers=headers)
+        assert status == 200
+        status, _, body = request("GET", port, "/api/suggestions", headers=headers)
+        assert json.loads(body) == []
+    finally:
+        stop_test_server(httpd, thread)
+
+
+def test_rehearsals_crud(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        request("POST", port, "/api/register", {"username": "carol", "password": "pw"})
+        status, headers, _ = request("POST", port, "/api/login", {"username": "carol", "password": "pw"})
+        cookie = extract_cookie(headers)
+        headers = {"Cookie": cookie}
+
+        status, _, body = request("POST", port, "/api/rehearsals", {"title": "R1"}, headers)
+        assert status == 201
+        reh_id = json.loads(body)["id"]
+
+        status, _, _ = request("PUT", port, f"/api/rehearsals/{reh_id}", {"level": 5, "note": "ok"}, headers)
+        assert status == 200
+
+        status, _, body = request("PUT", port, f"/api/rehearsals/{reh_id}/mastered", headers=headers)
+        assert status == 200
+        assert json.loads(body)["mastered"] is True
+
+        status, _, _ = request("DELETE", port, f"/api/rehearsals/{reh_id}", headers=headers)
+        assert status == 200
+        status, _, body = request("GET", port, "/api/rehearsals", headers=headers)
+        assert json.loads(body) == []
+    finally:
+        stop_test_server(httpd, thread)
