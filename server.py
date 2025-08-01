@@ -862,8 +862,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         suggestion_id = cur.lastrowid
         # Retrieve the created row with creator username and timestamp
         cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.creator_id, s.created_at, u.username AS creator
-               FROM suggestions s JOIN users u ON u.id = s.creator_id WHERE s.id = ?''',
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes,
+                     s.creator_id, s.created_at, u.username AS creator
+               FROM suggestions s JOIN users u ON u.id = s.creator_id
+               WHERE s.id = ?''',
             (suggestion_id,)
         )
         row = cur.fetchone()
