@@ -104,6 +104,7 @@ function init() {
       spotify TEXT,
       levels_json TEXT DEFAULT '{}',
       notes_json TEXT DEFAULT '{}',
+      audio_notes_json TEXT DEFAULT '{}',
       mastered INTEGER NOT NULL DEFAULT 0,
       creator_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -111,10 +112,15 @@ function init() {
     );`
   );
 
-  // Ensure mastered column exists on old databases
+  // Ensure mastered and audio_notes_json columns exist on old databases
   db.all('PRAGMA table_info(rehearsals)', (err, rows) => {
-    if (!err && rows && !rows.find((r) => r.name === 'mastered')) {
-      db.run('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0');
+    if (!err && rows) {
+      if (!rows.find((r) => r.name === 'mastered')) {
+        db.run('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0');
+      }
+      if (!rows.find((r) => r.name === 'audio_notes_json')) {
+        db.run("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'");
+      }
     }
   });
 
@@ -469,8 +475,8 @@ function incrementSuggestionLikes(id, userId) {
 function createRehearsal(title, youtube, spotify, creatorId) {
   return new Promise((resolve, reject) => {
     db.run(
-      'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [title, youtube || null, spotify || null, '{}', '{}', 0, creatorId],
+      'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [title, youtube || null, spotify || null, '{}', '{}', '{}', 0, creatorId],
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
@@ -485,7 +491,7 @@ function createRehearsal(title, youtube, spotify, creatorId) {
 function getRehearsals() {
   return new Promise((resolve, reject) => {
     db.all(
-      `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
+      `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
               u.username AS creator
        FROM rehearsals r
        JOIN users u ON u.id = r.creator_id
@@ -502,6 +508,7 @@ function getRehearsals() {
               spotify: row.spotify,
               levels: JSON.parse(row.levels_json || '{}'),
               notes: JSON.parse(row.notes_json || '{}'),
+              audioNotes: JSON.parse(row.audio_notes_json || '{}'),
               mastered: !!row.mastered,
               creatorId: row.creator_id,
               creator: row.creator,
@@ -518,26 +525,30 @@ function getRehearsals() {
  * Updates the level and note for the given rehearsal and user.  Only the
  * current user's values are changed.  Returns a promise.
  */
-function updateRehearsalUserData(id, username, level, note) {
+function updateRehearsalUserData(id, username, level, note, audio) {
   return new Promise((resolve, reject) => {
     // Retrieve existing levels and notes
     db.get(
-      'SELECT levels_json, notes_json FROM rehearsals WHERE id = ?',
+      'SELECT levels_json, notes_json, audio_notes_json FROM rehearsals WHERE id = ?',
       [id],
       (err, row) => {
         if (err) return reject(err);
         if (!row) return reject(new Error('Rehearsal not found'));
         const levels = JSON.parse(row.levels_json || '{}');
         const notes = JSON.parse(row.notes_json || '{}');
+        const audioNotes = JSON.parse(row.audio_notes_json || '{}');
         if (level !== undefined) {
           levels[username] = level;
         }
         if (note !== undefined) {
           notes[username] = note;
         }
+        if (audio !== undefined) {
+          audioNotes[username] = audio;
+        }
         db.run(
-          'UPDATE rehearsals SET levels_json = ?, notes_json = ? WHERE id = ?',
-          [JSON.stringify(levels), JSON.stringify(notes), id],
+          'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ?',
+          [JSON.stringify(levels), JSON.stringify(notes), JSON.stringify(audioNotes), id],
           function (err) {
             if (err) reject(err);
             else resolve();
@@ -563,7 +574,7 @@ function toggleRehearsalMastered(id) {
         function (err) {
           if (err) return reject(err);
           db.get(
-            `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
+            `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
                     u.username AS creator
              FROM rehearsals r JOIN users u ON u.id = r.creator_id WHERE r.id = ?`,
             [id],
@@ -578,6 +589,7 @@ function toggleRehearsalMastered(id) {
                   spotify: updated.spotify,
                   levels: JSON.parse(updated.levels_json || '{}'),
                   notes: JSON.parse(updated.notes_json || '{}'),
+                  audioNotes: JSON.parse(updated.audio_notes_json || '{}'),
                   mastered: !!updated.mastered,
                   creatorId: updated.creator_id,
                   creator: updated.creator,
@@ -712,15 +724,15 @@ function moveSuggestionToRehearsal(id) {
         if (err) return reject(err);
         if (!row) return resolve(null);
         db.run(
-          'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [row.title, row.url || null, null, '{}', '{}', 0, row.creator_id],
+          'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [row.title, row.url || null, null, '{}', '{}', '{}', 0, row.creator_id],
           function (err2) {
             if (err2) return reject(err2);
             const newId = this.lastID;
             db.run('DELETE FROM suggestions WHERE id = ?', [id], (err3) => {
               if (err3) return reject(err3);
               db.get(
-                `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
+                `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
                         u.username AS creator
                  FROM rehearsals r JOIN users u ON u.id = r.creator_id WHERE r.id = ?`,
                 [newId],
@@ -735,6 +747,7 @@ function moveSuggestionToRehearsal(id) {
                       spotify: rrow.spotify,
                       levels: JSON.parse(rrow.levels_json || '{}'),
                       notes: JSON.parse(rrow.notes_json || '{}'),
+                      audioNotes: JSON.parse(rrow.audio_notes_json || '{}'),
                       mastered: !!rrow.mastered,
                       creatorId: rrow.creator_id,
                       creator: rrow.creator,
