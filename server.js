@@ -2,7 +2,9 @@ const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const SQLiteStore = require('connect-sqlite3')(session);
-const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const { promisify } = require('util');
+const pbkdf2 = promisify(crypto.pbkdf2);
 
 // Import database helpers
 const db = require('./db');
@@ -64,10 +66,11 @@ app.post('/api/register', async (req, res) => {
     if (existing) {
       return res.status(409).json({ error: 'Username already taken' });
     }
-    // Hash password
-    const saltRounds = 10;
-    const hash = await bcrypt.hash(password, saltRounds);
-    const userId = await db.createUser(username, hash);
+    // Hash password using PBKDF2 with a per-user salt
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = await pbkdf2(password, salt, 310000, 32, 'sha256');
+    const hash = derived.toString('hex');
+    const userId = await db.createUser(username, hash, salt);
     // Set session
     req.session.userId = userId;
     req.session.username = username;
@@ -89,8 +92,9 @@ app.post('/api/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) {
+    const derived = await pbkdf2(password, user.salt, 310000, 32, 'sha256');
+    const hash = derived.toString('hex');
+    if (hash !== user.password_hash) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     req.session.userId = user.id;
