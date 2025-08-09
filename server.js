@@ -27,11 +27,9 @@ db.init();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const SSL_KEY = process.env.SSL_KEY || path.join(__dirname, 'certs', 'server.key');
-const SSL_CERT = process.env.SSL_CERT || path.join(__dirname, 'certs', 'server.crt');
 const httpsOptions = {
-  key: fs.readFileSync(SSL_KEY),
-  cert: fs.readFileSync(SSL_CERT),
+  key: fs.readFileSync(path.join(__dirname, 'certs', 'key.pem')),
+  cert: fs.readFileSync(path.join(__dirname, 'certs', 'cert.pem')),
 };
 
 // Middleware to parse JSON bodies
