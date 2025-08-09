@@ -44,6 +44,28 @@ app.use(
   })
 );
 
+// In-memory metrics
+const metrics = {
+  totalRequests: 0,
+  totalResponseTime: 0,
+  errorCount: 0,
+  lastReset: new Date(),
+};
+
+// Middleware to collect latency and error statistics
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - start) / 1e6;
+    metrics.totalRequests += 1;
+    metrics.totalResponseTime += durationMs;
+    if (res.statusCode >= 400) {
+      metrics.errorCount += 1;
+    }
+  });
+  next();
+});
+
 /**
  * Middleware to protect routes that require authentication.  If the user is
  * not logged in, respond with HTTP 401.
@@ -582,6 +604,37 @@ app.get('/api/logs', requireAuth, async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch logs' });
   }
+});
+
+// ----------------- Metrics (Admin only) -----------------
+app.get('/api/metrics', requireAuth, (req, res) => {
+  if (req.session.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const avgLatency = metrics.totalRequests
+    ? metrics.totalResponseTime / metrics.totalRequests
+    : 0;
+  const errorRate = metrics.totalRequests
+    ? metrics.errorCount / metrics.totalRequests
+    : 0;
+  res.json({
+    totalRequests: metrics.totalRequests,
+    averageLatency: avgLatency,
+    errorRate,
+    lastReset: metrics.lastReset,
+  });
+});
+
+// Reset metrics
+app.delete('/api/metrics', requireAuth, (req, res) => {
+  if (req.session.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  metrics.totalRequests = 0;
+  metrics.totalResponseTime = 0;
+  metrics.errorCount = 0;
+  metrics.lastReset = new Date();
+  res.json({ success: true });
 });
 
 // ----------------- Static Files -----------------

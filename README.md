@@ -62,3 +62,15 @@ permettre l'installation de l'application et son fonctionnement hors ligne.
 
 Les serveurs Node.js et Python gèrent tous deux ces champs et mettent à jour
 automatiquement les anciennes bases de données au démarrage.
+
+### Métriques serveur
+
+Un middleware Express enregistre la latence de chaque requête et le nombre
+d'erreurs (codes ≥ 400). Ces données sont conservées en mémoire depuis la
+dernière réinitialisation.
+
+- `GET /api/metrics` *(administrateur)* – retourne `totalRequests`,
+  `averageLatency` (ms), `errorRate` et `lastReset`.
+- `DELETE /api/metrics` *(administrateur)* – remet à zéro tous les compteurs.
+
+Les métriques sont également réinitialisées lors du redémarrage du serveur.
