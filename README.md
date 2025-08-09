@@ -74,3 +74,24 @@ dernière réinitialisation.
 - `DELETE /api/metrics` *(administrateur)* – remet à zéro tous les compteurs.
 
 Les métriques sont également réinitialisées lors du redémarrage du serveur.
+
+### Sauvegardes et restauration
+
+Un script `backup.sh` crée une copie de la base `bandtrack.db` et du dossier `audios/` dans `backups/DATE` où `DATE` est un horodatage `YYYYMMDD_HHMMSS`.
+Les `MAX_BACKUPS` dernières sauvegardes seulement sont conservées (7 par défaut).
+
+```bash
+./backup.sh            # créer une sauvegarde
+MAX_BACKUPS=10 ./backup.sh  # conserver 10 sauvegardes
+```
+
+Pour restaurer une sauvegarde :
+
+1. Arrêter le serveur.
+2. Copier les fichiers depuis le dossier voulu :
+   ```bash
+   cp backups/DATE/bandtrack.db .
+   rm -rf audios
+   cp -r backups/DATE/audios audios
+   ```
+3. Redémarrer le serveur.
