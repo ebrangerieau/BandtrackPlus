@@ -1,4 +1,6 @@
 const path = require('path');
+const fs = require('fs');
+const https = require('https');
 const express = require('express');
 const session = require('express-session');
 const SQLiteStore = require('connect-sqlite3')(session);
@@ -6,7 +8,7 @@ const crypto = require('crypto');
 const { promisify } = require('util');
 const pbkdf2 = promisify(crypto.pbkdf2);
 
-const ORIGIN = process.env.ORIGIN || 'http://localhost:3000';
+const ORIGIN = process.env.ORIGIN || 'https://localhost:3000';
 
 function base64urlToBuffer(str) {
   return Buffer.from(str, 'base64url');
@@ -24,6 +26,13 @@ db.init();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+const SSL_KEY = process.env.SSL_KEY || path.join(__dirname, 'certs', 'server.key');
+const SSL_CERT = process.env.SSL_CERT || path.join(__dirname, 'certs', 'server.crt');
+const httpsOptions = {
+  key: fs.readFileSync(SSL_KEY),
+  cert: fs.readFileSync(SSL_CERT),
+};
 
 // Middleware to parse JSON bodies
 app.use(express.json());
@@ -650,7 +659,7 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Start the server
-app.listen(PORT, () => {
+// Start the HTTPS server
+https.createServer(httpsOptions, app).listen(PORT, () => {
   console.log(`BandTrack server listening on port ${PORT}`);
 });
