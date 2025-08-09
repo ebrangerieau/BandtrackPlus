@@ -41,14 +41,14 @@
    * @param {string} path Chemin relatif à l’API, par exemple '/suggestions'
    * @param {string} method Méthode HTTP (GET, POST, PUT, DELETE)
    * @param {Object?} data Corps JSON à envoyer pour les méthodes POST/PUT
-   */
+  */
   async function api(path, method = 'GET', data) {
     const options = {
       method,
-      headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
     };
     if (data !== undefined) {
+      options.headers = { 'Content-Type': 'application/json' };
       options.body = JSON.stringify(data);
     }
     const res = await fetch('/api' + path, options);
