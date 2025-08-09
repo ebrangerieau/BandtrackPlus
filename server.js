@@ -237,12 +237,12 @@ app.get('/api/suggestions', requireAuth, async (req, res) => {
 
 // Create a new suggestion
 app.post('/api/suggestions', requireAuth, async (req, res) => {
-  const { title, url } = req.body;
+  const { title, author, youtube } = req.body;
   if (!title) {
     return res.status(400).json({ error: 'Title is required' });
   }
   try {
-    const newId = await db.createSuggestion(title, url || '', req.session.userId);
+    const newId = await db.createSuggestion(title, author || '', youtube || '', req.session.userId);
     const [created] = await Promise.all([
       db.getSuggestions().then((list) => list.find((s) => s.id === newId)),
     ]);
@@ -256,12 +256,12 @@ app.post('/api/suggestions', requireAuth, async (req, res) => {
 // Update an existing suggestion
 app.put('/api/suggestions/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { title, url } = req.body;
+  const { title, author, youtube } = req.body;
   if (isNaN(id) || !title) {
     return res.status(400).json({ error: 'Invalid data' });
   }
   try {
-    const changes = await db.updateSuggestion(id, title, url || '', req.session.userId, req.session.role);
+    const changes = await db.updateSuggestion(id, title, author || '', youtube || '', req.session.userId, req.session.role);
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to update' });
     }
@@ -430,12 +430,12 @@ app.get('/api/performances', requireAuth, async (req, res) => {
 
 // Create a performance
 app.post('/api/performances', requireAuth, async (req, res) => {
-  const { name, date, songs } = req.body;
+  const { name, date, location, songs } = req.body;
   if (!name || !date) {
     return res.status(400).json({ error: 'Name and date are required' });
   }
   try {
-    const newId = await db.createPerformance(name, date, songs || [], req.session.userId);
+    const newId = await db.createPerformance(name, date, location || '', songs || [], req.session.userId);
     const list = await db.getPerformances();
     const created = list.find((p) => p.id === newId);
     res.status(201).json(created);
@@ -462,10 +462,10 @@ app.get('/api/performances/:id', requireAuth, async (req, res) => {
 // Update performance
 app.put('/api/performances/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { name, date, songs } = req.body;
+  const { name, date, location, songs } = req.body;
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    const changes = await db.updatePerformance(id, name, date, songs || [], req.session.userId, req.session.role);
+    const changes = await db.updatePerformance(id, name, date, location || '', songs || [], req.session.userId, req.session.role);
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to update' });
     }
