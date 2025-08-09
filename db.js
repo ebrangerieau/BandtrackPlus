@@ -22,15 +22,24 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
  * server startup.
  */
 function init() {
-  // Users: store a unique username and a password hash.  The password
-  // hash is created using bcrypt on the server side during registration.
+  // Users: store a unique username, a password hash and its salt.  The
+  // password hash is created using PBKDF2 on the server side during
+  // registration.
   db.run(
     `CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL
+      password_hash TEXT NOT NULL,
+      salt TEXT NOT NULL
     );`
   );
+
+  // Ensure salt column exists on existing databases
+  db.all('PRAGMA table_info(users)', (err, rows) => {
+    if (!err && rows && !rows.find((r) => r.name === 'salt')) {
+      db.run('ALTER TABLE users ADD COLUMN salt TEXT');
+    }
+  });
 
   // Suggestions: simple list of song suggestions with an optional URL and
   // the user who created it.  Each suggestion also stores a number of likes
@@ -143,21 +152,22 @@ function init() {
 }
 
 /**
- * Creates a new user with the given username and hashed password.  Returns
- * a promise that resolves to the inserted user ID.
+ * Creates a new user with the given username, hashed password and salt.
+ * Returns a promise that resolves to the inserted user ID.
  * @param {string} username
  * @param {string} passwordHash
+ * @param {string} salt
  */
-function createUser(username, passwordHash) {
+function createUser(username, passwordHash, salt) {
   return new Promise((resolve, reject) => {
     const stmt = db.prepare(
-      'INSERT INTO users (username, password_hash) VALUES (?, ?)',
+      'INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)',
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
       }
     );
-    stmt.run(username, passwordHash);
+    stmt.run(username, passwordHash, salt);
   });
 }
 
@@ -169,7 +179,7 @@ function createUser(username, passwordHash) {
 function getUserByUsername(username) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT id, username, password_hash FROM users WHERE username = ?',
+      'SELECT id, username, password_hash, salt FROM users WHERE username = ?',
       [username],
       (err, row) => {
         if (err) reject(err);
