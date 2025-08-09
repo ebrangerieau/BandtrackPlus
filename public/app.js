@@ -679,13 +679,13 @@
       e.preventDefault();
       const titleVal = inputTitle.value.trim();
       const authorVal = inputAuthor.value.trim();
-      const urlVal = inputYt.value.trim();
+      const youtubeVal = inputYt.value.trim();
       if (!titleVal) return;
       try {
         await api(`/suggestions/${item.id}`, 'PUT', {
           title: titleVal,
           author: authorVal,
-          url: urlVal,
+          youtube: youtubeVal,
         });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
@@ -1198,6 +1198,11 @@
         const dateP = document.createElement('p');
         dateP.textContent = 'Date : ' + perf.date;
         details.appendChild(dateP);
+        if (perf.location) {
+          const locP = document.createElement('p');
+          locP.textContent = 'Lieu : ' + perf.location;
+          details.appendChild(locP);
+        }
         if (perf.songs && perf.songs.length > 0) {
           const ul = document.createElement('ul');
           perf.songs.forEach((id) => {
@@ -1278,6 +1283,12 @@
     inputDate.type = 'date';
     inputDate.required = true;
     inputDate.style.width = '100%';
+    // Lieu
+    const labelLoc = document.createElement('label');
+    labelLoc.textContent = 'Lieu';
+    const inputLoc = document.createElement('input');
+    inputLoc.type = 'text';
+    inputLoc.style.width = '100%';
     // Sélection des morceaux
     const labelSongs = document.createElement('label');
     labelSongs.textContent = 'Morceaux joués';
@@ -1296,6 +1307,8 @@
     form.appendChild(inputName);
     form.appendChild(labelDate);
     form.appendChild(inputDate);
+    form.appendChild(labelLoc);
+    form.appendChild(inputLoc);
     form.appendChild(labelSongs);
     form.appendChild(listDiv);
     content.appendChild(form);
@@ -1317,6 +1330,7 @@
       e.preventDefault();
       const name = inputName.value.trim();
       const dateVal = inputDate.value;
+      const locVal = inputLoc.value.trim();
       if (!name || !dateVal) return;
       const selected = [];
       listDiv.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
@@ -1341,7 +1355,7 @@
         return;
       }
       try {
-        await api('/performances', 'POST', { name, date: dateVal, songs: selected });
+        await api('/performances', 'POST', { name, date: dateVal, location: locVal, songs: selected });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
@@ -1388,6 +1402,13 @@
     inputDate.required = true;
     inputDate.style.width = '100%';
     inputDate.value = perf.date;
+    // Lieu
+    const labelLoc = document.createElement('label');
+    labelLoc.textContent = 'Lieu';
+    const inputLoc = document.createElement('input');
+    inputLoc.type = 'text';
+    inputLoc.style.width = '100%';
+    inputLoc.value = perf.location || '';
     // Morceaux
     const labelSongs = document.createElement('label');
     labelSongs.textContent = 'Morceaux joués';
@@ -1407,6 +1428,8 @@
     form.appendChild(inputName);
     form.appendChild(labelDate);
     form.appendChild(inputDate);
+    form.appendChild(labelLoc);
+    form.appendChild(inputLoc);
     form.appendChild(labelSongs);
     form.appendChild(listDiv);
     content.appendChild(form);
@@ -1428,6 +1451,7 @@
       e.preventDefault();
       const name = inputName.value.trim();
       const dateVal = inputDate.value;
+      const locVal = inputLoc.value.trim();
       if (!name || !dateVal) return;
       const selected = [];
       listDiv.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
@@ -1452,7 +1476,7 @@
         return;
       }
       try {
-        await api(`/performances/${perf.id}`, 'PUT', { name, date: dateVal, songs: selected });
+        await api(`/performances/${perf.id}`, 'PUT', { name, date: dateVal, location: locVal, songs: selected });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
@@ -1484,6 +1508,11 @@
     const dateP = document.createElement('p');
     dateP.textContent = 'Date : ' + perf.date;
     content.appendChild(dateP);
+    if (perf.location) {
+      const locP = document.createElement('p');
+      locP.textContent = 'Lieu : ' + perf.location;
+      content.appendChild(locP);
+    }
     // Liste des morceaux
     const ul = document.createElement('ul');
     if (perf.songs && perf.songs.length > 0) {

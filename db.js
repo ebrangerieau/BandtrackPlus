@@ -57,14 +57,16 @@ function init() {
     );`
   );
 
-  // Suggestions: simple list of song suggestions with an optional URL and
-  // the user who created it.  Each suggestion also stores a number of likes
-  // used to rank the items.
+  // Suggestions: list of song suggestions with optional author and YouTube
+  // link along with a generic URL. Each suggestion also stores a number of
+  // likes used to rank the items.
   db.run(
     `CREATE TABLE IF NOT EXISTS suggestions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
+      author TEXT,
       url TEXT,
+      youtube TEXT,
       likes INTEGER NOT NULL DEFAULT 0,
       creator_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -85,11 +87,19 @@ function init() {
     );`
   );
 
-  // Ensure the likes column exists on existing databases.  Older versions of
-  // the schema may not have it, so we attempt to add it and ignore errors.
+  // Ensure the new columns exist on existing databases. Older versions of the
+  // schema may not have them, so we attempt to add them and ignore errors.
   db.all('PRAGMA table_info(suggestions)', (err, rows) => {
-    if (!err && rows && !rows.find((r) => r.name === 'likes')) {
-      db.run('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0');
+    if (!err && rows) {
+      if (!rows.find((r) => r.name === 'likes')) {
+        db.run('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0');
+      }
+      if (!rows.find((r) => r.name === 'author')) {
+        db.run('ALTER TABLE suggestions ADD COLUMN author TEXT');
+      }
+      if (!rows.find((r) => r.name === 'youtube')) {
+        db.run('ALTER TABLE suggestions ADD COLUMN youtube TEXT');
+      }
     }
   });
 
@@ -132,12 +142,20 @@ function init() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       date TEXT NOT NULL,
+      location TEXT,
       songs_json TEXT DEFAULT '[]',
       creator_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (creator_id) REFERENCES users(id)
     );`
   );
+
+  // Ensure the location column exists on existing databases
+  db.all('PRAGMA table_info(performances)', (err, rows) => {
+    if (!err && rows && !rows.find((r) => r.name === 'location')) {
+      db.run('ALTER TABLE performances ADD COLUMN location TEXT');
+    }
+  });
 
   // Settings: stores a single row with group name, dark mode flag and next
   // rehearsal date/location.  We insert the default row if the table is empty.
@@ -311,11 +329,11 @@ function updateUserRole(id, role) {
 /**
  * Creates a new suggestion.
  */
-function createSuggestion(title, url, creatorId) {
+function createSuggestion(title, author, youtube, creatorId) {
   return new Promise((resolve, reject) => {
     db.run(
-      'INSERT INTO suggestions (title, url, creator_id) VALUES (?, ?, ?)',
-      [title, url, creatorId],
+      'INSERT INTO suggestions (title, author, youtube, creator_id) VALUES (?, ?, ?, ?)',
+      [title, author, youtube, creatorId],
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
@@ -330,7 +348,7 @@ function createSuggestion(title, url, creatorId) {
 function getSuggestions() {
   return new Promise((resolve, reject) => {
     db.all(
-      `SELECT s.id, s.title, s.url, s.likes, s.creator_id, s.created_at, u.username AS creator
+      `SELECT s.id, s.title, s.author, s.url, s.youtube, s.likes, s.creator_id, s.created_at, u.username AS creator
        FROM suggestions s
        JOIN users u ON u.id = s.creator_id
        ORDER BY s.likes DESC, s.created_at ASC`,
@@ -363,14 +381,14 @@ function deleteSuggestion(id, userId, role) {
  * Updates a suggestion title and URL if the user is the creator.
  * Resolves with the number of updated rows (0 or 1).
  */
-function updateSuggestion(id, title, url, userId, role) {
+function updateSuggestion(id, title, author, youtube, userId, role) {
   return new Promise((resolve, reject) => {
     const sql = role === 'admin' || role === 'moderator'
-      ? 'UPDATE suggestions SET title = ?, url = ? WHERE id = ?'
-      : 'UPDATE suggestions SET title = ?, url = ? WHERE id = ? AND creator_id = ?';
+      ? 'UPDATE suggestions SET title = ?, author = ?, youtube = ? WHERE id = ?'
+      : 'UPDATE suggestions SET title = ?, author = ?, youtube = ? WHERE id = ? AND creator_id = ?';
     const params = role === 'admin' || role === 'moderator'
-      ? [title, url, id]
-      : [title, url, id, userId];
+      ? [title, author, youtube, id]
+      : [title, author, youtube, id, userId];
     db.run(sql, params, function (err) {
       if (err) reject(err);
       else resolve(this.changes);
@@ -606,11 +624,11 @@ function toggleRehearsalMastered(id) {
 /**
  * Creates a performance.
  */
-function createPerformance(name, date, songs, creatorId) {
+function createPerformance(name, date, location, songs, creatorId) {
   return new Promise((resolve, reject) => {
     db.run(
-      'INSERT INTO performances (name, date, songs_json, creator_id) VALUES (?, ?, ?, ?)',
-      [name, date, JSON.stringify(songs || []), creatorId],
+      'INSERT INTO performances (name, date, location, songs_json, creator_id) VALUES (?, ?, ?, ?, ?)',
+      [name, date, location, JSON.stringify(songs || []), creatorId],
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
@@ -625,7 +643,7 @@ function createPerformance(name, date, songs, creatorId) {
 function getPerformances() {
   return new Promise((resolve, reject) => {
     db.all(
-      `SELECT p.id, p.name, p.date, p.songs_json, p.creator_id, u.username AS creator
+      `SELECT p.id, p.name, p.date, p.location, p.songs_json, p.creator_id, u.username AS creator
        FROM performances p
        JOIN users u ON u.id = p.creator_id
        ORDER BY p.date ASC`,
@@ -637,6 +655,7 @@ function getPerformances() {
               id: row.id,
               name: row.name,
               date: row.date,
+              location: row.location,
               songs: JSON.parse(row.songs_json || '[]'),
               creatorId: row.creator_id,
               creator: row.creator,
@@ -655,7 +674,7 @@ function getPerformances() {
 function getPerformance(id) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT id, name, date, songs_json, creator_id FROM performances WHERE id = ?',
+      'SELECT id, name, date, location, songs_json, creator_id FROM performances WHERE id = ?',
       [id],
       (err, row) => {
         if (err) reject(err);
@@ -665,6 +684,7 @@ function getPerformance(id) {
             id: row.id,
             name: row.name,
             date: row.date,
+            location: row.location,
             songs: JSON.parse(row.songs_json || '[]'),
             creatorId: row.creator_id,
           });
@@ -679,14 +699,14 @@ function getPerformance(id) {
  * permitted if the requesting user is the creator.  Resolves with the number
  * of updated rows (0 or 1).
  */
-function updatePerformance(id, name, date, songs, userId, role) {
+function updatePerformance(id, name, date, location, songs, userId, role) {
   return new Promise((resolve, reject) => {
     const sql = role === 'admin' || role === 'moderator'
-      ? 'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ?'
-      : 'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND creator_id = ?';
+      ? 'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ?'
+      : 'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ?';
     const params = role === 'admin' || role === 'moderator'
-      ? [name, date, JSON.stringify(songs || []), id]
-      : [name, date, JSON.stringify(songs || []), id, userId];
+      ? [name, date, location, JSON.stringify(songs || []), id]
+      : [name, date, location, JSON.stringify(songs || []), id, userId];
     db.run(sql, params, function (err) {
       if (err) reject(err);
       else resolve(this.changes);
@@ -718,14 +738,14 @@ function deletePerformance(id, userId, role) {
 function moveSuggestionToRehearsal(id) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT id, title, url, creator_id FROM suggestions WHERE id = ?',
+      'SELECT id, title, COALESCE(youtube, url) as youtube, creator_id FROM suggestions WHERE id = ?',
       [id],
       (err, row) => {
         if (err) return reject(err);
         if (!row) return resolve(null);
         db.run(
           'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [row.title, row.url || null, null, '{}', '{}', '{}', 0, row.creator_id],
+          [row.title, row.youtube || null, null, '{}', '{}', '{}', 0, row.creator_id],
           function (err2) {
             if (err2) return reject(err2);
             const newId = this.lastID;
@@ -776,15 +796,15 @@ function moveRehearsalToSuggestion(id) {
         if (err) return reject(err);
         if (!row) return resolve(null);
         db.run(
-          'INSERT INTO suggestions (title, url, creator_id) VALUES (?, ?, ?)',
-          [row.title, row.youtube || null, row.creator_id],
+          'INSERT INTO suggestions (title, author, youtube, creator_id) VALUES (?, ?, ?, ?)',
+          [row.title, null, row.youtube || null, row.creator_id],
           function (err2) {
             if (err2) return reject(err2);
             const newId = this.lastID;
             db.run('DELETE FROM rehearsals WHERE id = ?', [id], (err3) => {
               if (err3) return reject(err3);
               db.get(
-                `SELECT s.id, s.title, s.url, s.likes, s.creator_id, s.created_at, u.username AS creator
+                `SELECT s.id, s.title, s.author, s.url, s.youtube, s.likes, s.creator_id, s.created_at, u.username AS creator
                  FROM suggestions s JOIN users u ON u.id = s.creator_id WHERE s.id = ?`,
                 [newId],
                 (err4, srow) => {
