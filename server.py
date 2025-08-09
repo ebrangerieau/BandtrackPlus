@@ -752,9 +752,19 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             'INSERT INTO users (username, salt, password_hash, role) VALUES (?, ?, ?, ?)',
             (username, salt, pwd_hash, role)
         )
+        user_id = cur.lastrowid
         conn.commit()
         conn.close()
-        send_json(self, HTTPStatus.CREATED, {'message': 'User created'})
+        # Automatically log in the new user and return a session cookie so the
+        # behaviour mirrors the Express implementation.
+        token = generate_session(user_id)
+        expires_ts = int(time.time()) + 7 * 24 * 3600
+        send_json(
+            self,
+            HTTPStatus.OK,
+            {'id': user_id, 'username': username, 'role': role},
+            cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+        )
 
     def api_login(self, body: dict):
         username = (body.get('username') or '').strip().lower()

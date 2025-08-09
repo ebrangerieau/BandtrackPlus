@@ -55,7 +55,7 @@ def test_register_and_login(tmp_path):
             "/api/register",
             {"username": "alice", "password": "secret"},
         )
-        assert status == 201
+        assert status == 200
         status, headers, _ = request(
             "POST",
             port,
