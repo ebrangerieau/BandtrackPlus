@@ -365,13 +365,13 @@ app.post('/api/rehearsals', requireAuth, async (req, res) => {
   }
 });
 
-// Update the current user's level/notes for a rehearsal
+// Update the current user's level/notes/audio for a rehearsal
 app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { level, note } = req.body;
+  const { level, note, audio } = req.body;
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    await db.updateRehearsalUserData(id, req.session.username, level, note);
+    await db.updateRehearsalUserData(id, req.session.username, level, note, audio);
     // Return updated rehearsal data
     const rehearsals = await db.getRehearsals();
     const updated = rehearsals.find((r) => r.id === id);
