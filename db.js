@@ -189,6 +189,18 @@ function init() {
       db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_location TEXT');
     }
   });
+
+  // Logs: audit trail of key actions
+  db.run(
+    `CREATE TABLE IF NOT EXISTS logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      user_id INTEGER,
+      action TEXT NOT NULL,
+      metadata TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );`
+  );
 }
 
 /**
@@ -858,6 +870,50 @@ function updateSettings({ groupName, darkMode, nextRehearsalDate, nextRehearsalL
   });
 }
 
+/**
+ * Inserts an event into the logs table.
+ */
+function logEvent(userId, action, metadata) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'INSERT INTO logs (user_id, action, metadata) VALUES (?, ?, ?)',
+      [userId, action, metadata ? JSON.stringify(metadata) : null],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves recent log entries, joined with usernames.
+ */
+function getLogs(limit = 100) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT l.id, l.timestamp, l.user_id, u.username, l.action, l.metadata
+       FROM logs l LEFT JOIN users u ON u.id = l.user_id
+       ORDER BY l.timestamp DESC LIMIT ?`,
+      [limit],
+      (err, rows) => {
+        if (err) reject(err);
+        else {
+          const parsed = rows.map((r) => ({
+            id: r.id,
+            timestamp: r.timestamp,
+            user_id: r.user_id,
+            username: r.username,
+            action: r.action,
+            metadata: r.metadata ? JSON.parse(r.metadata) : null,
+          }));
+          resolve(parsed);
+        }
+      }
+    );
+  });
+}
+
 module.exports = {
   init,
   createUser,
@@ -890,4 +946,6 @@ module.exports = {
   updateSettings,
   moveSuggestionToRehearsal,
   moveRehearsalToSuggestion,
+  logEvent,
+  getLogs,
 };

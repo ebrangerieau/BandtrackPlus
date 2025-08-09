@@ -179,6 +179,17 @@ def init_db():
                FOREIGN KEY (user_id) REFERENCES users(id)
            );'''
     )
+    # Logs: record key user actions
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS logs (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+               user_id INTEGER,
+               action TEXT NOT NULL,
+               metadata TEXT,
+               FOREIGN KEY (user_id) REFERENCES users(id)
+           );'''
+    )
     conn.commit()
     conn.close()
 
@@ -331,6 +342,17 @@ def delete_session(token: str) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute('DELETE FROM sessions WHERE token = ?', (token,))
+    conn.commit()
+    conn.close()
+
+def log_event(user_id: int | None, action: str, metadata: dict | None = None) -> None:
+    """Insert an entry into the logs table."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'INSERT INTO logs (user_id, action, metadata) VALUES (?, ?, ?)',
+        (user_id, action, json.dumps(metadata or {}))
+    )
     conn.commit()
     conn.close()
 
@@ -607,9 +629,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         return self.api_move_suggestion_to_rehearsal_id(sug_id)
                     if len(parts) == 5 and parts[4] == 'vote':
                         if method == 'POST':
-                            return self.api_vote_suggestion_id(sug_id)
+                            return self.api_vote_suggestion_id(sug_id, user)
                         if method == 'DELETE':
-                            return self.api_unvote_suggestion_id(sug_id)
+                            return self.api_unvote_suggestion_id(sug_id, user)
                         raise NotImplementedError
                     if method == 'PUT':
                         return self.api_update_suggestion_id(sug_id, body, user)
@@ -685,6 +707,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     return self.api_get_settings()
                 if method == 'PUT':
                     return self.api_update_settings(body, user)
+                raise NotImplementedError
+
+            # Logs
+            if path == '/api/logs':
+                if not user or user.get('role') != 'admin':
+                    raise PermissionError
+                if method == 'GET':
+                    return self.api_get_logs()
                 raise NotImplementedError
 
             # Users management (admin only)
@@ -793,6 +823,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # representation.
         token = generate_session(row['id'])
         expires_ts = int(time.time()) + 7 * 24 * 3600
+        log_event(row['id'], 'login', {'username': row['username']})
         send_json(
             self,
             HTTPStatus.OK,
@@ -917,6 +948,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         if deleted:
+            log_event(user['id'], 'delete', {'entity': 'suggestion', 'id': sug_id})
             send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
@@ -1070,6 +1102,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         if updated:
+            log_event(user['id'], 'edit', {'entity': 'performance', 'id': perf_id})
             send_json(self, HTTPStatus.OK, {'message': 'Updated'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
@@ -1100,7 +1133,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
 
-    def api_vote_suggestion_id(self, sug_id: int):
+    def api_vote_suggestion_id(self, sug_id: int, user: dict):
         """Increment likes for a suggestion and return the updated row."""
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1129,11 +1162,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'createdAt': row['created_at'],
                 'likes': row['likes'],
             }
+            log_event(user['id'], 'vote', {'suggestionId': sug_id})
             send_json(self, HTTPStatus.OK, result)
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
-    def api_unvote_suggestion_id(self, sug_id: int):
+    def api_unvote_suggestion_id(self, sug_id: int, user: dict):
         """Decrement likes for a suggestion and return the updated row."""
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1167,6 +1201,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'createdAt': row['created_at'],
                 'likes': row['likes'],
             }
+            log_event(user['id'], 'unvote', {'suggestionId': sug_id})
             send_json(self, HTTPStatus.OK, result)
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
@@ -1195,6 +1230,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if updated:
             conn.commit()
             conn.close()
+            log_event(user['id'], 'edit', {'entity': 'suggestion', 'id': sug_id})
             send_json(self, HTTPStatus.OK, {'message': 'Updated'})
         else:
             # Determine if the suggestion exists
@@ -1300,6 +1336,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         if updated_metadata or updated_levels_notes_audio:
+            log_event(user['id'], 'edit', {'entity': 'rehearsal', 'id': rehearsal_id})
             send_json(self, HTTPStatus.OK, {'message': 'Updated'})
         else:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing was updated'})
@@ -1416,6 +1453,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         if deleted:
+            log_event(user['id'], 'delete', {'entity': 'performance', 'id': perf_id})
             send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
@@ -1457,6 +1495,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         if deleted:
+            log_event(user['id'], 'delete', {'entity': 'rehearsal', 'id': rehearsal_id})
             send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found or not owned'})
@@ -1477,9 +1516,32 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         if deleted:
+            log_event(user['id'], 'delete', {'entity': 'performance', 'id': perf_id})
             send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+
+    def api_get_logs(self):
+        """Return recent log entries."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            '''SELECT l.id, l.timestamp, l.user_id, u.username, l.action, l.metadata
+               FROM logs l LEFT JOIN users u ON u.id = l.user_id
+               ORDER BY l.timestamp DESC LIMIT 100'''
+        )
+        rows = []
+        for row in cur.fetchall():
+            rows.append({
+                'id': row['id'],
+                'timestamp': row['timestamp'],
+                'userId': row['user_id'],
+                'username': row['username'],
+                'action': row['action'],
+                'metadata': json.loads(row['metadata'] or '{}'),
+            })
+        conn.close()
+        send_json(self, HTTPStatus.OK, rows)
 
     def api_get_settings(self):
         conn = get_db_connection()
@@ -1564,6 +1626,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         if updated:
+            log_event(current_user['id'], 'role_change', {'targetUserId': uid, 'newRole': role})
             send_json(self, HTTPStatus.OK, {'message': 'User updated'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})

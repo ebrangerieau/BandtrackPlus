@@ -127,6 +127,7 @@ app.post('/api/login', async (req, res) => {
     req.session.username = user.username;
     req.session.role = user.role;
     req.session.webauthn = false;
+    await db.logEvent(user.id, 'login', { username: user.username });
     res.json({ id: user.id, username: user.username, role: user.role });
   } catch (err) {
     console.error(err);
@@ -267,6 +268,7 @@ app.put('/api/suggestions/:id', requireAuth, async (req, res) => {
     }
     const list = await db.getSuggestions();
     const updated = list.find((s) => s.id === id);
+    await db.logEvent(req.session.userId, 'edit', { entity: 'suggestion', id });
     res.json(updated);
   } catch (err) {
     console.error(err);
@@ -283,6 +285,7 @@ app.delete('/api/suggestions/:id', requireAuth, async (req, res) => {
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to delete' });
     }
+    await db.logEvent(req.session.userId, 'delete', { entity: 'suggestion', id });
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -297,6 +300,7 @@ app.post('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
   try {
     const ok = await db.incrementSuggestionLikes(id, req.session.userId);
     if (!ok) return res.status(404).json({ error: 'Suggestion not found' });
+    await db.logEvent(req.session.userId, 'vote', { suggestionId: id });
     const list = await db.getSuggestions();
     const updated = list.find((s) => s.id === id);
     res.json(updated);
@@ -313,6 +317,7 @@ app.delete('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
   try {
     const ok = await db.decrementUserSuggestionLikes(id, req.session.userId);
     if (!ok) return res.status(400).json({ error: 'No vote to remove' });
+    await db.logEvent(req.session.userId, 'unvote', { suggestionId: id });
     const list = await db.getSuggestions();
     const updated = list.find((s) => s.id === id);
     res.json(updated);
@@ -375,6 +380,7 @@ app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
     // Return updated rehearsal data
     const rehearsals = await db.getRehearsals();
     const updated = rehearsals.find((r) => r.id === id);
+    await db.logEvent(req.session.userId, 'edit', { entity: 'rehearsal', id });
     res.json(updated);
   } catch (err) {
     console.error(err);
@@ -470,6 +476,7 @@ app.put('/api/performances/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Not permitted to update' });
     }
     const updated = await db.getPerformance(id);
+    await db.logEvent(req.session.userId, 'edit', { entity: 'performance', id });
     res.json(updated);
   } catch (err) {
     console.error(err);
@@ -486,6 +493,7 @@ app.delete('/api/performances/:id', requireAuth, requireBiometric, async (req, r
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to delete' });
     }
+    await db.logEvent(req.session.userId, 'delete', { entity: 'performance', id });
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -554,10 +562,25 @@ app.put('/api/users/:id', requireAuth, requireBiometric, async (req, res) => {
   try {
     const changes = await db.updateUserRole(id, role);
     if (changes === 0) return res.status(404).json({ error: 'User not found' });
+    await db.logEvent(req.session.userId, 'role_change', { targetUserId: id, newRole: role });
     res.json({ success: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+// Retrieve audit logs (admin only)
+app.get('/api/logs', requireAuth, async (req, res) => {
+  if (req.session.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const logs = await db.getLogs();
+    res.json(logs);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch logs' });
   }
 });
 
