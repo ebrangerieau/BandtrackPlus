@@ -47,6 +47,16 @@ function init() {
     }
   });
 
+  // WebAuthn credentials associated with users
+  db.run(
+    `CREATE TABLE IF NOT EXISTS users_webauthn (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      credential_id TEXT NOT NULL UNIQUE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );`
+  );
+
   // Suggestions: simple list of song suggestions with an optional URL and
   // the user who created it.  Each suggestion also stores a number of likes
   // used to rank the items.
@@ -199,6 +209,66 @@ function getUserByUsername(username) {
     db.get(
       'SELECT id, username, password_hash, salt, role FROM users WHERE username = ?',
       [username],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves a user by ID. Returns id, username and role.
+ */
+function getUserById(id) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT id, username, role FROM users WHERE id = ?',
+      [id],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      }
+    );
+  });
+}
+
+/**
+ * Stores a WebAuthn credential for a user.
+ */
+function addWebAuthnCredential(userId, credentialId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'INSERT INTO users_webauthn (user_id, credential_id) VALUES (?, ?)',
+      [userId, credentialId],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      }
+    );
+  });
+}
+
+/**
+ * Returns all WebAuthn credentials for a user.
+ */
+function getWebAuthnCredentials(userId) {
+  return new Promise((resolve, reject) => {
+    db.all('SELECT credential_id FROM users_webauthn WHERE user_id = ?', [userId], (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows || []);
+    });
+  });
+}
+
+/**
+ * Retrieves a WebAuthn credential by its id.
+ */
+function getWebAuthnCredentialById(credentialId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT user_id, credential_id FROM users_webauthn WHERE credential_id = ?',
+      [credentialId],
       (err, row) => {
         if (err) reject(err);
         else resolve(row);
@@ -760,6 +830,10 @@ module.exports = {
   createUser,
   getUserCount,
   getUserByUsername,
+  getUserById,
+  addWebAuthnCredential,
+  getWebAuthnCredentials,
+  getWebAuthnCredentialById,
   getUsers,
   updateUserRole,
   createSuggestion,

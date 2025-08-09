@@ -23,6 +23,9 @@
   // Cache des répétitions pour éviter de relancer trop souvent la requête
   let rehearsalsCache = [];
 
+  // Indique si la vérification biométrique a été effectuée
+  let webAuthnVerified = false;
+
   function hasModRights() {
     return currentUser && (currentUser.role === 'admin' || currentUser.role === 'moderator');
   }
@@ -65,6 +68,15 @@
       throw new Error((json && json.error) || 'Erreur API');
     }
     return json;
+  }
+
+  // Déclenche une authentification WebAuthn si nécessaire
+  async function ensureBiometric() {
+    if (webAuthnVerified || !currentUser) return;
+    const opts = await api('/webauthn/login', 'POST', { username: currentUser.username });
+    const cred = await SimpleWebAuthnBrowser.startAuthentication(opts);
+    await api('/webauthn/login', 'POST', cred);
+    webAuthnVerified = true;
   }
 
   /**
@@ -199,6 +211,32 @@
       submitBtn.style.marginTop = '20px';
       submitBtn.textContent = isRegister ? 'S’inscrire' : 'Se connecter';
       form.appendChild(submitBtn);
+      if (!isRegister) {
+        const bioBtn = document.createElement('button');
+        bioBtn.type = 'button';
+        bioBtn.className = 'btn-secondary';
+        bioBtn.style.marginTop = '10px';
+        bioBtn.textContent = 'Connexion biométrique';
+        bioBtn.onclick = async () => {
+          const username = inputUser.value.trim();
+          if (!username) {
+            errorDiv.textContent = 'Veuillez saisir un nom d\u2019utilisateur';
+            return;
+          }
+          try {
+            const opts = await api('/webauthn/login', 'POST', { username });
+            const cred = await SimpleWebAuthnBrowser.startAuthentication(opts);
+            const user = await api('/webauthn/login', 'POST', cred);
+            currentUser = user;
+            await checkSession();
+            webAuthnVerified = true;
+            renderApp();
+          } catch (err) {
+            errorDiv.textContent = err.message;
+          }
+        };
+        form.appendChild(bioBtn);
+      }
       // Lien pour basculer
       const toggle = document.createElement('a');
       toggle.className = 'link';
@@ -230,6 +268,7 @@
           // Après l’inscription, récupère la session pour obtenir
           // l’identifiant et le nom d’utilisateur normalisé.
           await checkSession();
+          webAuthnVerified = false;
           currentPage = 'home';
           renderMain(app);
         } catch (err) {
@@ -248,6 +287,7 @@
           // Après la connexion, interroge le serveur pour récupérer
           // l’utilisateur courant et appliquer le thème.
           await checkSession();
+          webAuthnVerified = false;
           currentPage = 'home';
           renderMain(app);
         } catch (err) {
@@ -1186,6 +1226,7 @@
             e.stopPropagation();
             if (!confirm('Supprimer cette prestation ?')) return;
             try {
+              await ensureBiometric();
               await api(`/performances/${perf.id}`, 'DELETE');
               renderPerformances(container);
             } catch (err) {
@@ -1840,6 +1881,24 @@
     templateDiv.appendChild(templateLabel);
     templateDiv.appendChild(templateSelect);
     container.appendChild(templateDiv);
+
+    // Configuration WebAuthn
+    const webAuthnBtn = document.createElement('button');
+    webAuthnBtn.className = 'btn-secondary';
+    webAuthnBtn.style.marginTop = '20px';
+    webAuthnBtn.textContent = 'Configurer la biométrie';
+    webAuthnBtn.onclick = async () => {
+      try {
+        const opts = await api('/webauthn/register', 'POST');
+        const att = await SimpleWebAuthnBrowser.startRegistration(opts);
+        await api('/webauthn/verify-register', 'POST', att);
+        webAuthnVerified = true;
+        alert('Clé enregistrée');
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    container.appendChild(webAuthnBtn);
     // Déconnexion
     const logoutBtn = document.createElement('button');
     logoutBtn.className = 'logout-btn';
@@ -1848,6 +1907,7 @@
       try {
         await api('/logout', 'POST');
         currentUser = null;
+        webAuthnVerified = false;
         renderApp();
       } catch (err) {
         alert(err.message);
@@ -1899,6 +1959,7 @@
         saveBtn.textContent = 'Enregistrer les rôles';
         saveBtn.onclick = async () => {
           try {
+            await ensureBiometric();
             const updates = [];
             tbody.querySelectorAll('select').forEach((sel) => {
               const uid = Number(sel.dataset.userId);
