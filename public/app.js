@@ -23,6 +23,13 @@
   // Cache des répétitions pour éviter de relancer trop souvent la requête
   let rehearsalsCache = [];
 
+  function hasModRights() {
+    return currentUser && (currentUser.role === 'admin' || currentUser.role === 'moderator');
+  }
+  function isAdmin() {
+    return currentUser && currentUser.role === 'admin';
+  }
+
   /**
    * Effectue une requête vers l’API.  Ajoute systématiquement le préfixe
    * `/api` et passe l’option `credentials: 'same-origin'` pour que les
@@ -443,7 +450,7 @@
       addedBy.style.color = 'var(--text-color)';
       addedBy.textContent = `Ajouté par ${item.creator}`;
       details.appendChild(addedBy);
-      if (currentUser && (currentUser.isAdmin || item.creatorId === currentUser.id || item.creator === currentUser.username)) {
+      if (currentUser && (hasModRights() || item.creatorId === currentUser.id || item.creator === currentUser.username)) {
         const actions = document.createElement('div');
         actions.className = 'actions';
         const editBtn = document.createElement('button');
@@ -852,7 +859,7 @@
         details.appendChild(othersDiv);
       }
       // Actions (edit/delete) for creator or admin
-      if (currentUser && (currentUser.isAdmin || currentUser.id === song.creatorId)) {
+      if (currentUser && (hasModRights() || currentUser.id === song.creatorId)) {
         const actions = document.createElement('div');
         actions.className = 'actions';
         // Edit button
@@ -1161,7 +1168,7 @@
           });
           details.appendChild(ul);
         }
-        if (currentUser && (currentUser.isAdmin || currentUser.id === perf.creatorId)) {
+        if (currentUser && (hasModRights() || currentUser.id === perf.creatorId)) {
           const actions = document.createElement('div');
           actions.className = 'actions';
           const editBtn = document.createElement('button');
@@ -1849,10 +1856,9 @@
     container.appendChild(logoutBtn);
 
     // Gestion des utilisateurs (visible uniquement pour les administrateurs)
-    if (currentUser && currentUser.isAdmin) {
+    if (isAdmin()) {
       try {
         const users = await api('/users');
-        // Titre de section
         const adminHeader = document.createElement('h3');
         adminHeader.style.marginTop = '30px';
         adminHeader.textContent = 'Gestion des utilisateurs';
@@ -1860,33 +1866,33 @@
         const table = document.createElement('table');
         table.className = 'user-table';
         const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th>Utilisateur</th><th>Administrateur</th></tr>';
+        thead.innerHTML = '<tr><th>Utilisateur</th><th>Rôle</th></tr>';
         table.appendChild(thead);
         const tbody = document.createElement('tbody');
-        // Stocker l’état initial pour détecter les changements
         const initialState = {};
         users.forEach((u) => {
-          initialState[u.id] = u.isAdmin;
+          initialState[u.id] = u.role;
           const tr = document.createElement('tr');
           const nameTd = document.createElement('td');
           nameTd.textContent = u.username;
-          const adminTd = document.createElement('td');
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.checked = u.isAdmin;
-          // Disable checkbox for current user to prevent self-demotion
-          if (u.id === currentUser.id) {
-            checkbox.disabled = true;
-          }
-          checkbox.dataset.userId = u.id;
-          adminTd.appendChild(checkbox);
+          const roleTd = document.createElement('td');
+          const select = document.createElement('select');
+          ['user', 'moderator', 'admin'].forEach((r) => {
+            const opt = document.createElement('option');
+            opt.value = r;
+            opt.textContent = r;
+            if (u.role === r) opt.selected = true;
+            select.appendChild(opt);
+          });
+          if (u.id === currentUser.id) select.disabled = true;
+          select.dataset.userId = u.id;
+          roleTd.appendChild(select);
           tr.appendChild(nameTd);
-          tr.appendChild(adminTd);
+          tr.appendChild(roleTd);
           tbody.appendChild(tr);
         });
         table.appendChild(tbody);
         container.appendChild(table);
-        // Bouton enregistrer
         const saveBtn = document.createElement('button');
         saveBtn.className = 'btn-primary';
         saveBtn.style.marginTop = '10px';
@@ -1894,18 +1900,17 @@
         saveBtn.onclick = async () => {
           try {
             const updates = [];
-            tbody.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-              const uid = Number(cb.dataset.userId);
-              const newVal = cb.checked;
+            tbody.querySelectorAll('select').forEach((sel) => {
+              const uid = Number(sel.dataset.userId);
+              const newVal = sel.value;
               if (initialState[uid] !== newVal) {
-                updates.push({ id: uid, isAdmin: newVal });
+                updates.push({ id: uid, role: newVal });
               }
             });
             for (const upd of updates) {
-              await api(`/users/${upd.id}`, 'PUT', { isAdmin: upd.isAdmin });
+              await api(`/users/${upd.id}`, 'PUT', { role: upd.role });
             }
             alert('Rôles mis à jour');
-            // Rafraîchir la page pour refléter les modifications
             renderSettings(container);
           } catch (err) {
             alert(err.message);
