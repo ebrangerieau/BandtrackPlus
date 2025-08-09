@@ -102,7 +102,7 @@ def init_db():
                username TEXT NOT NULL UNIQUE,
                salt BLOB NOT NULL,
                password_hash BLOB NOT NULL,
-               is_admin INTEGER NOT NULL DEFAULT 0
+               role TEXT NOT NULL DEFAULT 'user'
            );'''
     )
     # Suggestions: simple list of suggestions with optional URL and creator
@@ -184,14 +184,14 @@ def init_db():
 
     # Ensure additional columns are present in existing databases.  SQLite
     # will raise an OperationalError if a column already exists; we
-    # silently ignore such errors.  Users table: is_admin
+    # silently ignore such errors.  Users table: role
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('PRAGMA table_info(users)')
         columns = [row['name'] for row in cur.fetchall()]
-        if 'is_admin' not in columns:
-            cur.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0')
+        if 'role' not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
             conn.commit()
         conn.close()
     except Exception:
@@ -310,9 +310,9 @@ def get_user_by_session(token: str) -> dict | None:
         'UPDATE sessions SET expires_at = ? WHERE token = ?',
         (new_expires, token)
     )
-    # Fetch the user along with admin flag
+    # Fetch the user along with their role
     cur.execute(
-        'SELECT id, username, is_admin FROM users WHERE id = ?',
+        'SELECT id, username, role FROM users WHERE id = ?',
         (user_id,)
     )
     user_row = cur.fetchone()
@@ -322,7 +322,7 @@ def get_user_by_session(token: str) -> dict | None:
         return {
             'id': user_row['id'],
             'username': user_row['username'],
-            'is_admin': bool(user_row['is_admin']),
+            'role': user_row['role'],
         }
     return None
 
@@ -646,7 +646,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         reh_id = int(parts[3])
                     except ValueError:
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    return self.api_toggle_rehearsal_mastered(reh_id)
+                    return self.api_toggle_rehearsal_mastered(reh_id, user)
                 if len(parts) == 5 and parts[4] == 'to-suggestion' and method == 'POST':
                     try:
                         reh_id = int(parts[3])
@@ -690,7 +690,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             # Users management (admin only)
             if path.startswith('/api/users'):
                 # Ensure user is authenticated and admin
-                if not user or not user.get('is_admin'):
+                if not user or user.get('role') != 'admin':
                     raise PermissionError
                 parts = path.split('/')
                 # GET /api/users
@@ -743,14 +743,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             conn.close()
             send_json(self, HTTPStatus.CONFLICT, {'error': 'User already exists'})
             return
-        # Determine if this is the first user; if so, grant admin rights
+        # Determine if this is the first user; if so, assign admin role
         cur.execute('SELECT COUNT(*) FROM users')
         count = cur.fetchone()[0]
-        is_admin = 1 if count == 0 else 0
+        role = 'admin' if count == 0 else 'user'
         salt, pwd_hash = hash_password(password)
         cur.execute(
-            'INSERT INTO users (username, salt, password_hash, is_admin) VALUES (?, ?, ?, ?)',
-            (username, salt, pwd_hash, is_admin)
+            'INSERT INTO users (username, salt, password_hash, role) VALUES (?, ?, ?, ?)',
+            (username, salt, pwd_hash, role)
         )
         conn.commit()
         conn.close()
@@ -765,7 +765,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         # Perform a case‑insensitive lookup for the username
-        cur.execute('SELECT id, username, salt, password_hash, is_admin FROM users WHERE LOWER(username) = LOWER(?)', (username,))
+        cur.execute('SELECT id, username, salt, password_hash, role FROM users WHERE LOWER(username) = LOWER(?)', (username,))
         row = cur.fetchone()
         conn.close()
         if not row:
@@ -791,7 +791,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'user': {
                     'id': row['id'],
                     'username': row['username'],
-                    'isAdmin': bool(row['is_admin']),
+                    'role': row['role'],
+                    'isAdmin': row['role'] == 'admin',
                 },
             },
             cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
@@ -816,7 +817,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         send_json(self, HTTPStatus.OK, {
             'id': user['id'],
             'username': user['username'],
-            'isAdmin': bool(user.get('is_admin')),
+            'role': user.get('role'),
+            'isAdmin': user.get('role') == 'admin',
         })
 
     def api_get_suggestions(self):
@@ -897,7 +899,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         conn = get_db_connection()
         cur = conn.cursor()
-        if user.get('is_admin'):
+        if user.get('role') in ('admin', 'moderator'):
             cur.execute('DELETE FROM suggestions WHERE id = ?', (sug_id,))
         else:
             cur.execute('DELETE FROM suggestions WHERE id = ? AND creator_id = ?', (sug_id, user['id']))
@@ -1043,8 +1045,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         conn = get_db_connection()
         cur = conn.cursor()
-        # Allow update if current user is creator or an admin
-        if user.get('is_admin'):
+        # Allow update if current user is creator or has moderator/administrator role
+        if user.get('role') in ('admin', 'moderator'):
             cur.execute(
                 'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ?',
                 (name, date, json.dumps(songs_list), perf_id)
@@ -1075,8 +1077,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         does not exist or the user lacks the necessary privileges."""
         conn = get_db_connection()
         cur = conn.cursor()
-        # Allow deletion if the user is the creator OR an admin
-        if user.get('is_admin'):
+        # Allow deletion if the user is the creator OR has moderator/administrator role
+        if user.get('role') in ('admin', 'moderator'):
             cur.execute('DELETE FROM suggestions WHERE id = ?', (sug_id,))
         else:
             cur.execute('DELETE FROM suggestions WHERE id = ? AND creator_id = ?', (sug_id, user['id']))
@@ -1169,7 +1171,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         conn = get_db_connection()
         cur = conn.cursor()
-        if user.get('is_admin'):
+        if user.get('role') in ('admin', 'moderator'):
             cur.execute(
                 'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ? WHERE id = ?',
                 (title, author, youtube, youtube, sug_id),
@@ -1180,12 +1182,20 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 (title, author, youtube, youtube, sug_id, user['id']),
             )
         updated = cur.rowcount
-        conn.commit()
-        conn.close()
         if updated:
+            conn.commit()
+            conn.close()
             send_json(self, HTTPStatus.OK, {'message': 'Updated'})
         else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
+            # Determine if the suggestion exists
+            cur.execute('SELECT 1 FROM suggestions WHERE id = ?', (sug_id,))
+            exists = cur.fetchone()
+            conn.commit()
+            conn.close()
+            if exists:
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
     def api_update_rehearsal_id(self, rehearsal_id: int, body: dict, user: dict):
         """Update a rehearsal by ID.  This method handles two scenarios:
@@ -1229,8 +1239,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         updated_metadata = False
         # Check if we need to update metadata
         if any(v is not None for v in (title, author, youtube, spotify)):
-            # Only creator or admin can modify metadata
-            if not (user.get('is_admin') or user['id'] == row['creator_id']):
+            # Only creator, moderator or admin can modify metadata
+            if not (user.get('role') in ('admin', 'moderator') or user['id'] == row['creator_id']):
                 conn.close()
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal details'})
                 return
@@ -1284,15 +1294,18 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         else:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing was updated'})
 
-    def api_toggle_rehearsal_mastered(self, rehearsal_id: int):
+    def api_toggle_rehearsal_mastered(self, rehearsal_id: int, user: dict):
         """Toggle the mastered flag for a rehearsal."""
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT mastered FROM rehearsals WHERE id = ?', (rehearsal_id,))
+        cur.execute('SELECT mastered, creator_id FROM rehearsals WHERE id = ?', (rehearsal_id,))
         row = cur.fetchone()
         if not row:
             conn.close()
             return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+        if not (user.get('role') in ('admin', 'moderator') or user['id'] == row['creator_id']):
+            conn.close()
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal'})
         new_val = 0 if row['mastered'] else 1
         cur.execute('UPDATE rehearsals SET mastered = ? WHERE id = ?', (new_val, rehearsal_id))
         conn.commit()
@@ -1361,8 +1374,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         conn = get_db_connection()
         cur = conn.cursor()
-        # Allow update if user is creator or admin
-        if user.get('is_admin'):
+        # Allow update if user is creator or has moderator/administrator role
+        if user.get('role') in ('admin', 'moderator'):
             cur.execute(
                 'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ?',
                 (name, date, json.dumps(songs_list), perf_id)
@@ -1385,7 +1398,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         creator or by an administrator."""
         conn = get_db_connection()
         cur = conn.cursor()
-        if user.get('is_admin'):
+        if user.get('role') in ('admin', 'moderator'):
             cur.execute('DELETE FROM performances WHERE id = ?', (perf_id,))
         else:
             cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ?', (perf_id, user['id']))
@@ -1414,7 +1427,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
             return
         creator_id = row['creator_id']
-        if not (user.get('is_admin') or user['id'] == creator_id):
+        if not (user.get('role') in ('admin', 'moderator') or user['id'] == creator_id):
             conn.close()
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to delete rehearsal'})
             return
@@ -1511,33 +1524,32 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         only to administrators."""
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT id, username, is_admin FROM users ORDER BY username ASC')
+        cur.execute('SELECT id, username, role FROM users ORDER BY username ASC')
         users = []
         for row in cur.fetchall():
             users.append({
                 'id': row['id'],
                 'username': row['username'],
-                'isAdmin': bool(row['is_admin']),
+                'role': row['role'],
             })
         conn.close()
         send_json(self, HTTPStatus.OK, users)
 
     def api_update_user_id(self, uid: int, body: dict, current_user: dict):
-        """Update a user's admin status.  Only administrators can call this
-        endpoint.  The body should contain ``isAdmin`` (boolean).  An
-        administrator cannot demote themselves to avoid accidental
-        lockouts."""
-        if 'isAdmin' not in body:
-            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'isAdmin is required'})
+        """Update a user's role.  Only administrators can call this
+        endpoint.  The body should contain ``role`` (user, moderator or
+        admin).  Administrators cannot demote themselves to avoid
+        accidental lockouts."""
+        role = body.get('role')
+        if role not in ('user', 'moderator', 'admin'):
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid role'})
             return
-        is_admin_val = 1 if bool(body.get('isAdmin')) else 0
-        # Prevent administrators from removing their own admin rights
-        if uid == current_user['id'] and is_admin_val == 0:
-            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Cannot demote yourself'})
+        if uid == current_user['id'] and role != 'admin':
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Cannot change your own admin role'})
             return
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('UPDATE users SET is_admin = ? WHERE id = ?', (is_admin_val, uid))
+        cur.execute('UPDATE users SET role = ? WHERE id = ?', (role, uid))
         updated = cur.rowcount
         conn.commit()
         conn.close()

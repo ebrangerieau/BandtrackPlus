@@ -124,3 +124,47 @@ def test_rehearsals_crud(tmp_path):
         assert json.loads(body) == []
     finally:
         stop_test_server(httpd, thread)
+
+
+def test_roles_and_permissions(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        # Register and login admin (first user)
+        request("POST", port, "/api/register", {"username": "admin", "password": "pw"})
+        status, headers, body = request("POST", port, "/api/login", {"username": "admin", "password": "pw"})
+        cookie_admin = extract_cookie(headers)
+        headers_admin = {"Cookie": cookie_admin}
+        status, _, body = request("GET", port, "/api/me", headers=headers_admin)
+        assert json.loads(body)["role"] == "admin"
+
+        # Admin creates a suggestion
+        status, _, body = request("POST", port, "/api/suggestions", {"title": "Song"}, headers_admin)
+        sug_id = json.loads(body)["id"]
+
+        # Register and login second user (bob)
+        request("POST", port, "/api/register", {"username": "bob", "password": "pw"})
+        status, headers, _ = request("POST", port, "/api/login", {"username": "bob", "password": "pw"})
+        cookie_bob = extract_cookie(headers)
+        headers_bob = {"Cookie": cookie_bob}
+        status, _, body = request("GET", port, "/api/me", headers=headers_bob)
+        bob_id = json.loads(body)["id"]
+        assert json.loads(body)["role"] == "user"
+
+        # Register third user (charlie)
+        request("POST", port, "/api/register", {"username": "charlie", "password": "pw"})
+        status, headers, _ = request("POST", port, "/api/login", {"username": "charlie", "password": "pw"})
+        cookie_charlie = extract_cookie(headers)
+        headers_charlie = {"Cookie": cookie_charlie}
+
+        # Promote bob to moderator
+        request("PUT", port, f"/api/users/{bob_id}", {"role": "moderator"}, headers_admin)
+
+        # Charlie (user) cannot edit admin's suggestion
+        status, _, _ = request("PUT", port, f"/api/suggestions/{sug_id}", {"title": "X"}, headers_charlie)
+        assert status == 403
+
+        # Bob (moderator) can edit admin's suggestion
+        status, _, _ = request("PUT", port, f"/api/suggestions/{sug_id}", {"title": "Y"}, headers_bob)
+        assert status == 200
+    finally:
+        stop_test_server(httpd, thread)

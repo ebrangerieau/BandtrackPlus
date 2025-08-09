@@ -30,14 +30,20 @@ function init() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
-      salt TEXT NOT NULL
+      salt TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user'
     );`
   );
 
-  // Ensure salt column exists on existing databases
+  // Ensure salt and role columns exist on existing databases
   db.all('PRAGMA table_info(users)', (err, rows) => {
-    if (!err && rows && !rows.find((r) => r.name === 'salt')) {
-      db.run('ALTER TABLE users ADD COLUMN salt TEXT');
+    if (!err && rows) {
+      if (!rows.find((r) => r.name === 'salt')) {
+        db.run('ALTER TABLE users ADD COLUMN salt TEXT');
+      }
+      if (!rows.find((r) => r.name === 'role')) {
+        db.run("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+      }
     }
   });
 
@@ -158,16 +164,28 @@ function init() {
  * @param {string} passwordHash
  * @param {string} salt
  */
-function createUser(username, passwordHash, salt) {
+function createUser(username, passwordHash, salt, role = 'user') {
   return new Promise((resolve, reject) => {
     const stmt = db.prepare(
-      'INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)',
+      'INSERT INTO users (username, password_hash, salt, role) VALUES (?, ?, ?, ?)',
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
       }
     );
-    stmt.run(username, passwordHash, salt);
+    stmt.run(username, passwordHash, salt, role);
+  });
+}
+
+/**
+ * Returns the total number of users in the database.
+ */
+function getUserCount() {
+  return new Promise((resolve, reject) => {
+    db.get('SELECT COUNT(*) as count FROM users', (err, row) => {
+      if (err) reject(err);
+      else resolve(row.count);
+    });
   });
 }
 
@@ -179,13 +197,38 @@ function createUser(username, passwordHash, salt) {
 function getUserByUsername(username) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT id, username, password_hash, salt FROM users WHERE username = ?',
+      'SELECT id, username, password_hash, salt, role FROM users WHERE username = ?',
       [username],
       (err, row) => {
         if (err) reject(err);
         else resolve(row);
       }
     );
+  });
+}
+
+/**
+ * Retrieves all users with their roles.
+ */
+function getUsers() {
+  return new Promise((resolve, reject) => {
+    db.all('SELECT id, username, role FROM users ORDER BY username ASC', (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
+
+/**
+ * Updates the role of a user identified by id. Resolves with the number of
+ * affected rows (0 or 1).
+ */
+function updateUserRole(id, role) {
+  return new Promise((resolve, reject) => {
+    db.run('UPDATE users SET role = ? WHERE id = ?', [role, id], function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
   });
 }
 
@@ -227,16 +270,16 @@ function getSuggestions() {
  * Deletes a suggestion if the given user is the creator.  Returns the number
  * of rows deleted.
  */
-function deleteSuggestion(id, userId) {
+function deleteSuggestion(id, userId, role) {
   return new Promise((resolve, reject) => {
-    db.run(
-      'DELETE FROM suggestions WHERE id = ? AND creator_id = ?',
-      [id, userId],
-      function (err) {
-        if (err) reject(err);
-        else resolve(this.changes);
-      }
-    );
+    const sql = role === 'admin' || role === 'moderator'
+      ? 'DELETE FROM suggestions WHERE id = ?'
+      : 'DELETE FROM suggestions WHERE id = ? AND creator_id = ?';
+    const params = role === 'admin' || role === 'moderator' ? [id] : [id, userId];
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
   });
 }
 
@@ -244,16 +287,18 @@ function deleteSuggestion(id, userId) {
  * Updates a suggestion title and URL if the user is the creator.
  * Resolves with the number of updated rows (0 or 1).
  */
-function updateSuggestion(id, title, url, userId) {
+function updateSuggestion(id, title, url, userId, role) {
   return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE suggestions SET title = ?, url = ? WHERE id = ? AND creator_id = ?',
-      [title, url, id, userId],
-      function (err) {
-        if (err) reject(err);
-        else resolve(this.changes);
-      }
-    );
+    const sql = role === 'admin' || role === 'moderator'
+      ? 'UPDATE suggestions SET title = ?, url = ? WHERE id = ?'
+      : 'UPDATE suggestions SET title = ?, url = ? WHERE id = ? AND creator_id = ?';
+    const params = role === 'admin' || role === 'moderator'
+      ? [title, url, id]
+      : [title, url, id, userId];
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
   });
 }
 
@@ -552,16 +597,18 @@ function getPerformance(id) {
  * permitted if the requesting user is the creator.  Resolves with the number
  * of updated rows (0 or 1).
  */
-function updatePerformance(id, name, date, songs, userId) {
+function updatePerformance(id, name, date, songs, userId, role) {
   return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND creator_id = ?',
-      [name, date, JSON.stringify(songs || []), id, userId],
-      function (err) {
-        if (err) reject(err);
-        else resolve(this.changes);
-      }
-    );
+    const sql = role === 'admin' || role === 'moderator'
+      ? 'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ?'
+      : 'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND creator_id = ?';
+    const params = role === 'admin' || role === 'moderator'
+      ? [name, date, JSON.stringify(songs || []), id]
+      : [name, date, JSON.stringify(songs || []), id, userId];
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
   });
 }
 
@@ -569,16 +616,16 @@ function updatePerformance(id, name, date, songs, userId) {
  * Deletes a performance if the user is the creator.  Returns number of rows
  * deleted.
  */
-function deletePerformance(id, userId) {
+function deletePerformance(id, userId, role) {
   return new Promise((resolve, reject) => {
-  db.run(
-      'DELETE FROM performances WHERE id = ? AND creator_id = ?',
-      [id, userId],
-      function (err) {
-        if (err) reject(err);
-        else resolve(this.changes);
-      }
-    );
+    const sql = role === 'admin' || role === 'moderator'
+      ? 'DELETE FROM performances WHERE id = ?'
+      : 'DELETE FROM performances WHERE id = ? AND creator_id = ?';
+    const params = role === 'admin' || role === 'moderator' ? [id] : [id, userId];
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
   });
 }
 
@@ -711,7 +758,10 @@ function updateSettings({ groupName, darkMode, nextRehearsalDate, nextRehearsalL
 module.exports = {
   init,
   createUser,
+  getUserCount,
   getUserByUsername,
+  getUsers,
+  updateUserRole,
   createSuggestion,
   getSuggestions,
   deleteSuggestion,

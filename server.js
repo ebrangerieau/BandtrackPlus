@@ -49,7 +49,11 @@ function requireAuth(req, res, next) {
  * Helper to send the current user's info (username and id) in responses.
  */
 function currentUser(req) {
-  return { id: req.session.userId, username: req.session.username };
+  return { id: req.session.userId, username: req.session.username, role: req.session.role };
+}
+
+function hasModRights(req) {
+  return req.session.role === 'admin' || req.session.role === 'moderator';
 }
 
 // ----------------- Authentication Routes -----------------
@@ -70,11 +74,14 @@ app.post('/api/register', async (req, res) => {
     const salt = crypto.randomBytes(16).toString('hex');
     const derived = await pbkdf2(password, salt, 310000, 32, 'sha256');
     const hash = derived.toString('hex');
-    const userId = await db.createUser(username, hash, salt);
+    const count = await db.getUserCount();
+    const role = count === 0 ? 'admin' : 'user';
+    const userId = await db.createUser(username, hash, salt, role);
     // Set session
     req.session.userId = userId;
     req.session.username = username;
-    res.json({ id: userId, username });
+    req.session.role = role;
+    res.json({ id: userId, username, role });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Registration failed' });
@@ -99,7 +106,8 @@ app.post('/api/login', async (req, res) => {
     }
     req.session.userId = user.id;
     req.session.username = user.username;
-    res.json({ id: user.id, username: user.username });
+    req.session.role = user.role;
+    res.json({ id: user.id, username: user.username, role: user.role });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Login failed' });
@@ -118,7 +126,7 @@ app.get('/api/me', (req, res) => {
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
-  res.json({ id: req.session.userId, username: req.session.username });
+  res.json({ id: req.session.userId, username: req.session.username, role: req.session.role });
 });
 
 // ----------------- Suggestion Routes -----------------
@@ -160,7 +168,7 @@ app.put('/api/suggestions/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Invalid data' });
   }
   try {
-    const changes = await db.updateSuggestion(id, title, url || '', req.session.userId);
+    const changes = await db.updateSuggestion(id, title, url || '', req.session.userId, req.session.role);
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to update' });
     }
@@ -178,7 +186,7 @@ app.delete('/api/suggestions/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    const changes = await db.deleteSuggestion(id, req.session.userId);
+    const changes = await db.deleteSuggestion(id, req.session.userId, req.session.role);
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to delete' });
     }
@@ -286,8 +294,13 @@ app.put('/api/rehearsals/:id/mastered', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
+    const rehearsals = await db.getRehearsals();
+    const rehearsal = rehearsals.find((r) => r.id === id);
+    if (!rehearsal) return res.status(404).json({ error: 'Rehearsal not found' });
+    if (rehearsal.creatorId !== req.session.userId && !hasModRights(req)) {
+      return res.status(403).json({ error: 'Not permitted to toggle' });
+    }
     const updated = await db.toggleRehearsalMastered(id);
-    if (!updated) return res.status(404).json({ error: 'Rehearsal not found' });
     res.json(updated);
   } catch (err) {
     console.error(err);
@@ -359,7 +372,7 @@ app.put('/api/performances/:id', requireAuth, async (req, res) => {
   const { name, date, songs } = req.body;
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    const changes = await db.updatePerformance(id, name, date, songs || [], req.session.userId);
+    const changes = await db.updatePerformance(id, name, date, songs || [], req.session.userId, req.session.role);
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to update' });
     }
@@ -376,7 +389,7 @@ app.delete('/api/performances/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    const changes = await db.deletePerformance(id, req.session.userId);
+    const changes = await db.deletePerformance(id, req.session.userId, req.session.role);
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to delete' });
     }
@@ -415,6 +428,43 @@ app.put('/api/settings', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+// ----------------- User Management (Admin only) -----------------
+
+app.get('/api/users', requireAuth, async (req, res) => {
+  if (req.session.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const users = await db.getUsers();
+    res.json(users);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+app.put('/api/users/:id', requireAuth, async (req, res) => {
+  if (req.session.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const id = parseInt(req.params.id, 10);
+  const { role } = req.body;
+  if (isNaN(id) || !['user', 'moderator', 'admin'].includes(role)) {
+    return res.status(400).json({ error: 'Invalid data' });
+  }
+  if (id === req.session.userId && role !== 'admin') {
+    return res.status(400).json({ error: 'Cannot change your own admin role' });
+  }
+  try {
+    const changes = await db.updateUserRole(id, role);
+    if (changes === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update user' });
   }
 });
 
