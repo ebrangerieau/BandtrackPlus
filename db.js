@@ -190,6 +190,41 @@ function init() {
     }
   });
 
+  // Groups allow multiple band configurations. Each group has an invitation
+  // code and an owner.  These tables are new and therefore we simply attempt
+  // to create them on startup for backward compatibility.
+  db.run(
+    `CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      invitation_code TEXT NOT NULL UNIQUE,
+      description TEXT,
+      logo_url TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      owner_id INTEGER NOT NULL,
+      FOREIGN KEY (owner_id) REFERENCES users(id)
+    );`
+  );
+
+  db.run(
+    `CREATE TABLE IF NOT EXISTS memberships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      nickname TEXT,
+      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      active INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (group_id) REFERENCES groups(id)
+    );`
+  );
+
+  // Unique index for quick lookups of a user's membership in a group
+  db.run(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships(user_id, group_id)'
+  );
+
   // Logs: audit trail of key actions
   db.run(
     `CREATE TABLE IF NOT EXISTS logs (
@@ -833,6 +868,126 @@ function moveRehearsalToSuggestion(id) {
 }
 
 /**
+ * Creates a new group.
+ */
+function createGroup(name, invitationCode, description, logoUrl, ownerId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'INSERT INTO groups (name, invitation_code, description, logo_url, owner_id) VALUES (?, ?, ?, ?, ?)',
+      [name, invitationCode, description, logoUrl, ownerId],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves a group by ID.
+ */
+function getGroupById(id) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE id = ?',
+      [id],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row || null);
+      }
+    );
+  });
+}
+
+/**
+ * Updates an existing group. Returns the number of affected rows.
+ */
+function updateGroup(id, name, invitationCode, description, logoUrl) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE groups SET name = ?, invitation_code = ?, description = ?, logo_url = ? WHERE id = ?',
+      [name, invitationCode, description, logoUrl, id],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
+ * Deletes a group by ID. Returns the number of deleted rows.
+ */
+function deleteGroup(id) {
+  return new Promise((resolve, reject) => {
+    db.run('DELETE FROM groups WHERE id = ?', [id], function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
+  });
+}
+
+/**
+ * Creates a membership linking a user to a group.
+ */
+function createMembership(userId, groupId, role, nickname, active = true) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, ?)',
+      [userId, groupId, role, nickname, active ? 1 : 0],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves a membership for a given user and group.
+ */
+function getMembership(userId, groupId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT id, user_id, group_id, role, nickname, joined_at, active FROM memberships WHERE user_id = ? AND group_id = ?',
+      [userId, groupId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row || null);
+      }
+    );
+  });
+}
+
+/**
+ * Updates a membership by ID. Returns the number of affected rows.
+ */
+function updateMembership(id, role, nickname, active) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE memberships SET role = ?, nickname = ?, active = ? WHERE id = ?',
+      [role, nickname, active ? 1 : 0, id],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
+ * Deletes a membership by ID. Returns the number of deleted rows.
+ */
+function deleteMembership(id) {
+  return new Promise((resolve, reject) => {
+    db.run('DELETE FROM memberships WHERE id = ?', [id], function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
+  });
+}
+
+/**
  * Retrieves settings row.  Always returns an object with groupName and darkMode.
  */
 function getSettings() {
@@ -944,6 +1099,14 @@ module.exports = {
   deletePerformance,
   getSettings,
   updateSettings,
+  createGroup,
+  getGroupById,
+  updateGroup,
+  deleteGroup,
+  createMembership,
+  getMembership,
+  updateMembership,
+  deleteMembership,
   moveSuggestionToRehearsal,
   moveRehearsalToSuggestion,
   logEvent,
