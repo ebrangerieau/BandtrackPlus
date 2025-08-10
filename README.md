@@ -91,6 +91,24 @@ dernière réinitialisation.
 
 Les métriques sont également réinitialisées lors du redémarrage du serveur.
 
+### Migration vers la gestion multi‑groupe
+
+Les bases de données créées avant l'introduction des groupes ne possèdent pas
+les tables `groups` et `memberships`. Au démarrage, le serveur vérifie leur
+présence et lance automatiquement une migration le cas échéant :
+
+1. création d'un groupe par défaut (ID 1) ;
+2. ajout de tous les utilisateurs comme membres de ce groupe ;
+3. mise à jour des tables de contenu pour inclure un champ `group_id`.
+
+La migration peut également être exécutée manuellement :
+
+```bash
+node scripts/migrate_to_multigroup.js
+# ou
+python3 scripts/migrate_to_multigroup.py
+```
+
 ### Sauvegardes et restauration
 
 Un script `backup.sh` crée une copie de la base `bandtrack.db` et du dossier `audios/` dans `backups/DATE` où `DATE` est un horodatage `YYYYMMDD_HHMMSS`.
