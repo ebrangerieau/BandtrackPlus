@@ -339,6 +339,11 @@ app.delete('/api/groups/:id/members', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/groups', requireAuth, async (req, res) => {
+  const groups = await db.getGroupsForUser(req.session.userId);
+  res.json(groups);
+});
+
 // ---------- WebAuthn Routes ----------
 
 // Generate registration challenge
