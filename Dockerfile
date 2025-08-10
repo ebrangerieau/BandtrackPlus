@@ -11,6 +11,7 @@ WORKDIR /app
 # the Python backend only.  The SQLite database will be created at runtime.
 COPY server.py ./
 COPY public ./public
+COPY scripts ./scripts
 
 # Create a volume for persistent database storage
 VOLUME ["/data"]
