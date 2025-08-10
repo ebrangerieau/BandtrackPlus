@@ -150,6 +150,37 @@ def init_db():
                FOREIGN KEY (creator_id) REFERENCES users(id)
            );'''
     )
+    # Groups allow multiple band configurations and are owned by a user
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS groups (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               name TEXT NOT NULL,
+               invitation_code TEXT NOT NULL UNIQUE,
+               description TEXT,
+               logo_url TEXT,
+               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+               owner_id INTEGER NOT NULL,
+               FOREIGN KEY (owner_id) REFERENCES users(id)
+           );'''
+    )
+    # Memberships link users to groups with a role and optional nickname
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS memberships (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               user_id INTEGER NOT NULL,
+               group_id INTEGER NOT NULL,
+               role TEXT NOT NULL,
+               nickname TEXT,
+               joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+               active INTEGER NOT NULL DEFAULT 1,
+               FOREIGN KEY (user_id) REFERENCES users(id),
+               FOREIGN KEY (group_id) REFERENCES groups(id)
+           );'''
+    )
+    # Index for quick lookup of a membership by user and group
+    cur.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships(user_id, group_id)'
+    )
     # Settings: single row with group name, dark mode flag and optional
     # next rehearsal info.  "template" selects the UI theme.
     cur.execute(
@@ -504,6 +535,110 @@ def move_rehearsal_to_suggestion(reh_id: int):
         'createdAt': new_row['created_at'],
         'likes': new_row['likes'],
     }
+
+
+def create_group(name: str, invitation_code: str, description: str | None, logo_url: str | None, owner_id: int) -> int:
+    """Insert a new group and return its ID."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'INSERT INTO groups (name, invitation_code, description, logo_url, owner_id) VALUES (?, ?, ?, ?, ?)',
+        (name, invitation_code, description, logo_url, owner_id),
+    )
+    group_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return group_id
+
+
+def get_group_by_id(group_id: int) -> dict | None:
+    """Fetch a group by its ID."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE id = ?',
+        (group_id,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_group(group_id: int, name: str, invitation_code: str, description: str | None, logo_url: str | None) -> int:
+    """Update a group's details.  Returns number of affected rows."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'UPDATE groups SET name = ?, invitation_code = ?, description = ?, logo_url = ? WHERE id = ?',
+        (name, invitation_code, description, logo_url, group_id),
+    )
+    conn.commit()
+    changes = cur.rowcount
+    conn.close()
+    return changes
+
+
+def delete_group(group_id: int) -> int:
+    """Delete a group by ID.  Returns the number of deleted rows."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM groups WHERE id = ?', (group_id,))
+    conn.commit()
+    changes = cur.rowcount
+    conn.close()
+    return changes
+
+
+def create_membership(user_id: int, group_id: int, role: str, nickname: str | None, active: bool = True) -> int:
+    """Create a membership entry linking a user to a group."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, ?)',
+        (user_id, group_id, role, nickname, 1 if active else 0),
+    )
+    membership_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return membership_id
+
+
+def get_membership(user_id: int, group_id: int) -> dict | None:
+    """Retrieve a membership for a user/group pair."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT id, user_id, group_id, role, nickname, joined_at, active FROM memberships WHERE user_id = ? AND group_id = ?',
+        (user_id, group_id),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_membership(membership_id: int, role: str, nickname: str | None, active: bool) -> int:
+    """Update membership details.  Returns number of affected rows."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'UPDATE memberships SET role = ?, nickname = ?, active = ? WHERE id = ?',
+        (role, nickname, 1 if active else 0, membership_id),
+    )
+    conn.commit()
+    changes = cur.rowcount
+    conn.close()
+    return changes
+
+
+def delete_membership(membership_id: int) -> int:
+    """Delete a membership by its ID."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM memberships WHERE id = ?', (membership_id,))
+    conn.commit()
+    changes = cur.rowcount
+    conn.close()
+    return changes
 
 #############################
 # HTTP request handler
