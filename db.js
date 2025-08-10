@@ -190,40 +190,36 @@ function init() {
     }
   });
 
-  // Groups allow multiple band configurations. Each group has an invitation
-  // code and an owner.  These tables are new and therefore we simply attempt
-  // to create them on startup for backward compatibility.
+// Groups and memberships to support multiple ensembles
   db.run(
     `CREATE TABLE IF NOT EXISTS groups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      invitation_code TEXT NOT NULL UNIQUE,
-      description TEXT,
-      logo_url TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      owner_id INTEGER NOT NULL,
-      FOREIGN KEY (owner_id) REFERENCES users(id)
+      name TEXT NOT NULL UNIQUE
     );`
   );
 
   db.run(
-    `CREATE TABLE IF NOT EXISTS memberships (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+    `CREATE TABLE IF NOT EXISTS group_members (
       user_id INTEGER NOT NULL,
       group_id INTEGER NOT NULL,
-      role TEXT NOT NULL,
-      nickname TEXT,
-      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      active INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (user_id, group_id),
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (group_id) REFERENCES groups(id)
     );`
   );
 
-  // Unique index for quick lookups of a user's membership in a group
-  db.run(
-    'CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships(user_id, group_id)'
+  // Ensure a default group exists
+  db.run('INSERT OR IGNORE INTO groups (id, name) VALUES (1, ?)', ['Groupe de musique']);
+
+    );`
   );
+
+  db.run(
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (group_id) REFERENCES groups(id)
+    );`
+  );
+
 
   // Logs: audit trail of key actions
   db.run(
@@ -301,6 +297,67 @@ function getUserById(id) {
         else resolve(row);
       }
     );
+  });
+}
+
+/**
+ * Adds a user to a group. Useful for initial registration where every user
+ * is placed into the default group.
+ */
+function addUserToGroup(userId, groupId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'INSERT OR IGNORE INTO group_members (user_id, group_id) VALUES (?, ?)',
+      [userId, groupId],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
+ * Returns the first group id associated with a user.
+ */
+function getFirstGroupForUser(userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT group_id FROM group_members WHERE user_id = ? ORDER BY group_id LIMIT 1',
+      [userId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row ? row.group_id : null);
+      }
+    );
+  });
+}
+
+/**
+ * Checks whether a user belongs to a given group.
+ */
+function userHasGroup(userId, groupId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?',
+      [userId, groupId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(!!row);
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves a group by its id.
+ */
+function getGroupById(groupId) {
+  return new Promise((resolve, reject) => {
+    db.get('SELECT id, name FROM groups WHERE id = ?', [groupId], (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
   });
 }
 
@@ -1075,6 +1132,10 @@ module.exports = {
   getUserCount,
   getUserByUsername,
   getUserById,
+  addUserToGroup,
+  getFirstGroupForUser,
+  userHasGroup,
+  getGroupById,
   addWebAuthnCredential,
   getWebAuthnCredentials,
   getWebAuthnCredentialById,
