@@ -4,7 +4,8 @@
   "description": "Server backend for BandTrack app",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "migrate": "node scripts/migrate_to_multigroup.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
