@@ -74,6 +74,7 @@ import urllib.parse
 import mimetypes
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
 
 #############################
 # Database initialisation
@@ -2131,6 +2132,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 #############################
 
 def run_server(host: str = '0.0.0.0', port: int = 3000):
+    migrate_to_multigroup()
     init_db()
     server = ThreadingHTTPServer((host, port), BandTrackHandler)
     print(f"BandTrack server running on http://{host}:{port} (Ctrl-C to stop)")

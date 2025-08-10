@@ -7,6 +7,7 @@ const SQLiteStore = require('connect-sqlite3')(session);
 const crypto = require('crypto');
 const { promisify } = require('util');
 const pbkdf2 = promisify(crypto.pbkdf2);
+const { execSync } = require('child_process');
 
 const ORIGIN = process.env.ORIGIN || 'https://localhost:3000';
 
@@ -16,6 +17,15 @@ function base64urlToBuffer(str) {
 
 function bufferToBase64url(buf) {
   return buf.toString('base64url');
+}
+
+// Run migration script if the groups table is missing
+try {
+  execSync(`node ${path.join(__dirname, 'scripts', 'migrate_to_multigroup.js')}`, {
+    stdio: 'inherit',
+  });
+} catch (err) {
+  console.error('Migration script failed:', err);
 }
 
 // Import database helpers
