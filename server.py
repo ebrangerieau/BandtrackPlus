@@ -699,6 +699,20 @@ def get_membership(user_id: int, group_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+ROLE_LEVELS = {'user': 1, 'moderator': 2, 'admin': 3}
+
+
+def verify_group_access(user_id: int, group_id: int, required_role: str = 'user') -> str | None:
+    """Return the membership role if the user has access to the group and
+    meets the required role.  Otherwise return ``None``."""
+    membership = get_membership(user_id, group_id)
+    if not membership or not membership.get('active'):
+        return None
+    if ROLE_LEVELS.get(membership['role'], 0) < ROLE_LEVELS.get(required_role, 0):
+        return None
+    return membership['role']
+
+
 def update_membership(membership_id: int, role: str, nickname: str | None, active: bool) -> int:
     """Update membership details.  Returns number of affected rows."""
     conn = get_db_connection()
@@ -848,7 +862,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 # e.g. /api/suggestions or /api/suggestions/
                 if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
                     if method == 'GET':
-                        return self.api_get_suggestions()
+                        return self.api_get_suggestions(user)
                     if method == 'POST':
                         return self.api_create_suggestion(body, user)
                     raise NotImplementedError
@@ -859,7 +873,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     except ValueError:
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
                     if len(parts) == 5 and parts[4] == 'to-rehearsal' and method == 'POST':
-                        return self.api_move_suggestion_to_rehearsal_id(sug_id)
+                        return self.api_move_suggestion_to_rehearsal_id(sug_id, user)
                     if len(parts) == 5 and parts[4] == 'vote':
                         if method == 'POST':
                             return self.api_vote_suggestion_id(sug_id, user)
@@ -881,7 +895,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 parts = path.split('/')
                 if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
                     if method == 'GET':
-                        return self.api_get_rehearsals()
+                        return self.api_get_rehearsals(user)
                     if method == 'POST':
                         return self.api_create_rehearsal(body, user)
                     raise NotImplementedError
@@ -907,7 +921,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         reh_id = int(parts[3])
                     except ValueError:
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    return self.api_move_rehearsal_to_suggestion_id(reh_id)
+                    return self.api_move_rehearsal_to_suggestion_id(reh_id, user)
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
 
@@ -916,7 +930,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 parts = path.split('/')
                 if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
                     if method == 'GET':
-                        return self.api_get_performances()
+                        return self.api_get_performances(user)
                     if method == 'POST':
                         return self.api_create_performance(body, user)
                     raise NotImplementedError
@@ -937,7 +951,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             # Settings
             if path == '/api/settings':
                 if method == 'GET':
-                    return self.api_get_settings()
+                    return self.api_get_settings(user)
                 if method == 'PUT':
                     return self.api_update_settings(body, user)
                 raise NotImplementedError
@@ -1031,7 +1045,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         send_json(
             self,
             HTTPStatus.OK,
-            {'id': user_id, 'username': username, 'role': role},
+            {'id': user_id, 'username': username, 'role': role, 'membershipRole': role},
             cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
         )
 
@@ -1069,6 +1083,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         group_id = g_row['group_id'] if g_row else None
         token = generate_session(row['id'], group_id)
         expires_ts = int(time.time()) + 7 * 24 * 3600
+        membership = get_membership(row['id'], group_id) if group_id else None
         log_event(row['id'], 'login', {'username': row['username']})
         send_json(
             self,
@@ -1079,6 +1094,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     'id': row['id'],
                     'username': row['username'],
                     'role': row['role'],
+                    'membershipRole': membership['role'] if membership else None,
                     'isAdmin': row['role'] == 'admin',
                 },
             },
@@ -1101,10 +1117,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not user:
             send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
             return
+        membership_role = verify_group_access(user['id'], user['group_id'])
+        if not membership_role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No membership'})
+            return
         send_json(self, HTTPStatus.OK, {
             'id': user['id'],
             'username': user['username'],
             'role': user.get('role'),
+            'membershipRole': membership_role,
             'isAdmin': user.get('role') == 'admin',
         })
 
@@ -1183,7 +1204,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         update_group_code(user['group_id'], new_code)
         send_json(self, HTTPStatus.OK, {'invitationCode': new_code})
 
-    def api_get_suggestions(self):
+    def api_get_suggestions(self, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
@@ -1216,6 +1241,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         youtube = (body.get('youtube') or body.get('url') or '').strip() or None
         if not title:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
+            return
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1284,7 +1313,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         return self.api_update_suggestion_id(sug_id, body, user)
 
-    def api_get_rehearsals(self):
+    def api_get_rehearsals(self, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
@@ -1321,6 +1354,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not title:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
             return
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
@@ -1344,7 +1381,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         return self.api_update_rehearsal_id(rehearsal_id, body, user)
 
-    def api_get_performances(self):
+    def api_get_performances(self, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
@@ -1371,6 +1412,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         songs = body.get('songs') or []
         if not name or not date:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
+            return
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
         # Validate songs: ensure list of ints
         try:
@@ -1401,6 +1446,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not name or not date:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
             return
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         try:
             songs_list = [int(s) for s in songs]
         except (TypeError, ValueError):
@@ -1409,7 +1458,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         # Allow update if current user is creator or has moderator/administrator role
-        if user.get('role') in ('admin', 'moderator'):
+        if role in ('admin', 'moderator'):
             cur.execute(
                 'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ?',
                 (name, date, json.dumps(songs_list), perf_id)
@@ -1439,10 +1488,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         """Delete a suggestion by ID.  The suggestion can be removed by its
         creator or by an administrator.  Returns 404 if the suggestion
         does not exist or the user lacks the necessary privileges."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
-        # Allow deletion if the user is the creator OR has moderator/administrator role
-        if user.get('role') in ('admin', 'moderator'):
+        if role in ('admin', 'moderator'):
             cur.execute('DELETE FROM suggestions WHERE id = ?', (sug_id,))
         else:
             cur.execute('DELETE FROM suggestions WHERE id = ? AND creator_id = ?', (sug_id, user['id']))
@@ -1456,6 +1508,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 
     def api_vote_suggestion_id(self, sug_id: int, user: dict):
         """Increment likes for a suggestion and return the updated row."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('UPDATE suggestions SET likes = likes + 1 WHERE id = ?', (sug_id,))
@@ -1490,6 +1545,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 
     def api_unvote_suggestion_id(self, sug_id: int, user: dict):
         """Decrement likes for a suggestion and return the updated row."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
@@ -1535,9 +1593,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not title:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
             return
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
-        if user.get('role') in ('admin', 'moderator'):
+        if role in ('admin', 'moderator'):
             cur.execute(
                 'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ? WHERE id = ?',
                 (title, author, youtube, youtube, sug_id),
@@ -1577,6 +1639,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         Both operations may be combined in a single request.  If no
         updatable fields are provided, a 400 response is returned.
         """
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         # Determine which fields are being updated
         title = body.get('title')
         author = body.get('author')
@@ -1607,7 +1673,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # Check if we need to update metadata
         if any(v is not None for v in (title, author, youtube, spotify)):
             # Only creator, moderator or admin can modify metadata
-            if not (user.get('role') in ('admin', 'moderator') or user['id'] == row['creator_id']):
+            if not (role in ('admin', 'moderator') or user['id'] == row['creator_id']):
                 conn.close()
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal details'})
                 return
@@ -1664,6 +1730,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 
     def api_toggle_rehearsal_mastered(self, rehearsal_id: int, user: dict):
         """Toggle the mastered flag for a rehearsal."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('SELECT mastered, creator_id FROM rehearsals WHERE id = ?', (rehearsal_id,))
@@ -1671,7 +1740,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not row:
             conn.close()
             return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-        if not (user.get('role') in ('admin', 'moderator') or user['id'] == row['creator_id']):
+        if not (role in ('admin', 'moderator') or user['id'] == row['creator_id']):
             conn.close()
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal'})
         new_val = 0 if row['mastered'] else 1
@@ -1711,16 +1780,22 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
 
-    def api_move_suggestion_to_rehearsal_id(self, sug_id: int):
+    def api_move_suggestion_to_rehearsal_id(self, sug_id: int, user: dict):
         """Move a suggestion to rehearsals."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         result = move_suggestion_to_rehearsal(sug_id)
         if result is None:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
         else:
             send_json(self, HTTPStatus.OK, result)
 
-    def api_move_rehearsal_to_suggestion_id(self, reh_id: int):
+    def api_move_rehearsal_to_suggestion_id(self, reh_id: int, user: dict):
         """Move a rehearsal back to suggestions."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         result = move_rehearsal_to_suggestion(reh_id)
         if result is None:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
@@ -1764,9 +1839,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
     def api_delete_performance_id(self, perf_id: int, user: dict):
         """Delete a performance by ID.  The performance can be removed by its
         creator or by an administrator."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
-        if user.get('role') in ('admin', 'moderator'):
+        if role in ('admin', 'moderator'):
             cur.execute('DELETE FROM performances WHERE id = ?', (perf_id,))
         else:
             cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ?', (perf_id, user['id']))
@@ -1786,6 +1865,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         from their song lists.  If no performances contain the ID, no
         changes occur.  If the user lacks permission or the rehearsal
         does not exist, a 404 is returned."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
         # Fetch creator_id to check permissions
@@ -1796,7 +1879,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
             return
         creator_id = row['creator_id']
-        if not (user.get('role') in ('admin', 'moderator') or user['id'] == creator_id):
+        if not (role in ('admin', 'moderator') or user['id'] == creator_id):
             conn.close()
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to delete rehearsal'})
             return
@@ -1864,7 +1947,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.close()
         send_json(self, HTTPStatus.OK, rows)
 
-    def api_get_settings(self):
+    def api_get_settings(self, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('SELECT group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location FROM settings WHERE id = 1')
@@ -1882,6 +1969,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         })
 
     def api_update_settings(self, body: dict, user: dict):
+        role = verify_group_access(user['id'], user['group_id'], 'admin')
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
         group_name = (body.get('groupName') or '').strip()
         dark_mode = body.get('darkMode')
         template = body.get('template')
@@ -1943,6 +2034,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('UPDATE users SET role = ? WHERE id = ?', (role, uid))
+        cur.execute('UPDATE memberships SET role = ? WHERE user_id = ?', (role, uid))
         updated = cur.rowcount
         conn.commit()
         conn.close()
