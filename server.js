@@ -279,6 +279,53 @@ app.post('/api/groups/renew-code', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/groups/:id/members', requireAuth, async (req, res) => {
+  const groupId = Number(req.params.id);
+  const role = await verifyGroupAccess(req.session.userId, groupId, 'moderator');
+  if (!role) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const members = await db.getGroupMembers(groupId);
+    res.json(members);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch members' });
+  }
+});
+
+app.put('/api/groups/:id/members', requireAuth, async (req, res) => {
+  const groupId = Number(req.params.id);
+  const { userId, role } = req.body;
+  if (!userId || !role) return res.status(400).json({ error: 'userId and role required' });
+  const access = await verifyGroupAccess(req.session.userId, groupId, 'admin');
+  if (!access) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const membership = await db.getMembership(userId, groupId);
+    if (!membership) return res.status(404).json({ error: 'Not found' });
+    await db.updateMembership(membership.id, role, membership.nickname, membership.active);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update membership' });
+  }
+});
+
+app.delete('/api/groups/:id/members', requireAuth, async (req, res) => {
+  const groupId = Number(req.params.id);
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId required' });
+  const access = await verifyGroupAccess(req.session.userId, groupId, 'admin');
+  if (!access) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const membership = await db.getMembership(userId, groupId);
+    if (!membership) return res.status(404).json({ error: 'Not found' });
+    await db.deleteMembership(membership.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to remove membership' });
+  }
+});
+
 // ---------- WebAuthn Routes ----------
 
 // Generate registration challenge
