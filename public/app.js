@@ -92,6 +92,10 @@
       applyTheme(settings.darkMode);
       applyTemplate(settings.template || 'classic');
       document.title = `${settings.groupName} – BandTrack`;
+      const groupNameEl = document.getElementById('group-name');
+      if (groupNameEl) groupNameEl.textContent = settings.groupName;
+      const profileImg = document.querySelector('#profile-btn img');
+      if (profileImg) profileImg.src = currentUser?.avatarUrl || 'Logobt-512.png';
     } catch (err) {
       currentUser = null;
     }
@@ -482,6 +486,15 @@
    */
   function renderMain(app) {
     app.innerHTML = '';
+    const profileBtn = document.getElementById('profile-btn');
+    if (profileBtn) {
+      profileBtn.onclick = () => {
+        if (currentPage !== 'settings') {
+          currentPage = 'settings';
+          renderMain(app);
+        }
+      };
+    }
     const pageDiv = document.createElement('div');
     pageDiv.className = 'page';
     app.appendChild(pageDiv);
@@ -493,7 +506,6 @@
       { key: 'suggestions', label: 'Propositions' },
       { key: 'rehearsals', label: 'Répétitions' },
       { key: 'performances', label: 'Prestations' },
-      { key: 'settings', label: 'Paramètres' },
     ];
     navItems.forEach((item) => {
       const btn = document.createElement('button');
@@ -1952,6 +1964,8 @@
       try {
         await api('/settings', 'PUT', { groupName: inputName.value, darkMode: settings.darkMode });
         document.title = `${inputName.value} – BandTrack`;
+        const groupNameEl = document.getElementById('group-name');
+        if (groupNameEl) groupNameEl.textContent = inputName.value;
       } catch (err) {
         alert(err.message);
       }
