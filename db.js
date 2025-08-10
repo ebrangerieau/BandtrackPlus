@@ -112,6 +112,11 @@ function init() {
     }
   });
 
+  // Index to speed up suggestion listings and ranking queries
+  db.run(
+    'CREATE INDEX IF NOT EXISTS idx_suggestions_group_likes_created_at ON suggestions (group_id, likes, created_at)'
+  );
+
   // Rehearsals: songs worked on during practice.  Levels and notes are stored
   // as JSON strings keyed by username so that each user can set their own
   // values independently.  We avoid separate tables for simplicity.
@@ -150,6 +155,11 @@ function init() {
       }
     }
   });
+
+  // Index to speed up rehearsal listings by group and date
+  db.run(
+    'CREATE INDEX IF NOT EXISTS idx_rehearsals_group_created_at ON rehearsals (group_id, created_at)'
+  );
 
   // Performances: gigs/presentations containing multiple rehearsal IDs and
   // associated with a creator.  Songs are stored as a JSON array of
@@ -255,6 +265,11 @@ function init() {
       FOREIGN KEY (group_id) REFERENCES groups(id),
       UNIQUE(user_id, group_id)
     );`
+  );
+
+  // Index to accelerate membership lookups (e.g., getMembership)
+  db.run(
+    'CREATE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships (user_id, group_id)'
   );
 
   // Ensure a default group exists so first users can join.
