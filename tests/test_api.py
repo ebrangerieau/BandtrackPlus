@@ -69,6 +69,34 @@ def test_register_and_login(tmp_path):
         stop_test_server(httpd, thread)
 
 
+def test_login_without_group(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        request(
+            "POST",
+            port,
+            "/api/register",
+            {"username": "dave", "password": "pw"},
+        )
+        # Remove group memberships for this user
+        conn = server.get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM memberships WHERE user_id = (SELECT id FROM users WHERE username = ?)",
+            ("dave",),
+        )
+        conn.commit()
+        conn.close()
+        status, _, body = request(
+            "POST", port, "/api/login", {"username": "dave", "password": "pw"}
+        )
+        assert status == 403
+        data = json.loads(body)
+        assert data["error"] == "No group membership"
+    finally:
+        stop_test_server(httpd, thread)
+
+
 def test_suggestions_crud(tmp_path):
     httpd, thread, port = start_test_server(tmp_path / "test.db")
     try:
