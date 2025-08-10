@@ -451,8 +451,11 @@ function getUsers() {
 function updateUserRole(id, role) {
   return new Promise((resolve, reject) => {
     db.run('UPDATE users SET role = ? WHERE id = ?', [role, id], function (err) {
-      if (err) reject(err);
-      else resolve(this.changes);
+      if (err) return reject(err);
+      db.run('UPDATE memberships SET role = ? WHERE user_id = ?', [role, id], function (err2) {
+        if (err2) reject(err2);
+        else resolve(this.changes);
+      });
     });
   });
 }

@@ -27,10 +27,10 @@
   let webAuthnVerified = false;
 
   function hasModRights() {
-    return currentUser && (currentUser.role === 'admin' || currentUser.role === 'moderator');
+    return currentUser && (currentUser.membershipRole === 'admin' || currentUser.membershipRole === 'moderator');
   }
   function isAdmin() {
-    return currentUser && currentUser.role === 'admin';
+    return currentUser && currentUser.membershipRole === 'admin';
   }
 
   /**
