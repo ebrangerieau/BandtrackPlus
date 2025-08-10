@@ -79,6 +79,23 @@
   }
 
   /**
+   * Récupère toutes les pages d'un point d'API paginé.
+   * @param {string} path Chemin de base (ex: '/suggestions')
+   * @param {number} limit Nombre d'éléments par page
+   */
+  async function apiPaginated(path, limit = 50) {
+    let offset = 0;
+    let all = [];
+    while (true) {
+      const page = await api(`${path}?limit=${limit}&offset=${offset}`);
+      all = all.concat(page);
+      if (!Array.isArray(page) || page.length < limit) break;
+      offset += limit;
+    }
+    return all;
+  }
+
+  /**
    * Vérifie si un utilisateur est connecté en appelant `/api/me`.  Si c’est le
    * cas, met à jour `currentUser` et applique le thème sombre ou clair selon
    * les paramètres du serveur.  Sinon, `currentUser` reste nul.
@@ -547,7 +564,7 @@
     container.appendChild(header);
     let list = [];
     try {
-      list = await api('/suggestions');
+      list = await apiPaginated('/suggestions');
     } catch (err) {
       const p = document.createElement('p');
       p.style.color = 'var(--danger-color)';
@@ -650,7 +667,7 @@
           e.stopPropagation();
           try {
             await api(`/suggestions/${item.id}/to-rehearsal`, 'POST');
-            rehearsalsCache = await api('/rehearsals');
+            rehearsalsCache = await apiPaginated('/rehearsals');
             renderSuggestions(container);
           } catch (err) {
             alert(err.message);
@@ -858,7 +875,7 @@
     container.appendChild(header);
     let list = [];
     try {
-      list = await api('/rehearsals');
+      list = await apiPaginated('/rehearsals');
       // Mettez en cache pour d’autres pages (prestations)
       rehearsalsCache = list;
     } catch (err) {
@@ -1078,7 +1095,7 @@
             // Rafraîchir la liste des répétitions et des prestations
             renderRehearsals(container);
             // Mettre à jour le cache des répétitions
-            rehearsalsCache = await api('/rehearsals');
+            rehearsalsCache = await apiPaginated('/rehearsals');
           } catch (err) {
             alert(err.message);
           }
@@ -1270,7 +1287,7 @@
         // Actualiser la page des répétitions
         renderRehearsals(container);
         // Mettre à jour le cache
-        rehearsalsCache = await api('/rehearsals');
+        rehearsalsCache = await apiPaginated('/rehearsals');
       } catch (err) {
         alert(err.message);
       }
@@ -1307,7 +1324,7 @@
     // Assurer d’avoir les répétitions en cache pour afficher les titres
     if (rehearsalsCache.length === 0) {
       try {
-        rehearsalsCache = await api('/rehearsals');
+        rehearsalsCache = await apiPaginated('/rehearsals');
       } catch (err) {
         // ignore
       }

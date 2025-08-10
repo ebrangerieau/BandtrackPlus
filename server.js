@@ -330,8 +330,10 @@ app.get('/api/groups', requireAuth, async (req, res) => {
 app.get('/api/suggestions', requireAuth, async (req, res) => {
   const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   try {
-    const suggestions = await db.getSuggestions();
+    const suggestions = await db.getSuggestions(req.session.groupId, limit, offset);
     res.json(suggestions);
   } catch (err) {
     console.error(err);
@@ -348,10 +350,8 @@ app.post('/api/suggestions', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Title is required' });
   }
   try {
-    const newId = await db.createSuggestion(title, author || '', youtube || '', req.session.userId);
-    const [created] = await Promise.all([
-      db.getSuggestions().then((list) => list.find((s) => s.id === newId)),
-    ]);
+    const newId = await db.createSuggestion(title, author || '', youtube || '', req.session.userId, req.session.groupId);
+    const created = await db.getSuggestionById(newId, req.session.groupId);
     res.status(201).json(created);
   } catch (err) {
     console.error(err);
@@ -369,12 +369,11 @@ app.put('/api/suggestions/:id', requireAuth, async (req, res) => {
   const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
-    const changes = await db.updateSuggestion(id, title, author || '', youtube || '', req.session.userId, role);
+    const changes = await db.updateSuggestion(id, title, author || '', youtube || '', req.session.userId, role, req.session.groupId);
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to update' });
     }
-    const list = await db.getSuggestions();
-    const updated = list.find((s) => s.id === id);
+    const updated = await db.getSuggestionById(id, req.session.groupId);
     await db.logEvent(req.session.userId, 'edit', { entity: 'suggestion', id });
     res.json(updated);
   } catch (err) {
@@ -390,7 +389,7 @@ app.delete('/api/suggestions/:id', requireAuth, async (req, res) => {
   const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
-    const changes = await db.deleteSuggestion(id, req.session.userId, role);
+    const changes = await db.deleteSuggestion(id, req.session.userId, role, req.session.groupId);
     if (changes === 0) {
       return res.status(403).json({ error: 'Not permitted to delete' });
     }
@@ -412,8 +411,7 @@ app.post('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
     const ok = await db.incrementSuggestionLikes(id, req.session.userId);
     if (!ok) return res.status(404).json({ error: 'Suggestion not found' });
     await db.logEvent(req.session.userId, 'vote', { suggestionId: id });
-    const list = await db.getSuggestions();
-    const updated = list.find((s) => s.id === id);
+    const updated = await db.getSuggestionById(id, req.session.groupId);
     res.json(updated);
   } catch (err) {
     console.error(err);
@@ -431,8 +429,7 @@ app.delete('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
     const ok = await db.decrementUserSuggestionLikes(id, req.session.userId);
     if (!ok) return res.status(400).json({ error: 'No vote to remove' });
     await db.logEvent(req.session.userId, 'unvote', { suggestionId: id });
-    const list = await db.getSuggestions();
-    const updated = list.find((s) => s.id === id);
+    const updated = await db.getSuggestionById(id, req.session.groupId);
     res.json(updated);
   } catch (err) {
     console.error(err);
@@ -462,8 +459,10 @@ app.post('/api/suggestions/:id/to-rehearsal', requireAuth, async (req, res) => {
 app.get('/api/rehearsals', requireAuth, async (req, res) => {
   const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   try {
-    const rehearsals = await db.getRehearsals();
+    const rehearsals = await db.getRehearsals(req.session.groupId, limit, offset);
     res.json(rehearsals);
   } catch (err) {
     console.error(err);
@@ -478,10 +477,8 @@ app.post('/api/rehearsals', requireAuth, async (req, res) => {
   const { title, youtube, spotify } = req.body;
   if (!title) return res.status(400).json({ error: 'Title is required' });
   try {
-    const newId = await db.createRehearsal(title, youtube || '', spotify || '', req.session.userId);
-    // Return the created rehearsal
-    const rehearsalList = await db.getRehearsals();
-    const created = rehearsalList.find((r) => r.id === newId);
+    const newId = await db.createRehearsal(title, youtube || '', spotify || '', req.session.userId, req.session.groupId);
+    const created = await db.getRehearsalById(newId, req.session.groupId);
     res.status(201).json(created);
   } catch (err) {
     console.error(err);
@@ -498,9 +495,7 @@ app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     await db.updateRehearsalUserData(id, req.session.username, level, note, audio);
-    // Return updated rehearsal data
-    const rehearsals = await db.getRehearsals();
-    const updated = rehearsals.find((r) => r.id === id);
+    const updated = await db.getRehearsalById(id, req.session.groupId);
     await db.logEvent(req.session.userId, 'edit', { entity: 'rehearsal', id });
     res.json(updated);
   } catch (err) {
@@ -516,8 +511,7 @@ app.put('/api/rehearsals/:id/mastered', requireAuth, async (req, res) => {
   const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
-    const rehearsals = await db.getRehearsals();
-    const rehearsal = rehearsals.find((r) => r.id === id);
+    const rehearsal = await db.getRehearsalById(id, req.session.groupId);
     if (!rehearsal) return res.status(404).json({ error: 'Rehearsal not found' });
     if (rehearsal.creatorId !== req.session.userId && !hasModRights(role)) {
       return res.status(403).json({ error: 'Not permitted to toggle' });
