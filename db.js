@@ -70,8 +70,10 @@ function init() {
       youtube TEXT,
       likes INTEGER NOT NULL DEFAULT 0,
       creator_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (creator_id) REFERENCES users(id)
+      FOREIGN KEY (creator_id) REFERENCES users(id),
+      FOREIGN KEY (group_id) REFERENCES groups(id)
     );`
   );
 
@@ -101,6 +103,12 @@ function init() {
       if (!rows.find((r) => r.name === 'youtube')) {
         db.run('ALTER TABLE suggestions ADD COLUMN youtube TEXT');
       }
+      if (!rows.find((r) => r.name === 'group_id')) {
+        db.run('ALTER TABLE suggestions ADD COLUMN group_id INTEGER');
+        db.run(
+          'UPDATE suggestions SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
+        );
+      }
     }
   });
 
@@ -118,8 +126,10 @@ function init() {
       audio_notes_json TEXT DEFAULT '{}',
       mastered INTEGER NOT NULL DEFAULT 0,
       creator_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (creator_id) REFERENCES users(id)
+      FOREIGN KEY (creator_id) REFERENCES users(id),
+      FOREIGN KEY (group_id) REFERENCES groups(id)
     );`
   );
 
@@ -131,6 +141,12 @@ function init() {
       }
       if (!rows.find((r) => r.name === 'audio_notes_json')) {
         db.run("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'");
+      }
+      if (!rows.find((r) => r.name === 'group_id')) {
+        db.run('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER');
+        db.run(
+          'UPDATE rehearsals SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
+        );
       }
     }
   });
@@ -146,15 +162,25 @@ function init() {
       location TEXT,
       songs_json TEXT DEFAULT '[]',
       creator_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (creator_id) REFERENCES users(id)
+      FOREIGN KEY (creator_id) REFERENCES users(id),
+      FOREIGN KEY (group_id) REFERENCES groups(id)
     );`
   );
 
   // Ensure the location column exists on existing databases
   db.all('PRAGMA table_info(performances)', (err, rows) => {
-    if (!err && rows && !rows.find((r) => r.name === 'location')) {
-      db.run('ALTER TABLE performances ADD COLUMN location TEXT');
+    if (!err && rows) {
+      if (!rows.find((r) => r.name === 'location')) {
+        db.run('ALTER TABLE performances ADD COLUMN location TEXT');
+      }
+      if (!rows.find((r) => r.name === 'group_id')) {
+        db.run('ALTER TABLE performances ADD COLUMN group_id INTEGER');
+        db.run(
+          'UPDATE performances SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
+        );
+      }
     }
   });
 
@@ -162,18 +188,20 @@ function init() {
   // rehearsal date/location.  We insert the default row if the table is empty.
   db.run(
     `CREATE TABLE IF NOT EXISTS settings (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL UNIQUE,
       group_name TEXT NOT NULL,
       dark_mode INTEGER NOT NULL DEFAULT 0,
       next_rehearsal_date TEXT,
-      next_rehearsal_location TEXT
+      next_rehearsal_location TEXT,
+      FOREIGN KEY (group_id) REFERENCES groups(id)
     );`,
     () => {
       // Insert default row if not present
       db.get('SELECT COUNT(*) AS count FROM settings', (err, row) => {
         if (!err && row && row.count === 0) {
           db.run(
-            "INSERT INTO settings (id, group_name, dark_mode, next_rehearsal_date, next_rehearsal_location) VALUES (1, ?, 0, '', '')",
+            "INSERT INTO settings (group_id, group_name, dark_mode, next_rehearsal_date, next_rehearsal_location) VALUES (1, ?, 0, '', '')",
             ['Groupe de musique']
           );
         }
@@ -183,11 +211,17 @@ function init() {
 
   // Ensure next_rehearsal_date/location columns exist on old databases
   db.all('PRAGMA table_info(settings)', (err, rows) => {
-    if (!err && rows && !rows.find((r) => r.name === 'next_rehearsal_date')) {
-      db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_date TEXT');
-    }
-    if (!err && rows && !rows.find((r) => r.name === 'next_rehearsal_location')) {
-      db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_location TEXT');
+    if (!err && rows) {
+      if (!rows.find((r) => r.name === 'next_rehearsal_date')) {
+        db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_date TEXT');
+      }
+      if (!rows.find((r) => r.name === 'next_rehearsal_location')) {
+        db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_location TEXT');
+      }
+      if (!rows.find((r) => r.name === 'group_id')) {
+        db.run('ALTER TABLE settings ADD COLUMN group_id INTEGER');
+        db.run('UPDATE settings SET group_id = 1 WHERE group_id IS NULL');
+      }
     }
   });
 
@@ -463,11 +497,11 @@ function updateUserRole(id, role) {
 /**
  * Creates a new suggestion.
  */
-function createSuggestion(title, author, youtube, creatorId) {
+function createSuggestion(title, author, youtube, creatorId, groupId) {
   return new Promise((resolve, reject) => {
     db.run(
-      'INSERT INTO suggestions (title, author, youtube, creator_id) VALUES (?, ?, ?, ?)',
-      [title, author, youtube, creatorId],
+      'INSERT INTO suggestions (title, author, youtube, creator_id, group_id) VALUES (?, ?, ?, ?, ?)',
+      [title, author, youtube, creatorId, groupId],
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
@@ -479,13 +513,15 @@ function createSuggestion(title, author, youtube, creatorId) {
 /**
  * Returns all suggestions with creator username.
  */
-function getSuggestions() {
+function getSuggestions(groupId) {
   return new Promise((resolve, reject) => {
     db.all(
       `SELECT s.id, s.title, s.author, s.url, s.youtube, s.likes, s.creator_id, s.created_at, u.username AS creator
        FROM suggestions s
        JOIN users u ON u.id = s.creator_id
+       WHERE s.group_id = ?
        ORDER BY s.likes DESC, s.created_at ASC`,
+      [groupId],
       (err, rows) => {
         if (err) reject(err);
         else resolve(rows);
@@ -498,12 +534,12 @@ function getSuggestions() {
  * Deletes a suggestion if the given user is the creator.  Returns the number
  * of rows deleted.
  */
-function deleteSuggestion(id, userId, role) {
+function deleteSuggestion(id, userId, role, groupId) {
   return new Promise((resolve, reject) => {
     const sql = role === 'admin' || role === 'moderator'
-      ? 'DELETE FROM suggestions WHERE id = ?'
-      : 'DELETE FROM suggestions WHERE id = ? AND creator_id = ?';
-    const params = role === 'admin' || role === 'moderator' ? [id] : [id, userId];
+      ? 'DELETE FROM suggestions WHERE id = ? AND group_id = ?'
+      : 'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?';
+    const params = role === 'admin' || role === 'moderator' ? [id, groupId] : [id, userId, groupId];
     db.run(sql, params, function (err) {
       if (err) reject(err);
       else resolve(this.changes);
@@ -515,14 +551,14 @@ function deleteSuggestion(id, userId, role) {
  * Updates a suggestion title and URL if the user is the creator.
  * Resolves with the number of updated rows (0 or 1).
  */
-function updateSuggestion(id, title, author, youtube, userId, role) {
+function updateSuggestion(id, title, author, youtube, userId, role, groupId) {
   return new Promise((resolve, reject) => {
     const sql = role === 'admin' || role === 'moderator'
-      ? 'UPDATE suggestions SET title = ?, author = ?, youtube = ? WHERE id = ?'
-      : 'UPDATE suggestions SET title = ?, author = ?, youtube = ? WHERE id = ? AND creator_id = ?';
+      ? 'UPDATE suggestions SET title = ?, author = ?, youtube = ? WHERE id = ? AND group_id = ?'
+      : 'UPDATE suggestions SET title = ?, author = ?, youtube = ? WHERE id = ? AND creator_id = ? AND group_id = ?';
     const params = role === 'admin' || role === 'moderator'
-      ? [title, author, youtube, id]
-      : [title, author, youtube, id, userId];
+      ? [title, author, youtube, id, groupId]
+      : [title, author, youtube, id, userId, groupId];
     db.run(sql, params, function (err) {
       if (err) reject(err);
       else resolve(this.changes);
@@ -624,11 +660,11 @@ function incrementSuggestionLikes(id, userId) {
 /**
  * Creates a rehearsal.  The levels and notes JSON are initially empty.
  */
-function createRehearsal(title, youtube, spotify, creatorId) {
+function createRehearsal(title, youtube, spotify, creatorId, groupId) {
   return new Promise((resolve, reject) => {
     db.run(
-      'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [title, youtube || null, spotify || null, '{}', '{}', '{}', 0, creatorId],
+      'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [title, youtube || null, spotify || null, '{}', '{}', '{}', 0, creatorId, groupId],
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
@@ -640,14 +676,16 @@ function createRehearsal(title, youtube, spotify, creatorId) {
 /**
  * Returns all rehearsals.  Parses JSON fields into objects.
  */
-function getRehearsals() {
+function getRehearsals(groupId) {
   return new Promise((resolve, reject) => {
     db.all(
       `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
               u.username AS creator
        FROM rehearsals r
        JOIN users u ON u.id = r.creator_id
+       WHERE r.group_id = ?
        ORDER BY r.created_at ASC`,
+      [groupId],
       (err, rows) => {
         if (err) {
           reject(err);
