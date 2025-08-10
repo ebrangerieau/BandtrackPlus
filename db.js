@@ -1275,7 +1275,9 @@ function getSettings() {
 function getSettingsForGroup(groupId) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location FROM settings WHERE group_id = ?',
+      `SELECT s.group_name, s.dark_mode, s.template, s.next_rehearsal_date, s.next_rehearsal_location, g.invitation_code
+       FROM settings s JOIN groups g ON s.group_id = g.id
+       WHERE s.group_id = ?`,
       [groupId],
       (err, row) => {
         if (err) reject(err);
@@ -1287,6 +1289,7 @@ function getSettingsForGroup(groupId) {
             template: row.template || 'classic',
             nextRehearsalDate: row.next_rehearsal_date || '',
             nextRehearsalLocation: row.next_rehearsal_location || '',
+            invitationCode: row.invitation_code,
           });
         }
       }
