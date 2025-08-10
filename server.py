@@ -659,6 +659,12 @@ def create_group(name: str, invitation_code: str, description: str | None, logo_
         (name, invitation_code, description, logo_url, owner_id),
     )
     group_id = cur.lastrowid
+    # Insert default settings for the new group
+    cur.execute(
+        'INSERT INTO settings (group_id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) '
+        "VALUES (?, ?, 0, 'classic', '', '')",
+        (group_id, name),
+    )
     conn.commit()
     conn.close()
     return group_id
@@ -2060,12 +2066,33 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location FROM settings WHERE group_id = ?', (user['group_id'],))
+        cur.execute(
+            'SELECT group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location '
+            'FROM settings WHERE group_id = ?',
+            (user['group_id'],),
+        )
         row = cur.fetchone()
-        conn.close()
         if not row:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Settings not found'})
-            return
+            # Create default settings row if missing
+            cur.execute('SELECT name FROM groups WHERE id = ?', (user['group_id'],))
+            g = cur.fetchone()
+            group_name = g['name'] if g else ''
+            cur.execute(
+                'INSERT INTO settings (group_id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) '
+                "VALUES (?, ?, 0, 'classic', '', '')",
+                (user['group_id'], group_name),
+            )
+            conn.commit()
+            row = {
+                'group_name': group_name,
+                'dark_mode': 0,
+                'template': 'classic',
+                'next_rehearsal_date': '',
+                'next_rehearsal_location': '',
+            }
+        else:
+            row = dict(row)
+        conn.close()
         send_json(self, HTTPStatus.OK, {
             'groupName': row['group_name'],
             'darkMode': bool(row['dark_mode']),
