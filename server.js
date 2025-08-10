@@ -189,6 +189,9 @@ app.post('/api/login', async (req, res) => {
     req.session.role = user.role;
     req.session.webauthn = false;
     const groupId = await db.getFirstGroupForUser(user.id);
+    if (groupId == null) {
+      return res.status(403).json({ error: 'No group membership' });
+    }
     req.session.groupId = groupId;
     const membership = await db.getMembership(user.id, groupId);
     await db.logEvent(user.id, 'login', { username: user.username });
@@ -403,6 +406,9 @@ app.post('/api/webauthn/login', async (req, res) => {
     req.session.role = user.role;
     req.session.webauthn = true;
     const groupId = await db.getFirstGroupForUser(user.id);
+    if (groupId == null) {
+      return res.status(403).json({ error: 'No group membership' });
+    }
     req.session.groupId = groupId;
     const membership = await db.getMembership(user.id, groupId);
     res.json({ id: user.id, username: user.username, role: user.role, membershipRole: membership ? membership.role : null });

@@ -1148,6 +1148,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         g_row = cur.fetchone()
         conn.close()
         group_id = g_row['group_id'] if g_row else None
+        if group_id is None:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No group membership'})
+            return
         token = generate_session(row['id'], group_id)
         expires_ts = int(time.time()) + 7 * 24 * 3600
         membership = get_membership(row['id'], group_id) if group_id else None
