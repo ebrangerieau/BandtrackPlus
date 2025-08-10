@@ -1,5 +1,6 @@
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
+const crypto = require('crypto');
 
 // Database file path relative to this module.  We keep the database
 // in the project root so it persists across server restarts.
@@ -190,26 +191,40 @@ function init() {
     }
   });
 
-// Groups and memberships to support multiple ensembles
+  // Groups and memberships to support multiple ensembles with invitation codes
   db.run(
     `CREATE TABLE IF NOT EXISTS groups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE
+      name TEXT NOT NULL,
+      invitation_code TEXT NOT NULL UNIQUE,
+      description TEXT,
+      logo_url TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      owner_id INTEGER NOT NULL
     );`
   );
 
   db.run(
-    `CREATE TABLE IF NOT EXISTS group_members (
+    `CREATE TABLE IF NOT EXISTS memberships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       group_id INTEGER NOT NULL,
-      PRIMARY KEY (user_id, group_id),
+      role TEXT NOT NULL,
+      nickname TEXT,
+      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      active INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (group_id) REFERENCES groups(id)
+      FOREIGN KEY (group_id) REFERENCES groups(id),
+      UNIQUE(user_id, group_id)
     );`
   );
 
-  // Ensure a default group exists
-  db.run('INSERT OR IGNORE INTO groups (id, name) VALUES (1, ?)', ['Groupe de musique']);
+  // Ensure a default group exists so first users can join.
+  const defaultCode = generateInvitationCode();
+  db.run(
+    'INSERT OR IGNORE INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, 1)',
+    ['Groupe de musique', defaultCode]
+  );
 
   // Logs: audit trail of key actions
   db.run(
@@ -222,6 +237,28 @@ function init() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     );`
   );
+}
+
+function generateCode() {
+  return crypto.randomBytes(4).toString('base64url');
+}
+
+function generateInvitationCode() {
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const code = generateCode();
+      db.get(
+        'SELECT 1 FROM groups WHERE invitation_code = ?',
+        [code],
+        (err, row) => {
+          if (err) return reject(err);
+          if (row) return attempt();
+          resolve(code);
+        }
+      );
+    };
+    attempt();
+  });
 }
 
 /**
@@ -294,11 +331,11 @@ function getUserById(id) {
  * Adds a user to a group. Useful for initial registration where every user
  * is placed into the default group.
  */
-function addUserToGroup(userId, groupId) {
+function addUserToGroup(userId, groupId, role = 'user') {
   return new Promise((resolve, reject) => {
     db.run(
-      'INSERT OR IGNORE INTO group_members (user_id, group_id) VALUES (?, ?)',
-      [userId, groupId],
+      'INSERT OR IGNORE INTO memberships (user_id, group_id, role, active) VALUES (?, ?, ?, 1)',
+      [userId, groupId, role],
       function (err) {
         if (err) reject(err);
         else resolve(this.changes);
@@ -313,7 +350,7 @@ function addUserToGroup(userId, groupId) {
 function getFirstGroupForUser(userId) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT group_id FROM group_members WHERE user_id = ? ORDER BY group_id LIMIT 1',
+      'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
       [userId],
       (err, row) => {
         if (err) reject(err);
@@ -329,7 +366,7 @@ function getFirstGroupForUser(userId) {
 function userHasGroup(userId, groupId) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?',
+      'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
       [userId, groupId],
       (err, row) => {
         if (err) reject(err);
@@ -946,6 +983,19 @@ function getGroupById(id) {
   });
 }
 
+function getGroupByCode(code) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE invitation_code = ?',
+      [code],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row || null);
+      }
+    );
+  });
+}
+
 /**
  * Updates an existing group. Returns the number of affected rows.
  */
@@ -954,6 +1004,19 @@ function updateGroup(id, name, invitationCode, description, logoUrl) {
     db.run(
       'UPDATE groups SET name = ?, invitation_code = ?, description = ?, logo_url = ? WHERE id = ?',
       [name, invitationCode, description, logoUrl, id],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+function updateGroupCode(id, invitationCode) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE groups SET invitation_code = ? WHERE id = ?',
+      [invitationCode, id],
       function (err) {
         if (err) reject(err);
         else resolve(this.changes);
@@ -1152,7 +1215,9 @@ module.exports = {
   updateSettings,
   createGroup,
   getGroupById,
+  getGroupByCode,
   updateGroup,
+  updateGroupCode,
   deleteGroup,
   createMembership,
   getMembership,
@@ -1160,6 +1225,7 @@ module.exports = {
   deleteMembership,
   moveSuggestionToRehearsal,
   moveRehearsalToSuggestion,
+  generateInvitationCode,
   logEvent,
   getLogs,
 };

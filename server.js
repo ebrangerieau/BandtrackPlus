@@ -131,7 +131,7 @@ app.post('/api/register', async (req, res) => {
     const role = count === 0 ? 'admin' : 'user';
     const userId = await db.createUser(username, hash, salt, role);
     // Add user to default group and initialise session
-    await db.addUserToGroup(userId, 1);
+    await db.addUserToGroup(userId, 1, role);
     req.session.userId = userId;
     req.session.username = username;
     req.session.role = role;
@@ -207,6 +207,52 @@ app.put('/api/context', requireAuth, async (req, res) => {
   req.session.groupId = groupId;
   const group = await db.getGroupById(groupId);
   res.json(group);
+});
+
+// --------- Group management ---------
+app.post('/api/groups', requireAuth, async (req, res) => {
+  const { name, description, logoUrl } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  try {
+    const code = await db.generateInvitationCode();
+    const groupId = await db.createGroup(name, code, description, logoUrl, req.session.userId);
+    await db.createMembership(req.session.userId, groupId, 'admin', null);
+    res.status(201).json({ id: groupId, invitationCode: code });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create group' });
+  }
+});
+
+app.post('/api/groups/join', requireAuth, async (req, res) => {
+  const { code, nickname } = req.body;
+  if (!code) return res.status(400).json({ error: 'code required' });
+  try {
+    const group = await db.getGroupByCode(code);
+    if (!group) return res.status(404).json({ error: 'Invalid code' });
+    const existing = await db.getMembership(req.session.userId, group.id);
+    if (existing) return res.status(409).json({ error: 'Already a member' });
+    await db.createMembership(req.session.userId, group.id, 'user', nickname);
+    res.status(201).json({ groupId: group.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to join group' });
+  }
+});
+
+app.post('/api/groups/renew-code', requireAuth, async (req, res) => {
+  try {
+    const membership = await db.getMembership(req.session.userId, req.session.groupId);
+    if (!membership || membership.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const newCode = await db.generateInvitationCode();
+    await db.updateGroupCode(req.session.groupId, newCode);
+    res.json({ invitationCode: newCode });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to renew code' });
+  }
 });
 
 // ---------- WebAuthn Routes ----------

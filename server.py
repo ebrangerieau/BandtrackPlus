@@ -65,6 +65,7 @@ import json
 import os
 import sqlite3
 import secrets
+import string
 import hashlib
 import hmac
 import time
@@ -351,6 +352,22 @@ def verify_password(password: str, salt: bytes, expected_hash: bytes) -> bool:
     # Constant‑time comparison to avoid timing attacks
     return hmac.compare_digest(hashed, expected_hash)
 
+
+def generate_invitation_code(length: int = 6) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
+def generate_unique_invitation_code() -> str:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    while True:
+        code = generate_invitation_code()
+        cur.execute('SELECT 1 FROM groups WHERE invitation_code = ?', (code,))
+        if cur.fetchone() is None:
+            conn.close()
+            return code
+
 def generate_session(user_id: int, group_id: int | None, duration_seconds: int = 7 * 24 * 3600) -> str:
     """Create a new session token for a user and store it with the active
     group in the database.  ``duration_seconds`` controls the cookie's
@@ -608,6 +625,18 @@ def get_group_by_id(group_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def get_group_by_code(code: str) -> dict | None:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE invitation_code = ?',
+        (code,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def update_group(group_id: int, name: str, invitation_code: str, description: str | None, logo_url: str | None) -> int:
     """Update a group's details.  Returns number of affected rows."""
     conn = get_db_connection()
@@ -616,6 +645,16 @@ def update_group(group_id: int, name: str, invitation_code: str, description: st
         'UPDATE groups SET name = ?, invitation_code = ?, description = ?, logo_url = ? WHERE id = ?',
         (name, invitation_code, description, logo_url, group_id),
     )
+    conn.commit()
+    changes = cur.rowcount
+    conn.close()
+    return changes
+
+
+def update_group_code(group_id: int, invitation_code: str) -> int:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('UPDATE groups SET invitation_code = ? WHERE id = ?', (invitation_code, group_id))
     conn.commit()
     changes = cur.rowcount
     conn.close()
@@ -795,6 +834,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if method == 'PUT':
                     return self.api_set_context(body, user, session_token)
 
+            # Group management
+            if path == '/api/groups' and method == 'POST':
+                return self.api_create_group(body, user)
+            if path == '/api/groups/join' and method == 'POST':
+                return self.api_join_group(body, user)
+            if path == '/api/groups/renew-code' and method == 'POST':
+                return self.api_renew_group_code(user)
+
             # Suggestions
             if path.startswith('/api/suggestions'):
                 parts = path.split('/')
@@ -971,8 +1018,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         user_id = cur.lastrowid
         # Add the new user to the default group (id 1)
         cur.execute(
-            'INSERT OR IGNORE INTO group_members (user_id, group_id) VALUES (?, 1)',
-            (user_id,)
+            'INSERT OR IGNORE INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)',
+            (user_id, role),
         )
         conn.commit()
         conn.close()
@@ -1016,7 +1063,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # Determine the first group this user belongs to
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT group_id FROM group_members WHERE user_id = ? ORDER BY group_id LIMIT 1', (row['id'],))
+        cur.execute('SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1', (row['id'],))
         g_row = cur.fetchone()
         conn.close()
         group_id = g_row['group_id'] if g_row else None
@@ -1082,7 +1129,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            'SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?',
+            'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
             (user['id'], group_id)
         )
         if not cur.fetchone():
@@ -1098,6 +1145,43 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
             return
         send_json(self, HTTPStatus.OK, {'id': row['id'], 'name': row['name']})
+
+    def api_create_group(self, body: dict, user: dict):
+        name = (body.get('name') or '').strip()
+        description = (body.get('description') or '').strip() or None
+        logo_url = (body.get('logoUrl') or '').strip() or None
+        if not name:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'name is required'})
+            return
+        code = generate_unique_invitation_code()
+        group_id = create_group(name, code, description, logo_url, user['id'])
+        create_membership(user['id'], group_id, 'admin', None)
+        send_json(self, HTTPStatus.CREATED, {'id': group_id, 'invitationCode': code})
+
+    def api_join_group(self, body: dict, user: dict):
+        code = (body.get('code') or '').strip()
+        nickname = (body.get('nickname') or '').strip() or None
+        if not code:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'code is required'})
+            return
+        group = get_group_by_code(code)
+        if not group:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Invalid code'})
+            return
+        if get_membership(user['id'], group['id']):
+            send_json(self, HTTPStatus.CONFLICT, {'error': 'Already a member'})
+            return
+        create_membership(user['id'], group['id'], 'user', nickname)
+        send_json(self, HTTPStatus.CREATED, {'groupId': group['id']})
+
+    def api_renew_group_code(self, user: dict):
+        membership = get_membership(user['id'], user['group_id'])
+        if not membership or membership['role'] != 'admin':
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
+        new_code = generate_unique_invitation_code()
+        update_group_code(user['group_id'], new_code)
+        send_json(self, HTTPStatus.OK, {'invitationCode': new_code})
 
     def api_get_suggestions(self):
         conn = get_db_connection()
