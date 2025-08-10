@@ -60,17 +60,20 @@
       options.body = JSON.stringify(data);
     }
     const res = await fetch('/api' + path, options);
-    if (res.status === 401) {
-      // Session invalide : retour à l’authentification
-      currentUser = null;
-      renderApp();
-      throw new Error('Non authentifié');
-    }
     let json;
     try {
       json = await res.json();
     } catch (e) {
       json = null;
+    }
+    if (res.status === 401) {
+      if (json && json.error === 'No membership') {
+        throw new Error('No membership');
+      }
+      // Session invalide : retour à l’authentification
+      currentUser = null;
+      renderApp();
+      throw new Error('Non authentifié');
     }
     if (!res.ok) {
       throw new Error((json && json.error) || 'Erreur API');
@@ -456,7 +459,11 @@
           await refreshGroups();
           renderApp();
         } catch (err) {
-          errorDiv.textContent = err.message;
+          if (err.message === 'No membership' || err.message === 'No group membership') {
+            errorDiv.textContent = 'Aucun groupe associé. Contactez l’administrateur.';
+          } else {
+            errorDiv.textContent = err.message;
+          }
         }
       }
     }
