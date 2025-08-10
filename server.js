@@ -742,7 +742,7 @@ app.get('/api/settings', requireAuth, async (req, res) => {
   const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
-    const settings = await db.getSettings();
+    const settings = await db.getSettingsForGroup(req.session.groupId);
     res.json(settings);
   } catch (err) {
     console.error(err);
