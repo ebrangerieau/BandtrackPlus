@@ -532,18 +532,38 @@ function createSuggestion(title, author, youtube, creatorId, groupId) {
 /**
  * Returns all suggestions with creator username.
  */
-function getSuggestions(groupId) {
+function getSuggestions(groupId, limit = 100, offset = 0) {
   return new Promise((resolve, reject) => {
     db.all(
       `SELECT s.id, s.title, s.author, s.url, s.youtube, s.likes, s.creator_id, s.created_at, u.username AS creator
        FROM suggestions s
        JOIN users u ON u.id = s.creator_id
        WHERE s.group_id = ?
-       ORDER BY s.likes DESC, s.created_at ASC`,
-      [groupId],
+       ORDER BY s.likes DESC, s.created_at ASC
+       LIMIT ? OFFSET ?`,
+      [groupId, limit, offset],
       (err, rows) => {
         if (err) reject(err);
         else resolve(rows);
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves a single suggestion by ID within a group.
+ */
+function getSuggestionById(id, groupId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT s.id, s.title, s.author, s.url, s.youtube, s.likes, s.creator_id, s.created_at, u.username AS creator
+       FROM suggestions s
+       JOIN users u ON u.id = s.creator_id
+       WHERE s.id = ? AND s.group_id = ?`,
+      [id, groupId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
       }
     );
   });
@@ -695,7 +715,7 @@ function createRehearsal(title, youtube, spotify, creatorId, groupId) {
 /**
  * Returns all rehearsals.  Parses JSON fields into objects.
  */
-function getRehearsals(groupId) {
+function getRehearsals(groupId, limit = 100, offset = 0) {
   return new Promise((resolve, reject) => {
     db.all(
       `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
@@ -703,8 +723,9 @@ function getRehearsals(groupId) {
        FROM rehearsals r
        JOIN users u ON u.id = r.creator_id
        WHERE r.group_id = ?
-       ORDER BY r.created_at ASC`,
-      [groupId],
+       ORDER BY r.created_at ASC
+       LIMIT ? OFFSET ?`,
+      [groupId, limit, offset],
       (err, rows) => {
         if (err) {
           reject(err);
@@ -725,6 +746,38 @@ function getRehearsals(groupId) {
           });
           resolve(result);
         }
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves a single rehearsal by ID within a group.
+ */
+function getRehearsalById(id, groupId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
+              u.username AS creator
+       FROM rehearsals r
+       JOIN users u ON u.id = r.creator_id
+       WHERE r.id = ? AND r.group_id = ?`,
+      [id, groupId],
+      (err, row) => {
+        if (err) return reject(err);
+        if (!row) return resolve(null);
+        resolve({
+          id: row.id,
+          title: row.title,
+          youtube: row.youtube,
+          spotify: row.spotify,
+          levels: JSON.parse(row.levels_json || '{}'),
+          notes: JSON.parse(row.notes_json || '{}'),
+          audioNotes: JSON.parse(row.audio_notes_json || '{}'),
+          mastered: !!row.mastered,
+          creatorId: row.creator_id,
+          creator: row.creator,
+        });
       }
     );
   });
@@ -1318,6 +1371,7 @@ module.exports = {
   updateUserRole,
   createSuggestion,
   getSuggestions,
+  getSuggestionById,
   deleteSuggestion,
   updateSuggestion,
   incrementUserSuggestionLikes,
@@ -1326,6 +1380,7 @@ module.exports = {
   incrementSuggestionLikes,
   createRehearsal,
   getRehearsals,
+  getRehearsalById,
   updateRehearsalUserData,
   toggleRehearsalMastered,
   createPerformance,
