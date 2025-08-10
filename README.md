@@ -23,6 +23,7 @@ serveur Node.js via une API REST.
 Pour démarrer le serveur localement:
 ```bash
 npm install
+npm run migrate
 SSL_KEY=certs/key.pem SSL_CERT=certs/cert.pem npm start
 ```
 
@@ -94,20 +95,20 @@ Les métriques sont également réinitialisées lors du redémarrage du serveur.
 ### Migration vers la gestion multi‑groupe
 
 Les bases de données créées avant l'introduction des groupes ne possèdent pas
-les tables `groups` et `memberships`. Au démarrage, le serveur vérifie leur
-présence et lance automatiquement une migration le cas échéant :
-
-1. création d'un groupe par défaut (ID 1) ;
-2. ajout de tous les utilisateurs comme membres de ce groupe ;
-3. mise à jour des tables de contenu pour inclure un champ `group_id`.
-
-La migration peut également être exécutée manuellement :
+les tables `groups` et `memberships`. Avant de démarrer le serveur, exécutez la
+migration :
 
 ```bash
-node scripts/migrate_to_multigroup.js
+npm run migrate
 # ou
-python3 scripts/migrate_to_multigroup.py
+node scripts/migrate_to_multigroup.js
 ```
+
+Cette opération :
+
+1. crée un groupe par défaut (ID 1) ;
+2. ajoute tous les utilisateurs comme membres de ce groupe ;
+3. met à jour les tables de contenu pour inclure un champ `group_id`.
 
 ### Sauvegardes et restauration
 
