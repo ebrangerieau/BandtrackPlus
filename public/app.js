@@ -1989,6 +1989,33 @@
     };
     groupSection.appendChild(labelName);
     groupSection.appendChild(inputName);
+    if (isAdmin()) {
+      const inviteDiv = document.createElement('div');
+      inviteDiv.style.marginTop = '8px';
+      let invitationCode = settings.invitationCode;
+      const codeSpan = document.createElement('span');
+      codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
+      inviteDiv.appendChild(codeSpan);
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copier';
+      copyBtn.style.marginLeft = '8px';
+      copyBtn.onclick = () => navigator.clipboard.writeText(invitationCode);
+      inviteDiv.appendChild(copyBtn);
+      const renewBtn = document.createElement('button');
+      renewBtn.textContent = 'Renouveler';
+      renewBtn.style.marginLeft = '8px';
+      renewBtn.onclick = async () => {
+        try {
+          const data = await api('/groups/renew-code', 'POST');
+          invitationCode = data.invitationCode;
+          codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      inviteDiv.appendChild(renewBtn);
+      groupSection.appendChild(inviteDiv);
+    }
     // Mode sombre
     const modeDiv = document.createElement('div');
     modeDiv.style.marginTop = '20px';
