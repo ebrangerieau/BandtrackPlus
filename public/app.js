@@ -26,6 +26,14 @@
   // Indique si la vérification biométrique a été effectuée
   let webAuthnVerified = false;
 
+  // Gestion des groupes
+  let groupsCache = [];
+  let activeGroupId = null;
+
+  function resetCaches() {
+    rehearsalsCache = [];
+  }
+
   function hasModRights() {
     return currentUser && (currentUser.membershipRole === 'admin' || currentUser.membershipRole === 'moderator');
   }
@@ -126,12 +134,164 @@
     body.classList.add('template-' + templateName);
   }
 
+  async function changeGroup(id) {
+    await api('/context', 'PUT', { groupId: Number(id) });
+    localStorage.setItem('activeGroupId', String(id));
+    activeGroupId = Number(id);
+    resetCaches();
+    await checkSession();
+  }
+
+  async function refreshGroups(forceId) {
+    if (!currentUser) return;
+    const container = document.getElementById('group-controls');
+    const select = document.getElementById('group-select');
+    const createBtn = document.getElementById('create-group-btn');
+    const joinBtn = document.getElementById('join-group-btn');
+    if (!container || !select) return;
+    container.style.display = 'flex';
+    createBtn.onclick = () => showCreateGroupDialog();
+    joinBtn.onclick = () => showJoinGroupDialog();
+    try {
+      groupsCache = await api('/groups');
+      select.innerHTML = '';
+      groupsCache.forEach((g) => {
+        const opt = document.createElement('option');
+        opt.value = g.id;
+        opt.textContent = g.name;
+        select.appendChild(opt);
+      });
+      let selected = forceId || localStorage.getItem('activeGroupId');
+      if (!groupsCache.some((g) => String(g.id) === String(selected))) {
+        selected = groupsCache[0] ? groupsCache[0].id : null;
+      }
+      if (selected) {
+        select.value = selected;
+        await changeGroup(selected);
+      }
+      select.onchange = async () => {
+        await changeGroup(select.value);
+        renderMain(document.getElementById('app'));
+      };
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function showCreateGroupDialog() {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Créer un groupe';
+    content.appendChild(h3);
+    const form = document.createElement('form');
+    form.onsubmit = (e) => e.preventDefault();
+    const labelName = document.createElement('label');
+    labelName.textContent = 'Nom du groupe';
+    const inputName = document.createElement('input');
+    inputName.type = 'text';
+    inputName.required = true;
+    inputName.style.width = '100%';
+    form.appendChild(labelName);
+    form.appendChild(inputName);
+    content.appendChild(form);
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.onclick = () => modal.remove();
+    const okBtn = document.createElement('button');
+    okBtn.className = 'btn-primary';
+    okBtn.textContent = 'Créer';
+    okBtn.onclick = async () => {
+      const name = inputName.value.trim();
+      if (!name) return;
+      try {
+        const data = await api('/groups', 'POST', { name });
+        alert('Code d\'invitation : ' + data.invitationCode);
+        modal.remove();
+        await refreshGroups(data.id);
+        renderMain(document.getElementById('app'));
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    content.appendChild(actions);
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    setTimeout(() => inputName.focus(), 50);
+  }
+
+  function showJoinGroupDialog() {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Rejoindre un groupe';
+    content.appendChild(h3);
+    const form = document.createElement('form');
+    form.onsubmit = (e) => e.preventDefault();
+    const labelCode = document.createElement('label');
+    labelCode.textContent = 'Code d\'invitation';
+    const inputCode = document.createElement('input');
+    inputCode.type = 'text';
+    inputCode.required = true;
+    inputCode.style.width = '100%';
+    const labelNick = document.createElement('label');
+    labelNick.textContent = 'Surnom';
+    const inputNick = document.createElement('input');
+    inputNick.type = 'text';
+    inputNick.style.width = '100%';
+    form.appendChild(labelCode);
+    form.appendChild(inputCode);
+    form.appendChild(labelNick);
+    form.appendChild(inputNick);
+    content.appendChild(form);
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.onclick = () => modal.remove();
+    const okBtn = document.createElement('button');
+    okBtn.className = 'btn-primary';
+    okBtn.textContent = 'Rejoindre';
+    okBtn.onclick = async () => {
+      const code = inputCode.value.trim();
+      const nickname = inputNick.value.trim();
+      if (!code) return;
+      try {
+        const data = await api('/groups/join', 'POST', { code, nickname });
+        modal.remove();
+        await refreshGroups(data.groupId);
+        renderMain(document.getElementById('app'));
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    content.appendChild(actions);
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    setTimeout(() => inputCode.focus(), 50);
+  }
+
   /**
    * Initialise l’application au chargement de la page.  Cette fonction est
    * déclenchée par l’événement `DOMContentLoaded` défini à la fin du fichier.
    */
   async function initApp() {
     await checkSession();
+    if (currentUser) {
+      await refreshGroups();
+    }
     renderApp();
   }
 
@@ -142,10 +302,13 @@
    */
   function renderApp() {
     const app = document.getElementById('app');
+    const groupCtrl = document.getElementById('group-controls');
     if (!currentUser) {
-      rehearsalsCache = [];
+      resetCaches();
+      if (groupCtrl) groupCtrl.style.display = 'none';
       renderAuth(app);
     } else {
+      if (groupCtrl) groupCtrl.style.display = 'flex';
       renderMain(app);
     }
   }
@@ -270,7 +433,8 @@
           await checkSession();
           webAuthnVerified = false;
           currentPage = 'home';
-          renderMain(app);
+          await refreshGroups();
+          renderApp();
         } catch (err) {
           errorDiv.textContent = err.message;
         }
@@ -289,7 +453,8 @@
           await checkSession();
           webAuthnVerified = false;
           currentPage = 'home';
-          renderMain(app);
+          await refreshGroups();
+          renderApp();
         } catch (err) {
           errorDiv.textContent = err.message;
         }

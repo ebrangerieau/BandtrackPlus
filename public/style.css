@@ -106,6 +106,17 @@ body, html {
   height: 40px;
 }
 
+.group-controls {
+  margin-left: auto;
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-controls select {
+  padding: 4px;
+}
+
 /* Formulaires d'authentification */
 .auth-container {
   max-width: 400px;
