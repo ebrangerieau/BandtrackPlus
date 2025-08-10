@@ -192,6 +192,7 @@ function init() {
       group_id INTEGER NOT NULL UNIQUE,
       group_name TEXT NOT NULL,
       dark_mode INTEGER NOT NULL DEFAULT 0,
+      template TEXT NOT NULL DEFAULT 'classic',
       next_rehearsal_date TEXT,
       next_rehearsal_location TEXT,
       FOREIGN KEY (group_id) REFERENCES groups(id)
@@ -201,7 +202,7 @@ function init() {
       db.get('SELECT COUNT(*) AS count FROM settings', (err, row) => {
         if (!err && row && row.count === 0) {
           db.run(
-            "INSERT INTO settings (group_id, group_name, dark_mode, next_rehearsal_date, next_rehearsal_location) VALUES (1, ?, 0, '', '')",
+            "INSERT INTO settings (group_id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) VALUES (1, ?, 0, 'classic', '', '')",
             ['Groupe de musique']
           );
         }
@@ -209,7 +210,7 @@ function init() {
     }
   );
 
-  // Ensure next_rehearsal_date/location columns exist on old databases
+  // Ensure settings table has required columns on old databases
   db.all('PRAGMA table_info(settings)', (err, rows) => {
     if (!err && rows) {
       if (!rows.find((r) => r.name === 'next_rehearsal_date')) {
@@ -221,6 +222,9 @@ function init() {
       if (!rows.find((r) => r.name === 'group_id')) {
         db.run('ALTER TABLE settings ADD COLUMN group_id INTEGER');
         db.run('UPDATE settings SET group_id = 1 WHERE group_id IS NULL');
+      }
+      if (!rows.find((r) => r.name === 'template')) {
+        db.run("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'");
       }
     }
   });
@@ -1198,6 +1202,31 @@ function getSettings() {
 }
 
 /**
+ * Retrieves settings for a given group.
+ */
+function getSettingsForGroup(groupId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location FROM settings WHERE group_id = ?',
+      [groupId],
+      (err, row) => {
+        if (err) reject(err);
+        else if (!row) resolve(null);
+        else {
+          resolve({
+            groupName: row.group_name,
+            darkMode: !!row.dark_mode,
+            template: row.template || 'classic',
+            nextRehearsalDate: row.next_rehearsal_date || '',
+            nextRehearsalLocation: row.next_rehearsal_location || '',
+          });
+        }
+      }
+    );
+  });
+}
+
+/**
  * Updates settings.  Accepts groupName and darkMode (boolean).
  */
 function updateSettings({ groupName, darkMode, nextRehearsalDate, nextRehearsalLocation }) {
@@ -1290,6 +1319,7 @@ module.exports = {
   updatePerformance,
   deletePerformance,
   getSettings,
+  getSettingsForGroup,
   updateSettings,
   createGroup,
   getGroupById,
