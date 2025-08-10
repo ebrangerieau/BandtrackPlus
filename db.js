@@ -1127,6 +1127,24 @@ function updateMembership(id, role, nickname, active) {
 }
 
 /**
+ * Lists all active memberships for a group with associated usernames.
+ */
+function getGroupMembers(groupId) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT m.user_id AS id, u.username, m.role, m.nickname
+       FROM memberships m JOIN users u ON m.user_id = u.id
+       WHERE m.group_id = ? AND m.active = 1`,
+      [groupId],
+      (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      }
+    );
+  });
+}
+
+/**
  * Deletes a membership by ID. Returns the number of deleted rows.
  */
 function deleteMembership(id) {
@@ -1262,6 +1280,7 @@ module.exports = {
   deleteGroup,
   createMembership,
   getMembership,
+  getGroupMembers,
   updateMembership,
   deleteMembership,
   moveSuggestionToRehearsal,

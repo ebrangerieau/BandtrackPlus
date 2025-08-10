@@ -2112,6 +2112,95 @@
     // Gestion des utilisateurs (visible uniquement pour les administrateurs)
     if (isAdmin()) {
       try {
+        const group = await api('/context');
+        const members = await api(`/groups/${activeGroupId}/members`);
+        const groupHeader = document.createElement('h3');
+        groupHeader.style.marginTop = '30px';
+        groupHeader.textContent = 'Tableau de bord du groupe';
+        container.appendChild(groupHeader);
+
+        const inviteDiv = document.createElement('div');
+        let invitationCode = group.invitation_code;
+        const codeSpan = document.createElement('span');
+        codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
+        inviteDiv.appendChild(codeSpan);
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = 'Copier';
+        copyBtn.style.marginLeft = '8px';
+        copyBtn.onclick = () => navigator.clipboard.writeText(invitationCode);
+        inviteDiv.appendChild(copyBtn);
+        const renewBtn = document.createElement('button');
+        renewBtn.textContent = 'Renouveler';
+        renewBtn.style.marginLeft = '8px';
+        renewBtn.onclick = async () => {
+          try {
+            const data = await api('/groups/renew-code', 'POST');
+            invitationCode = data.invitationCode;
+            codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        inviteDiv.appendChild(renewBtn);
+        container.appendChild(inviteDiv);
+
+        const memberTable = document.createElement('table');
+        memberTable.className = 'user-table';
+        const mthead = document.createElement('thead');
+        mthead.innerHTML = '<tr><th>Membre</th><th>Rôle</th><th>Actions</th></tr>';
+        memberTable.appendChild(mthead);
+        const mtbody = document.createElement('tbody');
+        members.forEach((m) => {
+          const tr = document.createElement('tr');
+          const nameTd = document.createElement('td');
+          nameTd.textContent = m.username;
+          const roleTd = document.createElement('td');
+          const sel = document.createElement('select');
+          ['user', 'moderator', 'admin'].forEach((r) => {
+            const opt = document.createElement('option');
+            opt.value = r;
+            opt.textContent = r;
+            if (m.role === r) opt.selected = true;
+            sel.appendChild(opt);
+          });
+          if (m.id === currentUser.id) sel.disabled = true;
+          sel.onchange = async () => {
+            try {
+              await api(`/groups/${activeGroupId}/members`, 'PUT', { userId: m.id, role: sel.value });
+            } catch (err) {
+              alert(err.message);
+            }
+          };
+          roleTd.appendChild(sel);
+          const actionsTd = document.createElement('td');
+          const removeBtn = document.createElement('button');
+          removeBtn.textContent = 'Retirer';
+          removeBtn.disabled = m.id === currentUser.id;
+          removeBtn.onclick = async () => {
+            if (!confirm('Supprimer ce membre ?')) return;
+            try {
+              await api(`/groups/${activeGroupId}/members`, 'DELETE', { userId: m.id });
+              tr.remove();
+            } catch (err) {
+              alert(err.message);
+            }
+          };
+          actionsTd.appendChild(removeBtn);
+          tr.appendChild(nameTd);
+          tr.appendChild(roleTd);
+          tr.appendChild(actionsTd);
+          mtbody.appendChild(tr);
+        });
+        memberTable.appendChild(mtbody);
+        container.appendChild(memberTable);
+      } catch (err) {
+        const p = document.createElement('p');
+        p.style.color = 'var(--danger-color)';
+        p.textContent = 'Impossible de récupérer les membres';
+        container.appendChild(p);
+      }
+
+      try {
         const users = await api('/users');
         const adminHeader = document.createElement('h3');
         adminHeader.style.marginTop = '30px';
