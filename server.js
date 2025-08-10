@@ -7,6 +7,9 @@ const SQLiteStore = require('connect-sqlite3')(session);
 const crypto = require('crypto');
 const { promisify } = require('util');
 const pbkdf2 = promisify(crypto.pbkdf2);
+// Chosen iteration count for PBKDF2. Higher values increase security but
+// also add latency during authentication.
+const PBKDF2_ITERATIONS = 200000;
 
 // Import database helpers
 const db = require('./db');
@@ -132,7 +135,7 @@ app.post('/api/register', async (req, res) => {
     }
     // Hash password using PBKDF2 with a per-user salt
     const salt = crypto.randomBytes(16).toString('hex');
-    const derived = await pbkdf2(password, salt, 310000, 32, 'sha256');
+    const derived = await pbkdf2(password, salt, PBKDF2_ITERATIONS, 32, 'sha256');
     const hash = derived.toString('hex');
     const count = await db.getUserCount();
     const role = count === 0 ? 'admin' : 'user';
@@ -162,7 +165,7 @@ app.post('/api/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const derived = await pbkdf2(password, user.salt, 310000, 32, 'sha256');
+    const derived = await pbkdf2(password, user.salt, PBKDF2_ITERATIONS, 32, 'sha256');
     const hash = derived.toString('hex');
     if (hash !== user.password_hash) {
       return res.status(401).json({ error: 'Invalid credentials' });
