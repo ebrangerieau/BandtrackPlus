@@ -23,7 +23,7 @@ serveur Node.js via une API REST.
 Pour démarrer le serveur localement:
 ```bash
 npm install
-SSL_KEY=certs/server.key SSL_CERT=certs/server.crt npm start
+SSL_KEY=certs/key.pem SSL_CERT=certs/cert.pem npm start
 ```
 
 ### HTTPS
@@ -33,7 +33,7 @@ Pour le développement, un certificat auto-signé peut être créé avec :
 
 ```bash
 mkdir certs
-openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/server.key -out certs/server.crt -days 365 -subj "/CN=localhost"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/key.pem -out certs/cert.pem -days 365 -subj "/CN=localhost"
 ```
 
 Les chemins vers la clé privée et le certificat sont fournis via les

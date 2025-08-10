@@ -27,9 +27,15 @@ db.init();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// In production the SSL certificate is provided via environment variables so
+// that deployments can supply paths to certificates issued by a real CA (e.g.
+// Let's Encrypt).  For local development we fall back to the self-signed
+// certificates located in `certs/`.
+const keyPath = process.env.SSL_KEY || path.join(__dirname, 'certs', 'key.pem');
+const certPath = process.env.SSL_CERT || path.join(__dirname, 'certs', 'cert.pem');
 const httpsOptions = {
-  key: fs.readFileSync(path.join(__dirname, 'certs', 'key.pem')),
-  cert: fs.readFileSync(path.join(__dirname, 'certs', 'cert.pem')),
+  key: fs.readFileSync(keyPath),
+  cert: fs.readFileSync(certPath),
 };
 
 // Middleware to parse JSON bodies
