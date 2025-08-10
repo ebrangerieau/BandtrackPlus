@@ -1038,6 +1038,25 @@ function getGroupByCode(code) {
 }
 
 /**
+ * Returns all groups that a given user belongs to.
+ */
+function getGroupsForUser(userId) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT g.id, g.name
+         FROM groups g
+         JOIN memberships m ON m.group_id = g.id
+         WHERE m.user_id = ? AND m.active = 1`,
+      [userId],
+      (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      }
+    );
+  });
+}
+
+/**
  * Updates an existing group. Returns the number of affected rows.
  */
 function updateGroup(id, name, invitationCode, description, logoUrl) {
@@ -1275,6 +1294,7 @@ module.exports = {
   createGroup,
   getGroupById,
   getGroupByCode,
+  getGroupsForUser,
   updateGroup,
   updateGroupCode,
   deleteGroup,

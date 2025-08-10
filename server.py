@@ -689,6 +689,19 @@ def get_group_by_code(code: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_groups_for_user(user_id: int) -> list[dict]:
+    """Return all groups a user is a member of."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT g.id, g.name FROM groups g JOIN memberships m ON m.group_id = g.id WHERE m.user_id = ? AND m.active = 1',
+        (user_id,),
+    )
+    rows = [{'id': row['id'], 'name': row['name']} for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
 def update_group(group_id: int, name: str, invitation_code: str, description: str | None, logo_url: str | None) -> int:
     """Update a group's details.  Returns number of affected rows."""
     conn = get_db_connection()
@@ -916,8 +929,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     return self.api_set_context(body, user, session_token)
 
             # Group management
-            if path == '/api/groups' and method == 'POST':
-                return self.api_create_group(body, user)
+            if path == '/api/groups':
+                if method == 'POST':
+                    return self.api_create_group(body, user)
+                if method == 'GET':
+                    return self.api_get_groups(user)
             if path == '/api/groups/join' and method == 'POST':
                 return self.api_join_group(body, user)
             if path == '/api/groups/renew-code' and method == 'POST':
@@ -1273,6 +1289,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         new_code = generate_unique_invitation_code()
         update_group_code(user['group_id'], new_code)
         send_json(self, HTTPStatus.OK, {'invitationCode': new_code})
+
+    def api_get_groups(self, user: dict):
+        groups = get_groups_for_user(user['id'])
+        send_json(self, HTTPStatus.OK, groups)
 
     def api_get_suggestions(self, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
