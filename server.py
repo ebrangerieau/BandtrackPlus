@@ -259,6 +259,48 @@ def init_db():
     except Exception:
         pass
 
+    # Groups and memberships.  Multiple groups are supported so users can
+    # belong to several ensembles.  We create a default group with id 1 for
+    # backward compatibility and for fresh installations.
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS groups (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL UNIQUE
+               );'''
+        )
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS group_members (
+                   user_id INTEGER NOT NULL,
+                   group_id INTEGER NOT NULL,
+                   PRIMARY KEY (user_id, group_id),
+                   FOREIGN KEY (user_id) REFERENCES users(id),
+                   FOREIGN KEY (group_id) REFERENCES groups(id)
+               );'''
+        )
+        # Ensure a default group exists
+        cur.execute('INSERT OR IGNORE INTO groups (id, name) VALUES (1, ?)', ('Groupe de musique',))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    # Sessions table: ensure a group_id column exists to store the active
+    # group for a session.
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(sessions)')
+        sess_columns = [row['name'] for row in cur.fetchall()]
+        if 'group_id' not in sess_columns:
+            cur.execute('ALTER TABLE sessions ADD COLUMN group_id INTEGER')
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
 #############################
 # Helper functions
 #############################
@@ -278,17 +320,17 @@ def verify_password(password: str, salt: bytes, expected_hash: bytes) -> bool:
     # Constant‑time comparison to avoid timing attacks
     return hmac.compare_digest(hashed, expected_hash)
 
-def generate_session(user_id: int, duration_seconds: int = 7 * 24 * 3600) -> str:
-    """Create a new session token for a user, store it in the database, and
-    return the token.  ``duration_seconds`` controls the cookie's
+def generate_session(user_id: int, group_id: int | None, duration_seconds: int = 7 * 24 * 3600) -> str:
+    """Create a new session token for a user and store it with the active
+    group in the database.  ``duration_seconds`` controls the cookie's
     lifetime; default is one week."""
     token = secrets.token_hex(32)
     expires_at = int(time.time()) + duration_seconds
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        'INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)',
-        (token, user_id, expires_at)
+        'INSERT INTO sessions (token, user_id, group_id, expires_at) VALUES (?, ?, ?, ?)',
+        (token, user_id, group_id, expires_at)
     )
     conn.commit()
     conn.close()
@@ -306,7 +348,7 @@ def get_user_by_session(token: str) -> dict | None:
     cur.execute('DELETE FROM sessions WHERE expires_at <= ?', (int(time.time()),))
     # Fetch the session
     cur.execute(
-        'SELECT user_id FROM sessions WHERE token = ?',
+        'SELECT user_id, group_id FROM sessions WHERE token = ?',
         (token,)
     )
     row = cur.fetchone()
@@ -315,6 +357,7 @@ def get_user_by_session(token: str) -> dict | None:
         conn.close()
         return None
     user_id = row['user_id']
+    group_id = row['group_id']
     # Extend session expiry on each use (sliding window)
     new_expires = int(time.time()) + 7 * 24 * 3600
     cur.execute(
@@ -334,6 +377,7 @@ def get_user_by_session(token: str) -> dict | None:
             'id': user_row['id'],
             'username': user_row['username'],
             'role': user_row['role'],
+            'group_id': group_id,
         }
     return None
 
@@ -605,9 +649,16 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if path == '/api/me' and method == 'GET':
                 return self.api_me(user)
 
-            # Remaining routes require authentication
-            if user is None:
+            # Remaining routes require authentication and an active group
+            if user is None or user.get('group_id') is None:
                 raise PermissionError
+
+            # Context endpoints
+            if path == '/api/context':
+                if method == 'GET':
+                    return self.api_get_context(user)
+                if method == 'PUT':
+                    return self.api_set_context(body, user, session_token)
 
             # Suggestions
             if path.startswith('/api/suggestions'):
@@ -783,11 +834,17 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             (username, salt, pwd_hash, role)
         )
         user_id = cur.lastrowid
+        # Add the new user to the default group (id 1)
+        cur.execute(
+            'INSERT OR IGNORE INTO group_members (user_id, group_id) VALUES (?, 1)',
+            (user_id,)
+        )
         conn.commit()
         conn.close()
+        group_id = 1
         # Automatically log in the new user and return a session cookie so the
         # behaviour mirrors the Express implementation.
-        token = generate_session(user_id)
+        token = generate_session(user_id, group_id)
         expires_ts = int(time.time()) + 7 * 24 * 3600
         send_json(
             self,
@@ -821,7 +878,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # differ in case from the input.  We return this canonical
         # username in the response so the client uses a consistent
         # representation.
-        token = generate_session(row['id'])
+        # Determine the first group this user belongs to
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT group_id FROM group_members WHERE user_id = ? ORDER BY group_id LIMIT 1', (row['id'],))
+        g_row = cur.fetchone()
+        conn.close()
+        group_id = g_row['group_id'] if g_row else None
+        token = generate_session(row['id'], group_id)
         expires_ts = int(time.time()) + 7 * 24 * 3600
         log_event(row['id'], 'login', {'username': row['username']})
         send_json(
@@ -861,6 +925,44 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             'role': user.get('role'),
             'isAdmin': user.get('role') == 'admin',
         })
+
+    def api_get_context(self, user: dict):
+        """Return the currently active group for the session."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT id, name FROM groups WHERE id = ?', (user['group_id'],))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
+            return
+        send_json(self, HTTPStatus.OK, {'id': row['id'], 'name': row['name']})
+
+    def api_set_context(self, body: dict, user: dict, session_token: str):
+        """Switch the active group if the user is a member of it."""
+        group_id = body.get('groupId')
+        if group_id is None:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'groupId is required'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?',
+            (user['id'], group_id)
+        )
+        if not cur.fetchone():
+            conn.close()
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No membership'})
+            return
+        cur.execute('UPDATE sessions SET group_id = ? WHERE token = ?', (group_id, session_token))
+        cur.execute('SELECT id, name FROM groups WHERE id = ?', (group_id,))
+        row = cur.fetchone()
+        conn.commit()
+        conn.close()
+        if not row:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
+            return
+        send_json(self, HTTPStatus.OK, {'id': row['id'], 'name': row['name']})
 
     def api_get_suggestions(self):
         conn = get_db_connection()

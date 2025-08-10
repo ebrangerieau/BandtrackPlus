@@ -190,6 +190,27 @@ function init() {
     }
   });
 
+  // Groups and memberships to support multiple ensembles
+  db.run(
+    `CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE
+    );`
+  );
+
+  db.run(
+    `CREATE TABLE IF NOT EXISTS group_members (
+      user_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
+      PRIMARY KEY (user_id, group_id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (group_id) REFERENCES groups(id)
+    );`
+  );
+
+  // Ensure a default group exists
+  db.run('INSERT OR IGNORE INTO groups (id, name) VALUES (1, ?)', ['Groupe de musique']);
+
   // Logs: audit trail of key actions
   db.run(
     `CREATE TABLE IF NOT EXISTS logs (
@@ -266,6 +287,67 @@ function getUserById(id) {
         else resolve(row);
       }
     );
+  });
+}
+
+/**
+ * Adds a user to a group. Useful for initial registration where every user
+ * is placed into the default group.
+ */
+function addUserToGroup(userId, groupId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'INSERT OR IGNORE INTO group_members (user_id, group_id) VALUES (?, ?)',
+      [userId, groupId],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
+ * Returns the first group id associated with a user.
+ */
+function getFirstGroupForUser(userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT group_id FROM group_members WHERE user_id = ? ORDER BY group_id LIMIT 1',
+      [userId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row ? row.group_id : null);
+      }
+    );
+  });
+}
+
+/**
+ * Checks whether a user belongs to a given group.
+ */
+function userHasGroup(userId, groupId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?',
+      [userId, groupId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(!!row);
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves a group by its id.
+ */
+function getGroupById(groupId) {
+  return new Promise((resolve, reject) => {
+    db.get('SELECT id, name FROM groups WHERE id = ?', [groupId], (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
   });
 }
 
@@ -920,6 +1002,10 @@ module.exports = {
   getUserCount,
   getUserByUsername,
   getUserById,
+  addUserToGroup,
+  getFirstGroupForUser,
+  userHasGroup,
+  getGroupById,
   addWebAuthnCredential,
   getWebAuthnCredentials,
   getWebAuthnCredentialById,

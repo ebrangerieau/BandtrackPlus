@@ -84,7 +84,7 @@ app.use((req, res, next) => {
  * not logged in, respond with HTTP 401.
  */
 function requireAuth(req, res, next) {
-  if (!req.session.userId) {
+  if (!req.session.userId || !req.session.groupId) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
   next();
@@ -130,11 +130,13 @@ app.post('/api/register', async (req, res) => {
     const count = await db.getUserCount();
     const role = count === 0 ? 'admin' : 'user';
     const userId = await db.createUser(username, hash, salt, role);
-    // Set session
+    // Add user to default group and initialise session
+    await db.addUserToGroup(userId, 1);
     req.session.userId = userId;
     req.session.username = username;
     req.session.role = role;
     req.session.webauthn = false;
+    req.session.groupId = 1;
     res.json({ id: userId, username, role });
   } catch (err) {
     console.error(err);
@@ -162,6 +164,8 @@ app.post('/api/login', async (req, res) => {
     req.session.username = user.username;
     req.session.role = user.role;
     req.session.webauthn = false;
+    const groupId = await db.getFirstGroupForUser(user.id);
+    req.session.groupId = groupId;
     await db.logEvent(user.id, 'login', { username: user.username });
     res.json({ id: user.id, username: user.username, role: user.role });
   } catch (err) {
@@ -183,6 +187,26 @@ app.get('/api/me', (req, res) => {
     return res.status(401).json({ error: 'Not authenticated' });
   }
   res.json({ id: req.session.userId, username: req.session.username, role: req.session.role });
+});
+
+// ----- Context management -----
+app.get('/api/context', requireAuth, async (req, res) => {
+  const group = await db.getGroupById(req.session.groupId);
+  res.json(group);
+});
+
+app.put('/api/context', requireAuth, async (req, res) => {
+  const { groupId } = req.body;
+  if (!groupId) {
+    return res.status(400).json({ error: 'groupId required' });
+  }
+  const hasMembership = await db.userHasGroup(req.session.userId, groupId);
+  if (!hasMembership) {
+    return res.status(403).json({ error: 'No membership' });
+  }
+  req.session.groupId = groupId;
+  const group = await db.getGroupById(groupId);
+  res.json(group);
 });
 
 // ---------- WebAuthn Routes ----------
