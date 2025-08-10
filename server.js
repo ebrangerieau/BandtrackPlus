@@ -9,16 +9,6 @@ const { promisify } = require('util');
 const pbkdf2 = promisify(crypto.pbkdf2);
 const { execSync } = require('child_process');
 
-const ORIGIN = process.env.ORIGIN || 'https://localhost:3000';
-
-function base64urlToBuffer(str) {
-  return Buffer.from(str, 'base64url');
-}
-
-function bufferToBase64url(buf) {
-  return buf.toString('base64url');
-}
-
 // Run migration script if the groups table is missing
 try {
   execSync(`node ${path.join(__dirname, 'scripts', 'migrate_to_multigroup.js')}`, {
@@ -125,14 +115,6 @@ async function verifyGroupAccess(userId, groupId, requiredRole = 'user') {
   return membership.role;
 }
 
-// Middleware ensuring recent biometric verification
-function requireBiometric(req, res, next) {
-  if (!req.session.webauthn) {
-    return res.status(403).json({ error: 'Biometric verification required' });
-  }
-  next();
-}
-
 // ----------------- Authentication Routes -----------------
 
 // Register a new user
@@ -159,7 +141,6 @@ app.post('/api/register', async (req, res) => {
     req.session.userId = userId;
     req.session.username = username;
     req.session.role = role;
-    req.session.webauthn = false;
     req.session.groupId = 1;
     res.json({ id: userId, username, role, membershipRole: role });
   } catch (err) {
@@ -187,7 +168,6 @@ app.post('/api/login', async (req, res) => {
     req.session.userId = user.id;
     req.session.username = user.username;
     req.session.role = user.role;
-    req.session.webauthn = false;
     const groupId = await db.getFirstGroupForUser(user.id);
     if (groupId == null) {
       return res.status(403).json({ error: 'No group membership' });
@@ -342,85 +322,6 @@ app.delete('/api/groups/:id/members', requireAuth, async (req, res) => {
 app.get('/api/groups', requireAuth, async (req, res) => {
   const groups = await db.getGroupsForUser(req.session.userId);
   res.json(groups);
-});
-
-// ---------- WebAuthn Routes ----------
-
-// Generate registration challenge
-app.post('/api/webauthn/register', requireAuth, async (req, res) => {
-  const challenge = bufferToBase64url(crypto.randomBytes(32));
-  req.session.currentChallenge = challenge;
-  const userId = bufferToBase64url(Buffer.from(String(req.session.userId)));
-  const options = {
-    challenge,
-    rp: { name: 'BandTrack' },
-    user: { id: userId, name: req.session.username },
-    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
-  };
-  res.json(options);
-});
-
-// Verify registration and store credential id
-app.post('/api/webauthn/verify-register', requireAuth, async (req, res) => {
-  try {
-    const expected = req.session.currentChallenge;
-    const clientData = JSON.parse(Buffer.from(req.body.response.clientDataJSON, 'base64url').toString());
-    if (clientData.challenge !== expected || clientData.type !== 'webauthn.create') {
-      return res.status(400).json({ error: 'Invalid challenge' });
-    }
-    await db.addWebAuthnCredential(req.session.userId, req.body.id);
-    req.session.webauthn = true;
-    res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    res.status(400).json({ error: 'Registration verification failed' });
-  }
-});
-
-// WebAuthn login / biometric verification
-app.post('/api/webauthn/login', async (req, res) => {
-  const { username } = req.body;
-  // Start authentication
-  if (username && !req.body.response) {
-    const user = await db.getUserByUsername(username);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    const creds = await db.getWebAuthnCredentials(user.id);
-    const challenge = bufferToBase64url(crypto.randomBytes(32));
-    req.session.currentChallenge = challenge;
-    req.session.authUserId = user.id;
-    const options = {
-      challenge,
-      allowCredentials: creds.map((c) => ({ id: c.credential_id, type: 'public-key' })),
-    };
-    return res.json(options);
-  }
-
-  // Verify authentication
-  try {
-    const expected = req.session.currentChallenge;
-    const clientData = JSON.parse(Buffer.from(req.body.response.clientDataJSON, 'base64url').toString());
-    if (clientData.challenge !== expected || clientData.type !== 'webauthn.get') {
-      return res.status(400).json({ error: 'Invalid challenge' });
-    }
-    const cred = await db.getWebAuthnCredentialById(req.body.id);
-    if (!cred) return res.status(400).json({ error: 'Unknown credential' });
-    const user = await db.getUserById(cred.user_id);
-    if (!user) return res.status(400).json({ error: 'User not found' });
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.role = user.role;
-    req.session.webauthn = true;
-    const groupId = await db.getFirstGroupForUser(user.id);
-    if (groupId == null) {
-      return res.status(403).json({ error: 'No group membership' });
-    }
-    req.session.groupId = groupId;
-    const membership = await db.getMembership(user.id, groupId);
-    res.json({ id: user.id, username: user.username, role: user.role, membershipRole: membership ? membership.role : null });
-  } catch (err) {
-    console.error(err);
-    res.status(400).json({ error: 'Authentication failed' });
-  }
 });
 
 // ----------------- Suggestion Routes -----------------
@@ -717,7 +618,7 @@ app.put('/api/performances/:id', requireAuth, async (req, res) => {
 });
 
 // Delete performance
-app.delete('/api/performances/:id', requireAuth, requireBiometric, async (req, res) => {
+app.delete('/api/performances/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
@@ -785,7 +686,7 @@ app.get('/api/users', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', requireAuth, requireBiometric, async (req, res) => {
+app.put('/api/users/:id', requireAuth, async (req, res) => {
   if (req.session.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
