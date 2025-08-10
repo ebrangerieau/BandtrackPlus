@@ -70,10 +70,10 @@
       if (json && json.error === 'No membership') {
         throw new Error('No membership');
       }
-      // Session invalide : retour à l’authentification
+      const wasLoggedIn = currentUser !== null;
       currentUser = null;
-      renderApp();
-      throw new Error('Non authentifié');
+      if (wasLoggedIn) renderApp();
+      throw new Error(json?.error || 'Non authentifié');
     }
     if (!res.ok) {
       throw new Error((json && json.error) || 'Erreur API');
