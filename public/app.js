@@ -95,7 +95,7 @@
       const groupNameEl = document.getElementById('group-name');
       if (groupNameEl) groupNameEl.textContent = settings.groupName;
       const profileImg = document.querySelector('#profile-btn img');
-      if (profileImg) profileImg.src = currentUser?.avatarUrl || 'Logobt-512.png';
+      if (profileImg) profileImg.src = currentUser?.avatarUrl || 'avatar.png';
     } catch (err) {
       currentUser = null;
     }
