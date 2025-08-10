@@ -50,6 +50,16 @@ enregistrées dans le fichier `bandtrack.db`. Aucune configuration
 supplémentaire n'est nécessaire : la table `sessions` est créée
 automatiquement au démarrage du serveur.
 
+### Hachage des mots de passe
+
+Les mots de passe utilisateurs sont dérivés avec `PBKDF2` et l'algorithme
+`sha256`. Des tests locaux ont mesuré un temps moyen d'environ **28 ms** pour
+100 000 itérations, **54 ms** pour 200 000 itérations et **84 ms** pour
+310 000 itérations. Afin de garder une latence raisonnable tout en respectant
+les recommandations actuelles (≥ 100 000 itérations), le serveur utilise
+désormais **200 000 itérations**. Cette valeur pourra être augmentée si les
+ressources matérielles le permettent.
+
 ### Serveur Python
 
 Une implémentation équivalente du backend est également fournie en Python. Elle se
