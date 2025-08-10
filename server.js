@@ -94,12 +94,17 @@ function requireAuth(req, res, next) {
  * Helper to send the current user's info (username and id) in responses.
  */
 async function currentUser(req) {
-  const membership = await db.getMembership(req.session.userId, req.session.groupId);
+  let membershipRole = req.session.membershipRole;
+  if (!membershipRole) {
+    const membership = await db.getMembership(req.session.userId, req.session.groupId);
+    membershipRole = membership ? membership.role : null;
+    req.session.membershipRole = membershipRole;
+  }
   return {
     id: req.session.userId,
     username: req.session.username,
     role: req.session.role,
-    membershipRole: membership ? membership.role : null,
+    membershipRole,
   };
 }
 
@@ -107,11 +112,17 @@ function hasModRights(role) {
   return role === 'admin' || role === 'moderator';
 }
 
-async function verifyGroupAccess(userId, groupId, requiredRole = 'user') {
-  const membership = await db.getMembership(userId, groupId);
-  if (!membership || membership.active === 0) return null;
+async function verifyGroupAccess(req, groupId = req.session.groupId, requiredRole = 'user') {
   const levels = { user: 1, moderator: 2, admin: 3 };
+  if (req.session.membershipRole && groupId === req.session.groupId) {
+    return levels[req.session.membershipRole] >= levels[requiredRole]
+      ? req.session.membershipRole
+      : null;
+  }
+  const membership = await db.getMembership(req.session.userId, groupId);
+  if (!membership || membership.active === 0) return null;
   if (levels[membership.role] < levels[requiredRole]) return null;
+  if (groupId === req.session.groupId) req.session.membershipRole = membership.role;
   return membership.role;
 }
 
@@ -142,6 +153,7 @@ app.post('/api/register', async (req, res) => {
     req.session.username = username;
     req.session.role = role;
     req.session.groupId = 1;
+    req.session.membershipRole = role;
     res.json({ id: userId, username, role, membershipRole: role });
   } catch (err) {
     console.error(err);
@@ -174,6 +186,7 @@ app.post('/api/login', async (req, res) => {
     }
     req.session.groupId = groupId;
     const membership = await db.getMembership(user.id, groupId);
+    req.session.membershipRole = membership ? membership.role : null;
     await db.logEvent(user.id, 'login', { username: user.username });
     res.json({ id: user.id, username: user.username, role: user.role, membershipRole: membership ? membership.role : null });
   } catch (err) {
@@ -194,7 +207,7 @@ app.get('/api/me', async (req, res) => {
   if (!req.session.userId || !req.session.groupId) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
-  const membershipRole = await verifyGroupAccess(req.session.userId, req.session.groupId, 'user');
+  const membershipRole = await verifyGroupAccess(req, req.session.groupId, 'user');
   if (!membershipRole) {
     return res.status(403).json({ error: 'No membership' });
   }
@@ -217,11 +230,12 @@ app.put('/api/context', requireAuth, async (req, res) => {
   if (!groupId) {
     return res.status(400).json({ error: 'groupId required' });
   }
-  const hasMembership = await db.userHasGroup(req.session.userId, groupId);
-  if (!hasMembership) {
+  const membership = await db.getMembership(req.session.userId, groupId);
+  if (!membership) {
     return res.status(403).json({ error: 'No membership' });
   }
   req.session.groupId = groupId;
+  req.session.membershipRole = membership.role;
   const group = await db.getGroupById(groupId);
   res.json(group);
 });
@@ -274,7 +288,7 @@ app.post('/api/groups/renew-code', requireAuth, async (req, res) => {
 
 app.get('/api/groups/:id/members', requireAuth, async (req, res) => {
   const groupId = Number(req.params.id);
-  const role = await verifyGroupAccess(req.session.userId, groupId, 'moderator');
+  const role = await verifyGroupAccess(req, groupId, 'moderator');
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const members = await db.getGroupMembers(groupId);
@@ -289,12 +303,15 @@ app.put('/api/groups/:id/members', requireAuth, async (req, res) => {
   const groupId = Number(req.params.id);
   const { userId, role } = req.body;
   if (!userId || !role) return res.status(400).json({ error: 'userId and role required' });
-  const access = await verifyGroupAccess(req.session.userId, groupId, 'admin');
+  const access = await verifyGroupAccess(req, groupId, 'admin');
   if (!access) return res.status(403).json({ error: 'Forbidden' });
   try {
     const membership = await db.getMembership(userId, groupId);
     if (!membership) return res.status(404).json({ error: 'Not found' });
     await db.updateMembership(membership.id, role, membership.nickname, membership.active);
+    if (userId === req.session.userId && groupId === req.session.groupId) {
+      req.session.membershipRole = role;
+    }
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -306,12 +323,15 @@ app.delete('/api/groups/:id/members', requireAuth, async (req, res) => {
   const groupId = Number(req.params.id);
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: 'userId required' });
-  const access = await verifyGroupAccess(req.session.userId, groupId, 'admin');
+  const access = await verifyGroupAccess(req, groupId, 'admin');
   if (!access) return res.status(403).json({ error: 'Forbidden' });
   try {
     const membership = await db.getMembership(userId, groupId);
     if (!membership) return res.status(404).json({ error: 'Not found' });
     await db.deleteMembership(membership.id);
+    if (userId === req.session.userId && groupId === req.session.groupId) {
+      req.session.membershipRole = null;
+    }
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -328,7 +348,7 @@ app.get('/api/groups', requireAuth, async (req, res) => {
 
 // Get all suggestions
 app.get('/api/suggestions', requireAuth, async (req, res) => {
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
@@ -343,7 +363,7 @@ app.get('/api/suggestions', requireAuth, async (req, res) => {
 
 // Create a new suggestion
 app.post('/api/suggestions', requireAuth, async (req, res) => {
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   const { title, author, youtube } = req.body;
   if (!title) {
@@ -366,7 +386,7 @@ app.put('/api/suggestions/:id', requireAuth, async (req, res) => {
   if (isNaN(id) || !title) {
     return res.status(400).json({ error: 'Invalid data' });
   }
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const changes = await db.updateSuggestion(id, title, author || '', youtube || '', req.session.userId, role, req.session.groupId);
@@ -386,7 +406,7 @@ app.put('/api/suggestions/:id', requireAuth, async (req, res) => {
 app.delete('/api/suggestions/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const changes = await db.deleteSuggestion(id, req.session.userId, role, req.session.groupId);
@@ -405,7 +425,7 @@ app.delete('/api/suggestions/:id', requireAuth, async (req, res) => {
 app.post('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const ok = await db.incrementSuggestionLikes(id, req.session.userId);
@@ -423,7 +443,7 @@ app.post('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
 app.delete('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const ok = await db.decrementUserSuggestionLikes(id, req.session.userId);
@@ -441,7 +461,7 @@ app.delete('/api/suggestions/:id/vote', requireAuth, async (req, res) => {
 app.post('/api/suggestions/:id/to-rehearsal', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const created = await db.moveSuggestionToRehearsal(id);
@@ -457,7 +477,7 @@ app.post('/api/suggestions/:id/to-rehearsal', requireAuth, async (req, res) => {
 
 // Get all rehearsals
 app.get('/api/rehearsals', requireAuth, async (req, res) => {
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
@@ -472,7 +492,7 @@ app.get('/api/rehearsals', requireAuth, async (req, res) => {
 
 // Create a rehearsal
 app.post('/api/rehearsals', requireAuth, async (req, res) => {
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   const { title, youtube, spotify } = req.body;
   if (!title) return res.status(400).json({ error: 'Title is required' });
@@ -491,7 +511,7 @@ app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { level, note, audio } = req.body;
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     await db.updateRehearsalUserData(id, req.session.username, level, note, audio);
@@ -508,7 +528,7 @@ app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
 app.put('/api/rehearsals/:id/mastered', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const rehearsal = await db.getRehearsalById(id, req.session.groupId);
@@ -528,7 +548,7 @@ app.put('/api/rehearsals/:id/mastered', requireAuth, async (req, res) => {
 app.post('/api/rehearsals/:id/to-suggestion', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const created = await db.moveRehearsalToSuggestion(id);
@@ -544,7 +564,7 @@ app.post('/api/rehearsals/:id/to-suggestion', requireAuth, async (req, res) => {
 
 // Get all performances
 app.get('/api/performances', requireAuth, async (req, res) => {
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const performances = await db.getPerformances();
@@ -557,7 +577,7 @@ app.get('/api/performances', requireAuth, async (req, res) => {
 
 // Create a performance
 app.post('/api/performances', requireAuth, async (req, res) => {
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   const { name, date, location, songs } = req.body;
   if (!name || !date) {
@@ -578,7 +598,7 @@ app.post('/api/performances', requireAuth, async (req, res) => {
 app.get('/api/performances/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const perf = await db.getPerformance(id);
@@ -595,7 +615,7 @@ app.put('/api/performances/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { name, date, location, songs } = req.body;
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const changes = await db.updatePerformance(id, name, date, location || '', songs || [], req.session.userId, role);
@@ -615,7 +635,7 @@ app.put('/api/performances/:id', requireAuth, async (req, res) => {
 app.delete('/api/performances/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const changes = await db.deletePerformance(id, req.session.userId, role);
@@ -634,7 +654,7 @@ app.delete('/api/performances/:id', requireAuth, async (req, res) => {
 
 // Get settings
 app.get('/api/settings', requireAuth, async (req, res) => {
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId);
+  const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
     const settings = await db.getSettingsForGroup(req.session.groupId);
@@ -647,7 +667,7 @@ app.get('/api/settings', requireAuth, async (req, res) => {
 
 // Update settings
 app.put('/api/settings', requireAuth, async (req, res) => {
-  const role = await verifyGroupAccess(req.session.userId, req.session.groupId, 'admin');
+  const role = await verifyGroupAccess(req, req.session.groupId, 'admin');
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   const { groupName, darkMode, nextRehearsalDate, nextRehearsalLocation } = req.body;
   try {
@@ -696,6 +716,9 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
     const changes = await db.updateUserRole(id, role);
     if (changes === 0) return res.status(404).json({ error: 'User not found' });
     await db.logEvent(req.session.userId, 'role_change', { targetUserId: id, newRole: role });
+    if (id === req.session.userId) {
+      req.session.role = role;
+    }
     res.json({ success: true });
   } catch (err) {
     console.error(err);
