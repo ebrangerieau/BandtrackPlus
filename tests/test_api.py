@@ -87,12 +87,17 @@ def test_login_without_group(tmp_path):
         )
         conn.commit()
         conn.close()
-        status, _, body = request(
+        status, headers, body = request(
             "POST", port, "/api/login", {"username": "dave", "password": "pw"}
         )
-        assert status == 403
+        assert status == 200
         data = json.loads(body)
-        assert data["error"] == "No group membership"
+        assert data["user"]["needsGroup"] is True
+        cookie = extract_cookie(headers)
+        headers = {"Cookie": cookie}
+        status, _, body = request("GET", port, "/api/me", headers=headers)
+        assert status == 200
+        assert json.loads(body)["needsGroup"] is True
     finally:
         stop_test_server(httpd, thread)
 
