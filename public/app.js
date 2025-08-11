@@ -108,6 +108,10 @@
     try {
       const user = await api('/me');
       currentUser = user;
+      const userNameEl = document.getElementById('user-name');
+      if (userNameEl) userNameEl.textContent = currentUser.username;
+      const profileImg = document.querySelector('#profile-btn img');
+      if (profileImg) profileImg.src = currentUser?.avatarUrl || 'avatar.png';
       if (!user.needsGroup) {
         // Récupère les paramètres (notamment le mode sombre) pour appliquer le thème
         const settings = await api('/settings');
@@ -116,11 +120,13 @@
         document.title = `${settings.groupName} – BandTrack`;
         const groupNameEl = document.getElementById('group-name');
         if (groupNameEl) groupNameEl.textContent = settings.groupName;
-        const profileImg = document.querySelector('#profile-btn img');
-        if (profileImg) profileImg.src = currentUser?.avatarUrl || 'avatar.png';
       }
     } catch (err) {
       currentUser = null;
+      const userNameEl = document.getElementById('user-name');
+      if (userNameEl) userNameEl.textContent = '';
+      const profileImg = document.querySelector('#profile-btn img');
+      if (profileImg) profileImg.src = 'avatar.png';
     }
   }
 
@@ -319,6 +325,12 @@
   function renderApp() {
     const app = document.getElementById('app');
     if (!currentUser) {
+      const userNameEl = document.getElementById('user-name');
+      if (userNameEl) userNameEl.textContent = '';
+      const profileImg = document.querySelector('#profile-btn img');
+      if (profileImg) profileImg.src = 'avatar.png';
+      const groupNameEl = document.getElementById('group-name');
+      if (groupNameEl) groupNameEl.textContent = '';
       resetCaches();
       renderAuth(app);
     } else if (currentUser.needsGroup) {

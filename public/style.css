@@ -112,6 +112,16 @@ body, html {
   text-align: center;
 }
 
+#user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#user-name {
+  font-weight: bold;
+}
+
 #profile-btn img {
   width: 40px;
   height: 40px;
