@@ -14,9 +14,6 @@ const PBKDF2_ITERATIONS = 200000;
 // Import database helpers
 const db = require('./db');
 
-// Initialize the database on server start
-db.init();
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -777,7 +774,10 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Start the HTTPS server
-https.createServer(httpsOptions, app).listen(PORT, () => {
-  console.log(`BandTrack server listening on port ${PORT}`);
-});
+// Start the HTTPS server once the database is initialized
+;(async () => {
+  await db.init();
+  https.createServer(httpsOptions, app).listen(PORT, () => {
+    console.log(`BandTrack server listening on port ${PORT}`);
+  });
+})();
