@@ -132,9 +132,8 @@ app.post('/api/register', async (req, res) => {
       return res.status(409).json({ error: 'Username already taken' });
     }
     // Hash password using PBKDF2 with a per-user salt
-    const salt = crypto.randomBytes(16).toString('hex');
-    const derived = await pbkdf2(password, salt, PBKDF2_ITERATIONS, 32, 'sha256');
-    const hash = derived.toString('hex');
+    const salt = crypto.randomBytes(16);
+    const hash = await pbkdf2(password, salt, PBKDF2_ITERATIONS, 32, 'sha256');
     const count = await db.getUserCount();
     const role = count === 0 ? 'admin' : 'user';
     const userId = await db.createUser(username, hash, salt, role);
@@ -164,8 +163,10 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const derived = await pbkdf2(password, user.salt, PBKDF2_ITERATIONS, 32, 'sha256');
-    const hash = derived.toString('hex');
-    if (hash !== user.password_hash) {
+    if (
+      user.password_hash.length !== derived.length ||
+      !crypto.timingSafeEqual(derived, user.password_hash)
+    ) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     req.session.userId = user.id;
