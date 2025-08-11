@@ -190,6 +190,7 @@ function init() {
         `CREATE TABLE IF NOT EXISTS rehearsals (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           title TEXT NOT NULL,
+          author TEXT,
           youtube TEXT,
           spotify TEXT,
           levels_json TEXT DEFAULT '{}',
@@ -206,6 +207,9 @@ function init() {
 
       db.all('PRAGMA table_info(rehearsals)', (err, rows) => {
         if (!err && rows) {
+          if (!rows.find((r) => r.name === 'author')) {
+            db.run('ALTER TABLE rehearsals ADD COLUMN author TEXT');
+          }
           if (!rows.find((r) => r.name === 'mastered')) {
             db.run('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0');
           }
@@ -766,11 +770,11 @@ function incrementSuggestionLikes(id, userId) {
 /**
  * Creates a rehearsal.  The levels and notes JSON are initially empty.
  */
-function createRehearsal(title, youtube, spotify, creatorId, groupId) {
+function createRehearsal(title, author, youtube, spotify, creatorId, groupId) {
   return new Promise((resolve, reject) => {
     db.run(
-      'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [title, youtube || null, spotify || null, '{}', '{}', '{}', 0, creatorId, groupId],
+      'INSERT INTO rehearsals (title, author, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [title, author || null, youtube || null, spotify || null, '{}', '{}', '{}', 0, creatorId, groupId],
       function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
@@ -785,7 +789,7 @@ function createRehearsal(title, youtube, spotify, creatorId, groupId) {
 function getRehearsals(groupId, limit = 100, offset = 0) {
   return new Promise((resolve, reject) => {
     db.all(
-      `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
+      `SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
               u.username AS creator
        FROM rehearsals r
        JOIN users u ON u.id = r.creator_id
@@ -801,6 +805,7 @@ function getRehearsals(groupId, limit = 100, offset = 0) {
             return {
               id: row.id,
               title: row.title,
+              author: row.author,
               youtube: row.youtube,
               spotify: row.spotify,
               levels: JSON.parse(row.levels_json || '{}'),
@@ -824,7 +829,7 @@ function getRehearsals(groupId, limit = 100, offset = 0) {
 function getRehearsalById(id, groupId) {
   return new Promise((resolve, reject) => {
     db.get(
-      `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
+      `SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
               u.username AS creator
        FROM rehearsals r
        JOIN users u ON u.id = r.creator_id
@@ -836,6 +841,7 @@ function getRehearsalById(id, groupId) {
         resolve({
           id: row.id,
           title: row.title,
+          author: row.author,
           youtube: row.youtube,
           spotify: row.spotify,
           levels: JSON.parse(row.levels_json || '{}'),
@@ -889,6 +895,26 @@ function updateRehearsalUserData(id, username, level, note, audio) {
 }
 
 /**
+ * Updates rehearsal metadata (title, author, youtube, spotify). Only the
+ * rehearsal creator or a moderator/admin may modify these fields. Resolves
+ * with the number of rows updated.
+ */
+function updateRehearsalDetails(id, title, author, youtube, spotify, userId, role, groupId) {
+  return new Promise((resolve, reject) => {
+    const sql = role === 'admin' || role === 'moderator'
+      ? 'UPDATE rehearsals SET title = ?, author = ?, youtube = ?, spotify = ? WHERE id = ? AND group_id = ?'
+      : 'UPDATE rehearsals SET title = ?, author = ?, youtube = ?, spotify = ? WHERE id = ? AND creator_id = ? AND group_id = ?';
+    const params = role === 'admin' || role === 'moderator'
+      ? [title, author, youtube, spotify, id, groupId]
+      : [title, author, youtube, spotify, id, userId, groupId];
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
+  });
+}
+
+/**
  * Toggles the mastered flag for a rehearsal and returns the updated row.
  */
 function toggleRehearsalMastered(id) {
@@ -903,7 +929,7 @@ function toggleRehearsalMastered(id) {
         function (err) {
           if (err) return reject(err);
           db.get(
-            `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
+            `SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
                     u.username AS creator
              FROM rehearsals r JOIN users u ON u.id = r.creator_id WHERE r.id = ?`,
             [id],
@@ -914,6 +940,7 @@ function toggleRehearsalMastered(id) {
                 resolve({
                   id: updated.id,
                   title: updated.title,
+                  author: updated.author,
                   youtube: updated.youtube,
                   spotify: updated.spotify,
                   levels: JSON.parse(updated.levels_json || '{}'),
@@ -1049,21 +1076,21 @@ function deletePerformance(id, userId, role) {
 function moveSuggestionToRehearsal(id) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT id, title, COALESCE(youtube, url) as youtube, creator_id FROM suggestions WHERE id = ?',
+      'SELECT id, title, author, COALESCE(youtube, url) as youtube, creator_id FROM suggestions WHERE id = ?',
       [id],
       (err, row) => {
         if (err) return reject(err);
         if (!row) return resolve(null);
         db.run(
-          'INSERT INTO rehearsals (title, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [row.title, row.youtube || null, null, '{}', '{}', '{}', 0, row.creator_id],
+          'INSERT INTO rehearsals (title, author, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [row.title, row.author || null, row.youtube || null, null, '{}', '{}', '{}', 0, row.creator_id],
           function (err2) {
             if (err2) return reject(err2);
             const newId = this.lastID;
             db.run('DELETE FROM suggestions WHERE id = ?', [id], (err3) => {
               if (err3) return reject(err3);
               db.get(
-                `SELECT r.id, r.title, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
+                `SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.levels_json, r.notes_json, r.audio_notes_json, r.mastered, r.creator_id, r.created_at,
                         u.username AS creator
                  FROM rehearsals r JOIN users u ON u.id = r.creator_id WHERE r.id = ?`,
                 [newId],
@@ -1074,6 +1101,7 @@ function moveSuggestionToRehearsal(id) {
                     resolve({
                       id: rrow.id,
                       title: rrow.title,
+                      author: rrow.author,
                       youtube: rrow.youtube,
                       spotify: rrow.spotify,
                       levels: JSON.parse(rrow.levels_json || '{}'),
@@ -1101,14 +1129,14 @@ function moveSuggestionToRehearsal(id) {
 function moveRehearsalToSuggestion(id) {
   return new Promise((resolve, reject) => {
     db.get(
-      'SELECT id, title, youtube, creator_id FROM rehearsals WHERE id = ?',
+      'SELECT id, title, author, youtube, creator_id FROM rehearsals WHERE id = ?',
       [id],
       (err, row) => {
         if (err) return reject(err);
         if (!row) return resolve(null);
         db.run(
           'INSERT INTO suggestions (title, author, youtube, creator_id) VALUES (?, ?, ?, ?)',
-          [row.title, null, row.youtube || null, row.creator_id],
+          [row.title, row.author || null, row.youtube || null, row.creator_id],
           function (err2) {
             if (err2) return reject(err2);
             const newId = this.lastID;
@@ -1452,6 +1480,7 @@ module.exports = {
   getRehearsals,
   getRehearsalById,
   updateRehearsalUserData,
+  updateRehearsalDetails,
   toggleRehearsalMastered,
   createPerformance,
   getPerformances,

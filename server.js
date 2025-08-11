@@ -503,10 +503,10 @@ app.get('/api/rehearsals', requireAuth, async (req, res) => {
 app.post('/api/rehearsals', requireAuth, async (req, res) => {
   const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
-  const { title, youtube, spotify } = req.body;
+  const { title, author, youtube, spotify } = req.body;
   if (!title) return res.status(400).json({ error: 'Title is required' });
   try {
-    const newId = await db.createRehearsal(title, youtube || '', spotify || '', req.session.userId, req.session.groupId);
+    const newId = await db.createRehearsal(title, author || '', youtube || '', spotify || '', req.session.userId, req.session.groupId);
     const created = await db.getRehearsalById(newId, req.session.groupId);
     res.status(201).json(created);
   } catch (err) {
@@ -518,12 +518,20 @@ app.post('/api/rehearsals', requireAuth, async (req, res) => {
 // Update the current user's level/notes/audio for a rehearsal
 app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { level, note, audio } = req.body;
+  const { level, note, audio, title, author, youtube, spotify } = req.body;
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
-    await db.updateRehearsalUserData(id, req.session.username, level, note, audio);
+    if (title !== undefined || author !== undefined || youtube !== undefined || spotify !== undefined) {
+      if (!title) return res.status(400).json({ error: 'Title is required' });
+      const changes = await db.updateRehearsalDetails(id, title, author || '', youtube || '', spotify || '', req.session.userId, role, req.session.groupId);
+      if (changes === 0) {
+        return res.status(403).json({ error: 'Not allowed to edit rehearsal details' });
+      }
+    } else {
+      await db.updateRehearsalUserData(id, req.session.username, level, note, audio);
+    }
     const updated = await db.getRehearsalById(id, req.session.groupId);
     await db.logEvent(req.session.userId, 'edit', { entity: 'rehearsal', id });
     res.json(updated);
