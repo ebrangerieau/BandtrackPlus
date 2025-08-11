@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "migrate": "node scripts/migrate_to_multigroup.js"
+    "migrate": "node scripts/migrate_to_multigroup.js",
+    "migrate-passwords": "node scripts/migrate_password_hex_to_blob.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -87,8 +87,8 @@ function init() {
         `CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           username TEXT NOT NULL UNIQUE,
-          password_hash TEXT NOT NULL,
-          salt TEXT NOT NULL,
+          password_hash BLOB NOT NULL,
+          salt BLOB NOT NULL,
           role TEXT NOT NULL DEFAULT 'user'
         );`
       );
@@ -97,7 +97,7 @@ function init() {
       db.all('PRAGMA table_info(users)', (err, rows) => {
         if (!err && rows) {
           if (!rows.find((r) => r.name === 'salt')) {
-            db.run('ALTER TABLE users ADD COLUMN salt TEXT');
+            db.run('ALTER TABLE users ADD COLUMN salt BLOB');
           }
           if (!rows.find((r) => r.name === 'role')) {
             db.run("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
@@ -385,9 +385,9 @@ function generateInvitationCode() {
  * Creates a new user with the given username, hashed password and salt.
  * Returns a promise that resolves to the inserted user ID.
  * @param {string} username
- * @param {string} passwordHash
- * @param {string} salt
- */
+ * @param {Buffer} passwordHash
+ * @param {Buffer} salt
+*/
 function createUser(username, passwordHash, salt, role = 'user') {
   return new Promise((resolve, reject) => {
     const stmt = db.prepare(
