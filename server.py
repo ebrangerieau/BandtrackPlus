@@ -75,6 +75,7 @@ import mimetypes
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
+from scripts.migrate_suggestion_votes import migrate as migrate_suggestion_votes
 
 #############################
 # Database initialisation
@@ -130,6 +131,16 @@ def init_db():
                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                FOREIGN KEY (creator_id) REFERENCES users(id),
                FOREIGN KEY (group_id) REFERENCES groups(id)
+           );'''
+    )
+    # Individual suggestion votes per user
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS suggestion_votes (
+               suggestion_id INTEGER NOT NULL,
+               user_id INTEGER NOT NULL,
+               PRIMARY KEY (suggestion_id, user_id),
+               FOREIGN KEY (suggestion_id) REFERENCES suggestions(id),
+               FOREIGN KEY (user_id) REFERENCES users(id)
            );'''
     )
     # Rehearsals: store levels and notes per user as JSON strings.  Include
@@ -648,6 +659,7 @@ def move_suggestion_to_rehearsal(sug_id: int):
         (new_id,),
     )
     new_row = cur.fetchone()
+    cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
     cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, row['group_id']))
     conn.commit()
     conn.close()
@@ -1536,8 +1548,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if user.get('role') in ('admin', 'moderator'):
             cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
         else:
-            cur.execute('DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?', (sug_id, user['id'], user['group_id']))
+            cur.execute(
+                'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?',
+                (sug_id, user['id'], user['group_id'])
+            )
         deleted = cur.rowcount
+        if deleted:
+            cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
         conn.commit()
         conn.close()
         if deleted:
@@ -1750,8 +1767,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if role in ('admin', 'moderator'):
             cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
         else:
-            cur.execute('DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?', (sug_id, user['id'], user['group_id']))
+            cur.execute(
+                'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?',
+                (sug_id, user['id'], user['group_id'])
+            )
         deleted = cur.rowcount
+        if deleted:
+            cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
         conn.commit()
         conn.close()
         if deleted:
@@ -1760,17 +1782,23 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
 
     def api_vote_suggestion_id(self, sug_id: int, user: dict):
-        """Increment likes for a suggestion and return the updated row."""
+        """Register a user's vote for a suggestion and return the updated row."""
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('UPDATE suggestions SET likes = likes + 1 WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
-        if cur.rowcount == 0:
-            conn.commit()
+        cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+        if not cur.fetchone():
             conn.close()
             return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+        cur.execute(
+            'INSERT OR IGNORE INTO suggestion_votes (suggestion_id, user_id) VALUES (?, ?)',
+            (sug_id, user['id'])
+        )
+        cur.execute('SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+        likes = cur.fetchone()[0]
+        cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
         cur.execute(
             '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at,
                       u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
@@ -1797,22 +1825,23 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
     def api_unvote_suggestion_id(self, sug_id: int, user: dict):
-        """Decrement likes for a suggestion and return the updated row."""
+        """Remove a user's vote for a suggestion and return the updated row."""
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(
-            'UPDATE suggestions '
-            'SET likes = CASE WHEN likes > 0 THEN likes - 1 ELSE 0 END '
-            'WHERE id = ? AND group_id = ?',
-            (sug_id, user['group_id'])
-        )
-        if cur.rowcount == 0:
-            conn.commit()
+        cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+        if not cur.fetchone():
             conn.close()
             return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+        cur.execute(
+            'DELETE FROM suggestion_votes WHERE suggestion_id = ? AND user_id = ?',
+            (sug_id, user['id'])
+        )
+        cur.execute('SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+        likes = cur.fetchone()[0]
+        cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
         cur.execute(
             '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at,
                       u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
@@ -2329,6 +2358,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 def run_server(host: str = '0.0.0.0', port: int = 3000):
     migrate_to_multigroup()
     init_db()
+    migrate_suggestion_votes()
     server = ThreadingHTTPServer((host, port), BandTrackHandler)
     print(f"BandTrack server running on http://{host}:{port} (Ctrl-C to stop)")
     try:
