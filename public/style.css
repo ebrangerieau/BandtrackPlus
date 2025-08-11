@@ -413,6 +413,19 @@ textarea {
   box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 
+/* Section générique pour les paramètres */
+.settings-section {
+  margin-top: 20px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.settings-section h3 {
+  margin-top: 0;
+}
+
 /* Bouton de déconnexion */
 .logout-btn {
   margin-top: 20px;

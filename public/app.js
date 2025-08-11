@@ -2327,6 +2327,8 @@
     container.appendChild(themeSection);
     const rehearsalSection = renderRehearsalSection(currentSettings);
     container.appendChild(rehearsalSection);
+    const logoutSection = document.createElement('div');
+    logoutSection.className = 'settings-section';
     const logoutBtn = document.createElement('button');
     logoutBtn.className = 'logout-btn';
     logoutBtn.textContent = 'Se déconnecter';
@@ -2339,7 +2341,8 @@
         alert(err.message);
       }
     };
-    container.appendChild(logoutBtn);
+    logoutSection.appendChild(logoutBtn);
+    container.appendChild(logoutSection);
     if (isAdmin()) {
       const adminSection = await renderAdminSection(container);
       container.appendChild(adminSection);
