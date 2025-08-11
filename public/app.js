@@ -64,13 +64,17 @@
       json = null;
     }
     if (res.status === 401) {
-      if (json && json.error === 'No membership') {
-        throw new Error('No membership');
-      }
       const wasLoggedIn = currentUser !== null;
       currentUser = null;
       if (wasLoggedIn) renderApp();
       throw new Error(json?.error || 'Non authentifié');
+    }
+    if (res.status === 403 && json && json.error === 'No membership') {
+      if (currentUser) {
+        currentUser.needsGroup = true;
+        renderApp();
+      }
+      throw new Error('No membership');
     }
     if (!res.ok) {
       throw new Error((json && json.error) || 'Erreur API');
@@ -104,15 +108,17 @@
     try {
       const user = await api('/me');
       currentUser = user;
-      // Récupère les paramètres (notamment le mode sombre) pour appliquer le thème
-      const settings = await api('/settings');
-      applyTheme(settings.darkMode);
-      applyTemplate(settings.template || 'classic');
-      document.title = `${settings.groupName} – BandTrack`;
-      const groupNameEl = document.getElementById('group-name');
-      if (groupNameEl) groupNameEl.textContent = settings.groupName;
-      const profileImg = document.querySelector('#profile-btn img');
-      if (profileImg) profileImg.src = currentUser?.avatarUrl || 'avatar.png';
+      if (!user.needsGroup) {
+        // Récupère les paramètres (notamment le mode sombre) pour appliquer le thème
+        const settings = await api('/settings');
+        applyTheme(settings.darkMode);
+        applyTemplate(settings.template || 'classic');
+        document.title = `${settings.groupName} – BandTrack`;
+        const groupNameEl = document.getElementById('group-name');
+        if (groupNameEl) groupNameEl.textContent = settings.groupName;
+        const profileImg = document.querySelector('#profile-btn img');
+        if (profileImg) profileImg.src = currentUser?.avatarUrl || 'avatar.png';
+      }
     } catch (err) {
       currentUser = null;
     }
@@ -315,9 +321,37 @@
     if (!currentUser) {
       resetCaches();
       renderAuth(app);
+    } else if (currentUser.needsGroup) {
+      renderGroupSetup(app);
     } else {
       renderMain(app);
     }
+  }
+
+  function renderGroupSetup(app) {
+    app.innerHTML = '';
+    const container = document.createElement('div');
+    container.className = 'auth-container';
+    const h2 = document.createElement('h2');
+    h2.textContent = 'Rejoindre ou créer un groupe';
+    container.appendChild(h2);
+    const p = document.createElement('p');
+    p.textContent = 'Vous devez sélectionner ou créer un groupe pour continuer.';
+    container.appendChild(p);
+    const btnRow = document.createElement('div');
+    const createBtn = document.createElement('button');
+    createBtn.className = 'btn-primary';
+    createBtn.textContent = 'Créer un groupe';
+    createBtn.onclick = () => showCreateGroupDialog();
+    btnRow.appendChild(createBtn);
+    const joinBtn = document.createElement('button');
+    joinBtn.className = 'btn-secondary';
+    joinBtn.style.marginLeft = '10px';
+    joinBtn.textContent = 'Rejoindre un groupe';
+    joinBtn.onclick = () => showJoinGroupDialog();
+    btnRow.appendChild(joinBtn);
+    container.appendChild(btnRow);
+    app.appendChild(container);
   }
 
   /**
@@ -438,11 +472,7 @@
           await refreshGroups();
           renderApp();
         } catch (err) {
-          if (err.message === 'No membership' || err.message === 'No group membership') {
-            errorDiv.textContent = 'Aucun groupe associé. Contactez l’administrateur.';
-          } else {
-            errorDiv.textContent = err.message;
-          }
+          errorDiv.textContent = err.message;
         }
       }
     }

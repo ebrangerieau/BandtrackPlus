@@ -773,9 +773,11 @@ def get_membership(user_id: int, group_id: int) -> dict | None:
 ROLE_LEVELS = {'user': 1, 'moderator': 2, 'admin': 3}
 
 
-def verify_group_access(user_id: int, group_id: int, required_role: str = 'user') -> str | None:
+def verify_group_access(user_id: int, group_id: int | None, required_role: str = 'user') -> str | None:
     """Return the membership role if the user has access to the group and
     meets the required role.  Otherwise return ``None``."""
+    if group_id is None:
+        return None
     membership = get_membership(user_id, group_id)
     if not membership or not membership.get('active'):
         return None
@@ -1171,7 +1173,25 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.close()
         group_id = g_row['group_id'] if g_row else None
         if group_id is None:
-            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No group membership'})
+            token = generate_session(row['id'], None)
+            expires_ts = int(time.time()) + 7 * 24 * 3600
+            log_event(row['id'], 'login', {'username': row['username']})
+            send_json(
+                self,
+                HTTPStatus.OK,
+                {
+                    'message': 'Logged in',
+                    'user': {
+                        'id': row['id'],
+                        'username': row['username'],
+                        'role': row['role'],
+                        'membershipRole': None,
+                        'needsGroup': True,
+                        'isAdmin': row['role'] == 'admin',
+                    },
+                },
+                cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+            )
             return
         token = generate_session(row['id'], group_id)
         expires_ts = int(time.time()) + 7 * 24 * 3600
@@ -1209,6 +1229,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not user:
             send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
             return
+        if user.get('group_id') is None:
+            send_json(self, HTTPStatus.OK, {
+                'id': user['id'],
+                'username': user['username'],
+                'role': user.get('role'),
+                'needsGroup': True,
+                'isAdmin': user.get('role') == 'admin',
+            })
+            return
         membership_role = verify_group_access(user['id'], user['group_id'])
         if not membership_role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No membership'})
@@ -1223,6 +1252,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 
     def api_get_context(self, user: dict):
         """Return the currently active group for the session."""
+        if user.get('group_id') is None:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'No active group'})
+            return
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('SELECT id, name FROM groups WHERE id = ?', (user['group_id'],))

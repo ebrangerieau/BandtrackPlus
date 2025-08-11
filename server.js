@@ -74,7 +74,7 @@ app.use((req, res, next) => {
  * not logged in, respond with HTTP 401.
  */
 function requireAuth(req, res, next) {
-  if (!req.session.userId || !req.session.groupId) {
+  if (!req.session.userId) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
   next();
@@ -104,6 +104,7 @@ function hasModRights(role) {
 
 async function verifyGroupAccess(req, groupId = req.session.groupId, requiredRole = 'user') {
   const levels = { user: 1, moderator: 2, admin: 3 };
+  if (!groupId) return null;
   if (req.session.membershipRole && groupId === req.session.groupId) {
     return levels[req.session.membershipRole] >= levels[requiredRole]
       ? req.session.membershipRole
@@ -172,11 +173,16 @@ app.post('/api/login', async (req, res) => {
     req.session.role = user.role;
     const groupId = await db.getFirstGroupForUser(user.id);
     if (groupId == null) {
-      return res.status(403).json({ error: 'No group membership' });
+      req.session.groupId = null;
+      req.session.membershipRole = null;
+      req.session.needsGroup = true;
+      await db.logEvent(user.id, 'login', { username: user.username });
+      return res.json({ id: user.id, username: user.username, role: user.role, needsGroup: true });
     }
     req.session.groupId = groupId;
     const membership = await db.getMembership(user.id, groupId);
     req.session.membershipRole = membership ? membership.role : null;
+    req.session.needsGroup = false;
     await db.logEvent(user.id, 'login', { username: user.username });
     res.json({ id: user.id, username: user.username, role: user.role, membershipRole: membership ? membership.role : null });
   } catch (err) {
@@ -194,8 +200,16 @@ app.post('/api/logout', (req, res) => {
 
 // Return current authenticated user
 app.get('/api/me', async (req, res) => {
-  if (!req.session.userId || !req.session.groupId) {
+  if (!req.session.userId) {
     return res.status(401).json({ error: 'Not authenticated' });
+  }
+  if (!req.session.groupId) {
+    return res.json({
+      id: req.session.userId,
+      username: req.session.username,
+      role: req.session.role,
+      needsGroup: true,
+    });
   }
   const membershipRole = await verifyGroupAccess(req, req.session.groupId, 'user');
   if (!membershipRole) {
@@ -211,7 +225,11 @@ app.get('/api/me', async (req, res) => {
 
 // ----- Context management -----
 app.get('/api/context', requireAuth, async (req, res) => {
+  if (!req.session.groupId) {
+    return res.status(404).json({ error: 'No active group' });
+  }
   const group = await db.getGroupById(req.session.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found' });
   res.json(group);
 });
 
