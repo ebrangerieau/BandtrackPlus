@@ -26,6 +26,15 @@ npm install
 npm run migrate
 SSL_KEY=certs/key.pem SSL_CERT=certs/cert.pem npm start
 ```
+> **Remarque :** sous Windows, la syntaxe `VAR=valeur` n'est pas supportée dans l'invite de commandes. Utilisez plutôt :
+> ```bat
+> set SSL_KEY=certs/key.pem && set SSL_CERT=certs/cert.pem && npm start
+> ```
+> ou la commande multiplateforme :
+> ```bash
+> npx cross-env SSL_KEY=certs/key.pem SSL_CERT=certs/cert.pem npm start
+> ```
+
 
 ### HTTPS
 
