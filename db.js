@@ -147,24 +147,41 @@ function init() {
       // Ensure new columns exist before creating index
       db.all('PRAGMA table_info(suggestions)', (err, rows) => {
         if (!err && rows) {
+          const operations = [];
           if (!rows.find((r) => r.name === 'likes')) {
-            db.run('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0');
+            operations.push(
+              'ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0'
+            );
           }
           if (!rows.find((r) => r.name === 'author')) {
-            db.run('ALTER TABLE suggestions ADD COLUMN author TEXT');
+            operations.push('ALTER TABLE suggestions ADD COLUMN author TEXT');
           }
           if (!rows.find((r) => r.name === 'youtube')) {
-            db.run('ALTER TABLE suggestions ADD COLUMN youtube TEXT');
+            operations.push('ALTER TABLE suggestions ADD COLUMN youtube TEXT');
           }
           if (!rows.find((r) => r.name === 'group_id')) {
-            db.run('ALTER TABLE suggestions ADD COLUMN group_id INTEGER');
-            db.run(
+            operations.push('ALTER TABLE suggestions ADD COLUMN group_id INTEGER');
+            operations.push(
               'UPDATE suggestions SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
             );
           }
-          db.run(
+          operations.push(
             'CREATE INDEX IF NOT EXISTS idx_suggestions_group_likes_created_at ON suggestions (group_id, likes, created_at)'
           );
+
+          const runSequentially = (statements) => {
+            const next = () => {
+              const sql = statements.shift();
+              if (!sql) return;
+              db.run(sql, (err) => {
+                if (err) return;
+                next();
+              });
+            };
+            next();
+          };
+
+          runSequentially(operations);
         }
       });
 
