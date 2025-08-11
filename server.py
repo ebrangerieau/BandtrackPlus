@@ -107,6 +107,15 @@ def init_db():
                role TEXT NOT NULL DEFAULT 'user'
            );'''
     )
+    # WebAuthn credentials associated with users
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS users_webauthn (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               user_id INTEGER NOT NULL,
+               credential_id TEXT NOT NULL UNIQUE,
+               FOREIGN KEY (user_id) REFERENCES users(id)
+           );'''
+    )
     # Suggestions: simple list of suggestions with optional URL and creator
     cur.execute(
         '''CREATE TABLE IF NOT EXISTS suggestions (
@@ -499,6 +508,56 @@ def log_event(user_id: int | None, action: str, metadata: dict | None = None) ->
     )
     conn.commit()
     conn.close()
+
+
+def add_webauthn_credential(user_id: int, credential_id: str) -> int:
+    """Store a WebAuthn credential for a user."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'INSERT INTO users_webauthn (user_id, credential_id) VALUES (?, ?)',
+        (user_id, credential_id),
+    )
+    cred_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return cred_id
+
+
+def get_webauthn_credentials(user_id: int) -> list[str]:
+    """Return all credential IDs associated with a user."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
+    rows = [row['credential_id'] for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_user_by_webauthn_credential(credential_id: str) -> dict | None:
+    """Lookup the user owning a given credential ID."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT u.id, u.username, u.role FROM users_webauthn w JOIN users u ON u.id = w.user_id WHERE w.credential_id = ?',
+        (credential_id,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def verify_webauthn_credential(user_id: int, credential_id: str) -> bool:
+    """Check that ``credential_id`` belongs to ``user_id``."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
+    rows = cur.fetchall()
+    conn.close()
+    for r in rows:
+        if hmac.compare_digest(r['credential_id'], credential_id):
+            return True
+    return False
 
 def read_request_body(handler: BaseHTTPRequestHandler) -> bytes:
     """Read and return the request body for the current request.  If the
@@ -924,6 +983,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return self.api_logout(session_token)
             if path == '/api/me' and method == 'GET':
                 return self.api_me(user)
+            if path == '/api/webauthn/authenticate' and method == 'POST':
+                return self.api_webauthn_authenticate(body)
+            if path == '/api/webauthn/register' and method == 'POST':
+                if user is None:
+                    raise PermissionError
+                return self.api_webauthn_register(body, user)
 
             # Remaining routes require authentication and an active group
             if user is None or user.get('group_id') is None:
@@ -1249,6 +1314,54 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             'membershipRole': membership_role,
             'isAdmin': user.get('role') == 'admin',
         })
+
+    def api_webauthn_register(self, body: dict, user: dict):
+        """Store a new WebAuthn credential for the logged-in user."""
+        credential_id = (body.get('credentialId') or '').strip()
+        if not credential_id:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'credentialId is required'})
+            return
+        try:
+            add_webauthn_credential(user['id'], credential_id)
+        except sqlite3.IntegrityError:
+            send_json(self, HTTPStatus.CONFLICT, {'error': 'Credential already registered'})
+            return
+        send_json(self, HTTPStatus.OK, {'message': 'Credential registered'})
+
+    def api_webauthn_authenticate(self, body: dict):
+        """Authenticate using a WebAuthn credential and create a session."""
+        credential_id = (body.get('credentialId') or '').strip()
+        if not credential_id:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'credentialId is required'})
+            return
+        user_row = get_user_by_webauthn_credential(credential_id)
+        if not user_row:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credential'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1', (user_row['id'],))
+        g_row = cur.fetchone()
+        conn.close()
+        group_id = g_row['group_id'] if g_row else None
+        token = generate_session(user_row['id'], group_id)
+        expires_ts = int(time.time()) + 7 * 24 * 3600
+        membership = get_membership(user_row['id'], group_id) if group_id else None
+        log_event(user_row['id'], 'login', {'username': user_row['username'], 'method': 'webauthn'})
+        payload = {
+            'id': user_row['id'],
+            'username': user_row['username'],
+            'role': user_row['role'],
+            'membershipRole': membership['role'] if membership else None,
+            'needsGroup': group_id is None,
+            'isAdmin': user_row['role'] == 'admin',
+        }
+        send_json(
+            self,
+            HTTPStatus.OK,
+            {'message': 'Logged in', 'user': payload},
+            cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})],
+        )
 
     def api_get_context(self, user: dict):
         """Return the currently active group for the session."""
