@@ -51,6 +51,10 @@ def migrate() -> bool:
             cur.execute(f'UPDATE {table} SET group_id = 1 WHERE group_id IS NULL')
         except sqlite3.OperationalError:
             pass
+    cur.execute('PRAGMA table_info(users)')
+    columns = cur.fetchall()
+    if not any(col[1] == 'role' for col in columns):
+        cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
     cur.execute('SELECT id, role FROM users')
     for uid, role in cur.fetchall():
         cur.execute(
