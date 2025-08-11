@@ -60,29 +60,52 @@ function migrate() {
           ['suggestions', 'rehearsals', 'performances', 'settings'].forEach((t) =>
             addGroupId(db, t)
           );
-          db.all('SELECT id, role FROM users', (uErr, users) => {
-            if (uErr) {
+          db.all('PRAGMA table_info(users)', (pErr, columns) => {
+            if (pErr) {
               db.close();
-              return reject(uErr);
+              return reject(pErr);
             }
-            const stmt = db.prepare(
-              'INSERT INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)'
-            );
-            users.forEach((u) => stmt.run(u.id, u.role || 'user'));
-            stmt.finalize((fErr) => {
-              if (fErr) {
-                db.close();
-                return reject(fErr);
-              }
-              db.run(
-                "INSERT OR IGNORE INTO settings (group_id, group_name, dark_mode) VALUES (1, 'Groupe de musique', 0)",
-                (sErr) => {
+            const hasRole = columns.some((c) => c.name === 'role');
+            const proceed = () => {
+              db.all('SELECT id, role FROM users', (uErr, users) => {
+                if (uErr) {
                   db.close();
-                  if (sErr) return reject(sErr);
-                  resolve(true);
+                  return reject(uErr);
+                }
+                const stmt = db.prepare(
+                  'INSERT INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)'
+                );
+                users.forEach((u) => stmt.run(u.id, u.role || 'user'));
+                stmt.finalize((fErr) => {
+                  if (fErr) {
+                    db.close();
+                    return reject(fErr);
+                  }
+                  db.run(
+                    "INSERT OR IGNORE INTO settings (group_id, group_name, dark_mode) VALUES (1, 'Groupe de musique', 0)",
+                    (sErr) => {
+                      db.close();
+                      if (sErr) return reject(sErr);
+                      resolve(true);
+                    }
+                  );
+                });
+              });
+            };
+            if (!hasRole) {
+              db.run(
+                "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+                (aErr) => {
+                  if (aErr) {
+                    db.close();
+                    return reject(aErr);
+                  }
+                  proceed();
                 }
               );
-            });
+            } else {
+              proceed();
+            }
           });
         });
       }
