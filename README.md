@@ -36,6 +36,18 @@ SSL_KEY=certs/key.pem SSL_CERT=certs/cert.pem npm start
 > ```
 
 
+### Réinitialiser la base de données
+
+Pour repartir d'une base vide :
+
+```bash
+rm bandtrack.db
+npm run migrate
+```
+
+Un script `reset-db.sh` est fourni pour automatiser ces étapes.
+
+
 ### HTTPS
 
 Le serveur écoute uniquement en HTTPS et nécessite un certificat SSL.
