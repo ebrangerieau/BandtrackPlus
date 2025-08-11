@@ -1967,36 +1967,15 @@
     document.body.appendChild(modal);
   }
 
-  /**
-   * Rendu de la page paramètres.  Permet de modifier le nom du groupe,
-   * d’activer le mode sombre ou clair et de se déconnecter.
-   * @param {HTMLElement} container
-   */
-  async function renderSettings(container) {
-    container.innerHTML = '';
-    const header = document.createElement('h2');
-    header.textContent = 'Paramètres';
-    container.appendChild(header);
-    let settings;
-    try {
-      settings = await api('/settings');
-    } catch (err) {
-      const p = document.createElement('p');
-      p.style.color = 'var(--danger-color)';
-      p.textContent = 'Impossible de récupérer les paramètres';
-      container.appendChild(p);
-      return;
-    }
-    const groupSection = document.createElement('div');
-    groupSection.style.marginTop = '20px';
-    const groupHeader = document.createElement('h3');
-    groupHeader.textContent = 'Groupe';
-    groupSection.appendChild(groupHeader);
-
+  function renderGroupSection(currentSettings) {
+    const section = document.createElement('div');
+    section.className = 'settings-section';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Groupes';
+    section.appendChild(h3);
     const groupSelect = document.createElement('select');
     groupSelect.id = 'group-select';
-    groupSection.appendChild(groupSelect);
-
+    section.appendChild(groupSelect);
     const groupBtnRow = document.createElement('div');
     groupBtnRow.style.marginTop = '10px';
     const createBtn = document.createElement('button');
@@ -2010,18 +1989,17 @@
     joinBtn.textContent = 'Rejoindre';
     joinBtn.style.marginLeft = '8px';
     groupBtnRow.appendChild(joinBtn);
-    groupSection.appendChild(groupBtnRow);
-
-    // Nom du groupe
+    section.appendChild(groupBtnRow);
     const labelName = document.createElement('label');
     labelName.textContent = 'Nom du groupe';
     const inputName = document.createElement('input');
     inputName.type = 'text';
-    inputName.value = settings.groupName;
+    inputName.value = currentSettings.groupName;
     inputName.style.width = '100%';
     inputName.onchange = async () => {
+      currentSettings.groupName = inputName.value;
       try {
-        await api('/settings', 'PUT', { groupName: inputName.value, darkMode: settings.darkMode });
+        await api('/settings', 'PUT', currentSettings);
         document.title = `${inputName.value} – BandTrack`;
         const groupNameEl = document.getElementById('group-name');
         if (groupNameEl) groupNameEl.textContent = inputName.value;
@@ -2029,12 +2007,12 @@
         alert(err.message);
       }
     };
-    groupSection.appendChild(labelName);
-    groupSection.appendChild(inputName);
+    section.appendChild(labelName);
+    section.appendChild(inputName);
     if (isAdmin()) {
       const inviteDiv = document.createElement('div');
       inviteDiv.style.marginTop = '8px';
-      let invitationCode = settings.invitationCode;
+      let invitationCode = currentSettings.invitationCode;
       const codeSpan = document.createElement('span');
       codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
       inviteDiv.appendChild(codeSpan);
@@ -2056,20 +2034,28 @@
         }
       };
       inviteDiv.appendChild(renewBtn);
-      groupSection.appendChild(inviteDiv);
+      section.appendChild(inviteDiv);
     }
-    // Mode sombre
+    return section;
+  }
+
+  function renderThemeSection(currentSettings) {
+    const section = document.createElement('div');
+    section.className = 'settings-section';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Thème';
+    section.appendChild(h3);
     const modeDiv = document.createElement('div');
-    modeDiv.style.marginTop = '20px';
     const modeLabel = document.createElement('label');
     modeLabel.textContent = 'Mode sombre';
     modeLabel.style.marginRight = '8px';
     const modeCheckbox = document.createElement('input');
     modeCheckbox.type = 'checkbox';
-    modeCheckbox.checked = settings.darkMode;
+    modeCheckbox.checked = currentSettings.darkMode;
     modeCheckbox.onchange = async () => {
+      currentSettings.darkMode = modeCheckbox.checked;
       try {
-        await api('/settings', 'PUT', { groupName: inputName.value, darkMode: modeCheckbox.checked, template: settings.template });
+        await api('/settings', 'PUT', currentSettings);
         applyTheme(modeCheckbox.checked);
       } catch (err) {
         alert(err.message);
@@ -2077,64 +2063,13 @@
     };
     modeDiv.appendChild(modeLabel);
     modeDiv.appendChild(modeCheckbox);
-    groupSection.appendChild(modeDiv);
-
-    // Prochaine répétition (date/heure)
-    const labelDate = document.createElement('label');
-    labelDate.textContent = 'Prochaine répétition (date/heure)';
-    labelDate.style.marginTop = '20px';
-    const inputDate = document.createElement('input');
-    inputDate.type = 'datetime-local';
-    inputDate.value = settings.nextRehearsalDate || '';
-    inputDate.style.width = '100%';
-    inputDate.onchange = async () => {
-      try {
-        await api('/settings', 'PUT', {
-          groupName: inputName.value,
-          darkMode: modeCheckbox.checked,
-          template: settings.template,
-          nextRehearsalDate: inputDate.value,
-          nextRehearsalLocation: inputLocation.value,
-        });
-      } catch (err) {
-        alert(err.message);
-      }
-    };
-    groupSection.appendChild(labelDate);
-    groupSection.appendChild(inputDate);
-
-    // Lieu de la prochaine répétition
-    const labelLocation = document.createElement('label');
-    labelLocation.textContent = 'Lieu de la prochaine répétition';
-    labelLocation.style.marginTop = '12px';
-    const inputLocation = document.createElement('input');
-    inputLocation.type = 'text';
-    inputLocation.value = settings.nextRehearsalLocation || '';
-    inputLocation.style.width = '100%';
-    inputLocation.onchange = async () => {
-      try {
-        await api('/settings', 'PUT', {
-          groupName: inputName.value,
-          darkMode: modeCheckbox.checked,
-          template: settings.template,
-          nextRehearsalDate: inputDate.value,
-          nextRehearsalLocation: inputLocation.value,
-        });
-      } catch (err) {
-        alert(err.message);
-      }
-    };
-    groupSection.appendChild(labelLocation);
-    groupSection.appendChild(inputLocation);
-
-    // Sélecteur de template (design)
+    section.appendChild(modeDiv);
     const templateDiv = document.createElement('div');
     templateDiv.style.marginTop = '20px';
     const templateLabel = document.createElement('label');
     templateLabel.textContent = 'Template (design)';
     templateLabel.style.marginRight = '8px';
     const templateSelect = document.createElement('select');
-    // Définition des templates disponibles
     const templateOptions = [
       { value: 'classic', label: 'Classique' },
       { value: 'groove', label: 'Groove' },
@@ -2145,17 +2080,12 @@
       optEl.textContent = opt.label;
       templateSelect.appendChild(optEl);
     });
-    templateSelect.value = settings.template || 'classic';
+    templateSelect.value = currentSettings.template || 'classic';
     templateSelect.onchange = async () => {
       const val = templateSelect.value;
+      currentSettings.template = val;
       try {
-        await api('/settings', 'PUT', {
-          groupName: inputName.value,
-          darkMode: modeCheckbox.checked,
-          template: val,
-        });
-        // Mettre à jour le setting local
-        settings.template = val;
+        await api('/settings', 'PUT', currentSettings);
         applyTemplate(val);
       } catch (err) {
         alert(err.message);
@@ -2163,12 +2093,240 @@
     };
     templateDiv.appendChild(templateLabel);
     templateDiv.appendChild(templateSelect);
-    groupSection.appendChild(templateDiv);
+    section.appendChild(templateDiv);
+    return section;
+  }
 
+  function renderRehearsalSection(currentSettings) {
+    const section = document.createElement('div');
+    section.className = 'settings-section';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Répétition';
+    section.appendChild(h3);
+    const labelDate = document.createElement('label');
+    labelDate.textContent = 'Prochaine répétition (date/heure)';
+    const inputDate = document.createElement('input');
+    inputDate.type = 'datetime-local';
+    inputDate.value = currentSettings.nextRehearsalDate || '';
+    inputDate.style.width = '100%';
+    inputDate.onchange = async () => {
+      currentSettings.nextRehearsalDate = inputDate.value;
+      try {
+        await api('/settings', 'PUT', currentSettings);
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    section.appendChild(labelDate);
+    section.appendChild(inputDate);
+    const labelLocation = document.createElement('label');
+    labelLocation.textContent = 'Lieu de la prochaine répétition';
+    labelLocation.style.marginTop = '12px';
+    const inputLocation = document.createElement('input');
+    inputLocation.type = 'text';
+    inputLocation.value = currentSettings.nextRehearsalLocation || '';
+    inputLocation.style.width = '100%';
+    inputLocation.onchange = async () => {
+      currentSettings.nextRehearsalLocation = inputLocation.value;
+      try {
+        await api('/settings', 'PUT', currentSettings);
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    section.appendChild(labelLocation);
+    section.appendChild(inputLocation);
+    return section;
+  }
+
+  async function renderAdminSection(container) {
+    const section = document.createElement('div');
+    section.className = 'settings-section';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Administration';
+    section.appendChild(h3);
+    try {
+      const group = await api('/context');
+      const members = await api(`/groups/${activeGroupId}/members`);
+      const groupHeader = document.createElement('h4');
+      groupHeader.textContent = 'Tableau de bord du groupe';
+      groupHeader.style.marginTop = '10px';
+      section.appendChild(groupHeader);
+      const inviteDiv = document.createElement('div');
+      let invitationCode = group.invitation_code;
+      const codeSpan = document.createElement('span');
+      codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
+      inviteDiv.appendChild(codeSpan);
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copier';
+      copyBtn.style.marginLeft = '8px';
+      copyBtn.onclick = () => navigator.clipboard.writeText(invitationCode);
+      inviteDiv.appendChild(copyBtn);
+      const renewBtn = document.createElement('button');
+      renewBtn.textContent = 'Renouveler';
+      renewBtn.style.marginLeft = '8px';
+      renewBtn.onclick = async () => {
+        try {
+          const data = await api('/groups/renew-code', 'POST');
+          invitationCode = data.invitationCode;
+          codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      inviteDiv.appendChild(renewBtn);
+      section.appendChild(inviteDiv);
+      const memberTable = document.createElement('table');
+      memberTable.className = 'user-table';
+      const mthead = document.createElement('thead');
+      mthead.innerHTML = '<tr><th>Membre</th><th>Rôle</th><th>Actions</th></tr>';
+      memberTable.appendChild(mthead);
+      const mtbody = document.createElement('tbody');
+      members.forEach((m) => {
+        const tr = document.createElement('tr');
+        const nameTd = document.createElement('td');
+        nameTd.textContent = m.username;
+        const roleTd = document.createElement('td');
+        const sel = document.createElement('select');
+        ['user', 'moderator', 'admin'].forEach((r) => {
+          const opt = document.createElement('option');
+          opt.value = r;
+          opt.textContent = r;
+          if (m.role === r) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        if (m.id === currentUser.id) sel.disabled = true;
+        sel.onchange = async () => {
+          try {
+            await api(`/groups/${activeGroupId}/members`, 'PUT', { userId: m.id, role: sel.value });
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        roleTd.appendChild(sel);
+        const actionsTd = document.createElement('td');
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = 'Retirer';
+        removeBtn.disabled = m.id === currentUser.id;
+        removeBtn.onclick = async () => {
+          if (!confirm('Supprimer ce membre ?')) return;
+          try {
+            await api(`/groups/${activeGroupId}/members`, 'DELETE', { userId: m.id });
+            tr.remove();
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        actionsTd.appendChild(removeBtn);
+        tr.appendChild(nameTd);
+        tr.appendChild(roleTd);
+        tr.appendChild(actionsTd);
+        mtbody.appendChild(tr);
+      });
+      memberTable.appendChild(mtbody);
+      section.appendChild(memberTable);
+    } catch (err) {
+      const p = document.createElement('p');
+      p.style.color = 'var(--danger-color)';
+      p.textContent = 'Impossible de récupérer les membres';
+      section.appendChild(p);
+    }
+    try {
+      const users = await api('/users');
+      const adminHeader = document.createElement('h4');
+      adminHeader.textContent = 'Gestion des utilisateurs';
+      adminHeader.style.marginTop = '30px';
+      section.appendChild(adminHeader);
+      const table = document.createElement('table');
+      table.className = 'user-table';
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Utilisateur</th><th>Rôle</th></tr>';
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      const initialState = {};
+      users.forEach((u) => {
+        initialState[u.id] = u.role;
+        const tr = document.createElement('tr');
+        const nameTd = document.createElement('td');
+        nameTd.textContent = u.username;
+        const roleTd = document.createElement('td');
+        const select = document.createElement('select');
+        ['user', 'moderator', 'admin'].forEach((r) => {
+          const opt = document.createElement('option');
+          opt.value = r;
+          opt.textContent = r;
+          if (u.role === r) opt.selected = true;
+          select.appendChild(opt);
+        });
+        if (u.id === currentUser.id) select.disabled = true;
+        select.dataset.userId = u.id;
+        roleTd.appendChild(select);
+        tr.appendChild(nameTd);
+        tr.appendChild(roleTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      section.appendChild(table);
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'btn-primary';
+      saveBtn.style.marginTop = '10px';
+      saveBtn.textContent = 'Enregistrer les rôles';
+      saveBtn.onclick = async () => {
+        try {
+          const updates = [];
+          tbody.querySelectorAll('select').forEach((sel) => {
+            const uid = Number(sel.dataset.userId);
+            const newVal = sel.value;
+            if (initialState[uid] !== newVal) {
+              updates.push({ id: uid, role: newVal });
+            }
+          });
+          for (const upd of updates) {
+            await api(`/users/${upd.id}`, 'PUT', { role: upd.role });
+          }
+          alert('Rôles mis à jour');
+          renderSettings(container);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      section.appendChild(saveBtn);
+    } catch (err) {
+      const p = document.createElement('p');
+      p.style.color = 'var(--danger-color)';
+      p.textContent = 'Impossible de récupérer les utilisateurs';
+      section.appendChild(p);
+    }
+    return section;
+  }
+
+  /**
+   * Rendu de la page paramètres.  Assemble les différentes sections de paramètres.
+   * @param {HTMLElement} container
+   */
+  async function renderSettings(container) {
+    container.innerHTML = '';
+    const header = document.createElement('h2');
+    header.textContent = 'Paramètres';
+    container.appendChild(header);
+    let settings;
+    try {
+      settings = await api('/settings');
+    } catch (err) {
+      const p = document.createElement('p');
+      p.style.color = 'var(--danger-color)';
+      p.textContent = 'Impossible de récupérer les paramètres';
+      container.appendChild(p);
+      return;
+    }
+    const currentSettings = { ...settings };
+    const groupSection = renderGroupSection(currentSettings);
     container.appendChild(groupSection);
     await refreshGroups();
-
-    // Déconnexion
+    const themeSection = renderThemeSection(currentSettings);
+    container.appendChild(themeSection);
+    const rehearsalSection = renderRehearsalSection(currentSettings);
+    container.appendChild(rehearsalSection);
     const logoutBtn = document.createElement('button');
     logoutBtn.className = 'logout-btn';
     logoutBtn.textContent = 'Se déconnecter';
@@ -2182,167 +2340,13 @@
       }
     };
     container.appendChild(logoutBtn);
-
-    // Gestion des utilisateurs (visible uniquement pour les administrateurs)
     if (isAdmin()) {
-      try {
-        const group = await api('/context');
-        const members = await api(`/groups/${activeGroupId}/members`);
-        const groupHeader = document.createElement('h3');
-        groupHeader.style.marginTop = '30px';
-        groupHeader.textContent = 'Tableau de bord du groupe';
-        container.appendChild(groupHeader);
-
-        const inviteDiv = document.createElement('div');
-        let invitationCode = group.invitation_code;
-        const codeSpan = document.createElement('span');
-        codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
-        inviteDiv.appendChild(codeSpan);
-        const copyBtn = document.createElement('button');
-        copyBtn.textContent = 'Copier';
-        copyBtn.style.marginLeft = '8px';
-        copyBtn.onclick = () => navigator.clipboard.writeText(invitationCode);
-        inviteDiv.appendChild(copyBtn);
-        const renewBtn = document.createElement('button');
-        renewBtn.textContent = 'Renouveler';
-        renewBtn.style.marginLeft = '8px';
-        renewBtn.onclick = async () => {
-          try {
-            const data = await api('/groups/renew-code', 'POST');
-            invitationCode = data.invitationCode;
-            codeSpan.textContent = `Code d'invitation : ${invitationCode}`;
-          } catch (err) {
-            alert(err.message);
-          }
-        };
-        inviteDiv.appendChild(renewBtn);
-        container.appendChild(inviteDiv);
-
-        const memberTable = document.createElement('table');
-        memberTable.className = 'user-table';
-        const mthead = document.createElement('thead');
-        mthead.innerHTML = '<tr><th>Membre</th><th>Rôle</th><th>Actions</th></tr>';
-        memberTable.appendChild(mthead);
-        const mtbody = document.createElement('tbody');
-        members.forEach((m) => {
-          const tr = document.createElement('tr');
-          const nameTd = document.createElement('td');
-          nameTd.textContent = m.username;
-          const roleTd = document.createElement('td');
-          const sel = document.createElement('select');
-          ['user', 'moderator', 'admin'].forEach((r) => {
-            const opt = document.createElement('option');
-            opt.value = r;
-            opt.textContent = r;
-            if (m.role === r) opt.selected = true;
-            sel.appendChild(opt);
-          });
-          if (m.id === currentUser.id) sel.disabled = true;
-          sel.onchange = async () => {
-            try {
-              await api(`/groups/${activeGroupId}/members`, 'PUT', { userId: m.id, role: sel.value });
-            } catch (err) {
-              alert(err.message);
-            }
-          };
-          roleTd.appendChild(sel);
-          const actionsTd = document.createElement('td');
-          const removeBtn = document.createElement('button');
-          removeBtn.textContent = 'Retirer';
-          removeBtn.disabled = m.id === currentUser.id;
-          removeBtn.onclick = async () => {
-            if (!confirm('Supprimer ce membre ?')) return;
-            try {
-              await api(`/groups/${activeGroupId}/members`, 'DELETE', { userId: m.id });
-              tr.remove();
-            } catch (err) {
-              alert(err.message);
-            }
-          };
-          actionsTd.appendChild(removeBtn);
-          tr.appendChild(nameTd);
-          tr.appendChild(roleTd);
-          tr.appendChild(actionsTd);
-          mtbody.appendChild(tr);
-        });
-        memberTable.appendChild(mtbody);
-        container.appendChild(memberTable);
-      } catch (err) {
-        const p = document.createElement('p');
-        p.style.color = 'var(--danger-color)';
-        p.textContent = 'Impossible de récupérer les membres';
-        container.appendChild(p);
-      }
-
-      try {
-        const users = await api('/users');
-        const adminHeader = document.createElement('h3');
-        adminHeader.style.marginTop = '30px';
-        adminHeader.textContent = 'Gestion des utilisateurs';
-        container.appendChild(adminHeader);
-        const table = document.createElement('table');
-        table.className = 'user-table';
-        const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th>Utilisateur</th><th>Rôle</th></tr>';
-        table.appendChild(thead);
-        const tbody = document.createElement('tbody');
-        const initialState = {};
-        users.forEach((u) => {
-          initialState[u.id] = u.role;
-          const tr = document.createElement('tr');
-          const nameTd = document.createElement('td');
-          nameTd.textContent = u.username;
-          const roleTd = document.createElement('td');
-          const select = document.createElement('select');
-          ['user', 'moderator', 'admin'].forEach((r) => {
-            const opt = document.createElement('option');
-            opt.value = r;
-            opt.textContent = r;
-            if (u.role === r) opt.selected = true;
-            select.appendChild(opt);
-          });
-          if (u.id === currentUser.id) select.disabled = true;
-          select.dataset.userId = u.id;
-          roleTd.appendChild(select);
-          tr.appendChild(nameTd);
-          tr.appendChild(roleTd);
-          tbody.appendChild(tr);
-        });
-        table.appendChild(tbody);
-        container.appendChild(table);
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'btn-primary';
-        saveBtn.style.marginTop = '10px';
-        saveBtn.textContent = 'Enregistrer les rôles';
-        saveBtn.onclick = async () => {
-          try {
-            const updates = [];
-            tbody.querySelectorAll('select').forEach((sel) => {
-              const uid = Number(sel.dataset.userId);
-              const newVal = sel.value;
-              if (initialState[uid] !== newVal) {
-                updates.push({ id: uid, role: newVal });
-              }
-            });
-            for (const upd of updates) {
-              await api(`/users/${upd.id}`, 'PUT', { role: upd.role });
-            }
-            alert('Rôles mis à jour');
-            renderSettings(container);
-          } catch (err) {
-            alert(err.message);
-          }
-        };
-        container.appendChild(saveBtn);
-      } catch (err) {
-        const p = document.createElement('p');
-        p.style.color = 'var(--danger-color)';
-        p.textContent = 'Impossible de récupérer les utilisateurs';
-        container.appendChild(p);
-      }
+      const adminSection = await renderAdminSection(container);
+      container.appendChild(adminSection);
     }
   }
 
   // Lancement de l’application lorsque le DOM est prêt
   window.addEventListener('DOMContentLoaded', initApp);
 })();
+
