@@ -76,6 +76,7 @@ from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
 from scripts.migrate_suggestion_votes import migrate as migrate_suggestion_votes
+from scripts.migrate_performance_location import migrate as migrate_performance_location
 
 #############################
 # Database initialisation
@@ -170,6 +171,7 @@ def init_db():
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                name TEXT NOT NULL,
                date TEXT NOT NULL,
+               location TEXT,
                songs_json TEXT DEFAULT '[]',
                creator_id INTEGER NOT NULL,
                group_id INTEGER NOT NULL,
@@ -335,8 +337,6 @@ def init_db():
                         ORDER BY m.group_id LIMIT 1
                     ) WHERE group_id IS NULL'''
             )
-        if 'location' not in p_columns:
-            cur.execute('ALTER TABLE performances ADD COLUMN location TEXT')
         conn.commit()
         conn.close()
     except Exception:
@@ -1652,7 +1652,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            '''SELECT p.id, p.name, p.date, p.songs_json, p.creator_id, u.username AS creator
+            '''SELECT p.id, p.name, p.date, p.location, p.songs_json, p.creator_id, u.username AS creator
                FROM performances p JOIN users u ON u.id = p.creator_id
                WHERE p.group_id = ?
                ORDER BY p.date ASC''',
@@ -1664,6 +1664,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'id': row['id'],
                 'name': row['name'],
                 'date': row['date'],
+                'location': row['location'],
                 'songs': json.loads(row['songs_json'] or '[]'),
                 'creatorId': row['creator_id'],
                 'creator': row['creator'],
@@ -1675,6 +1676,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
     def api_create_performance(self, body: dict, user: dict):
         name = (body.get('name') or '').strip()
         date = (body.get('date') or '').strip()
+        location = (body.get('location') or '').strip()
         songs = body.get('songs') or []
         if not name or not date:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
@@ -1696,13 +1698,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            'INSERT INTO performances (name, date, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?)',
-            (name, date, json.dumps(songs_list), user['id'], user['group_id'])
+            'INSERT INTO performances (name, date, location, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
+             (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
         )
         perf_id = cur.lastrowid
         conn.commit()
         conn.close()
-        send_json(self, HTTPStatus.CREATED, {'id': perf_id, 'name': name, 'date': date, 'songs': songs_list})
+        send_json(self, HTTPStatus.CREATED, {'id': perf_id, 'name': name, 'date': date, 'location': location, 'songs': songs_list})
 
     def api_update_performance(self, body: dict, user: dict):
         try:
@@ -1712,6 +1714,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         name = (body.get('name') or '').strip()
         date = (body.get('date') or '').strip()
+        location = (body.get('location') or '').strip()
         songs = body.get('songs') or []
         if not name or not date:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
@@ -1730,13 +1733,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # Allow update if current user is creator or has moderator/administrator role
         if role in ('admin', 'moderator'):
             cur.execute(
-                'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND group_id = ?',
-                (name, date, json.dumps(songs_list), perf_id, user['group_id'])
+                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
+                (name, date, location, json.dumps(songs_list), perf_id, user['group_id'])
             )
         else:
             cur.execute(
-                'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
-                (name, date, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
+                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
+                (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
             )
         updated = cur.rowcount
         conn.commit()
@@ -2088,6 +2091,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         """Update name, date and songs for a performance if owned by user."""
         name = (body.get('name') or '').strip()
         date = (body.get('date') or '').strip()
+        location = (body.get('location') or '').strip()
         songs = body.get('songs') or []
         if not name or not date:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
@@ -2102,13 +2106,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # Allow update if user is creator or has moderator/administrator role
         if user.get('role') in ('admin', 'moderator'):
             cur.execute(
-                'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND group_id = ?',
-                (name, date, json.dumps(songs_list), perf_id, user['group_id'])
+                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
+                (name, date, location, json.dumps(songs_list), perf_id, user['group_id'])
             )
         else:
             cur.execute(
-                'UPDATE performances SET name = ?, date = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
-                (name, date, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
+                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
+                (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
             )
         updated = cur.rowcount
         conn.commit()
@@ -2358,6 +2362,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 def run_server(host: str = '0.0.0.0', port: int = 3000):
     migrate_to_multigroup()
     init_db()
+    migrate_performance_location()
     migrate_suggestion_votes()
     server = ThreadingHTTPServer((host, port), BandTrackHandler)
     print(f"BandTrack server running on http://{host}:{port} (Ctrl-C to stop)")
