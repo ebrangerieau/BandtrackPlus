@@ -36,7 +36,7 @@ app.use(express.json());
 // `saveUninitialized: false` reduce unnecessary session persistence.
 app.use(
   session({
-    store: new SQLiteStore({ db: 'bandtrack.db', dir: __dirname }),
+    store: new SQLiteStore({ db: 'bandtrack.db', dir: __dirname, table: 'web_sessions' }),
     secret: process.env.SESSION_SECRET || 'bandtrack_secret',
     resave: false,
     saveUninitialized: false,
