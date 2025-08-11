@@ -23,273 +23,323 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
  * server startup.
  */
 function init() {
-  // Users: store a unique username, a password hash and its salt.  The
-  // password hash is created using PBKDF2 on the server side during
-  // registration.
-  db.run(
-    `CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      salt TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'user'
-    );`
-  );
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      let pending = 0;
 
-  // Ensure salt and role columns exist on existing databases
-  db.all('PRAGMA table_info(users)', (err, rows) => {
-    if (!err && rows) {
-      if (!rows.find((r) => r.name === 'salt')) {
-        db.run('ALTER TABLE users ADD COLUMN salt TEXT');
-      }
-      if (!rows.find((r) => r.name === 'role')) {
-        db.run("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
-      }
-    }
-  });
+      const originalRun = db.run.bind(db);
+      const originalAll = db.all.bind(db);
+      const originalGet = db.get.bind(db);
 
-  // WebAuthn credentials associated with users
-  db.run(
-    `CREATE TABLE IF NOT EXISTS users_webauthn (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      credential_id TEXT NOT NULL UNIQUE,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    );`
-  );
+      const checkDone = () => {
+        if (pending === 0) {
+          db.run = originalRun;
+          db.all = originalAll;
+          db.get = originalGet;
+          resolve();
+        }
+      };
 
-  // Suggestions: list of song suggestions with optional author and YouTube
-  // link along with a generic URL. Each suggestion also stores a number of
-  // likes used to rank the items.
-  db.run(
-    `CREATE TABLE IF NOT EXISTS suggestions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      author TEXT,
-      url TEXT,
-      youtube TEXT,
-      likes INTEGER NOT NULL DEFAULT 0,
-      creator_id INTEGER NOT NULL,
-      group_id INTEGER NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (creator_id) REFERENCES users(id),
-      FOREIGN KEY (group_id) REFERENCES groups(id)
-    );`
-  );
+      db.run = function (sql, params, cb) {
+        if (typeof params === 'function') {
+          cb = params;
+          params = [];
+        }
+        pending++;
+        return originalRun.call(db, sql, params, function (err) {
+          if (cb) cb(err);
+          if (err) reject(err);
+          pending--;
+          checkDone();
+        });
+      };
 
-  // Votes per user on suggestions. Keeps track of how many times each
-  // user voted for a specific suggestion so we can decrement later.
-  db.run(
-    `CREATE TABLE IF NOT EXISTS suggestion_votes (
-      suggestion_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      count INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (suggestion_id, user_id),
-      FOREIGN KEY (suggestion_id) REFERENCES suggestions(id),
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    );`
-  );
+      db.all = function (sql, params, cb) {
+        if (typeof params === 'function') {
+          cb = params;
+          params = [];
+        }
+        pending++;
+        return originalAll.call(db, sql, params, function (err, rows) {
+          if (cb) cb(err, rows);
+          if (err) reject(err);
+          pending--;
+          checkDone();
+        });
+      };
 
-  // Ensure the new columns exist on existing databases. Older versions of the
-  // schema may not have them, so we attempt to add them and ignore errors.
-  db.all('PRAGMA table_info(suggestions)', (err, rows) => {
-    if (!err && rows) {
-      if (!rows.find((r) => r.name === 'likes')) {
-        db.run('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0');
-      }
-      if (!rows.find((r) => r.name === 'author')) {
-        db.run('ALTER TABLE suggestions ADD COLUMN author TEXT');
-      }
-      if (!rows.find((r) => r.name === 'youtube')) {
-        db.run('ALTER TABLE suggestions ADD COLUMN youtube TEXT');
-      }
-      if (!rows.find((r) => r.name === 'group_id')) {
-        db.run('ALTER TABLE suggestions ADD COLUMN group_id INTEGER');
-        db.run(
-          'UPDATE suggestions SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
-        );
-      }
-    }
-  });
+      db.get = function (sql, params, cb) {
+        if (typeof params === 'function') {
+          cb = params;
+          params = [];
+        }
+        pending++;
+        return originalGet.call(db, sql, params, function (err, row) {
+          if (cb) cb(err, row);
+          if (err) reject(err);
+          pending--;
+          checkDone();
+        });
+      };
 
-  // Index to speed up suggestion listings and ranking queries
-  db.run(
-    'CREATE INDEX IF NOT EXISTS idx_suggestions_group_likes_created_at ON suggestions (group_id, likes, created_at)'
-  );
+      // Users: store a unique username, a password hash and its salt.
+      db.run(
+        `CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          salt TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'user'
+        );`
+      );
 
-  // Rehearsals: songs worked on during practice.  Levels and notes are stored
-  // as JSON strings keyed by username so that each user can set their own
-  // values independently.  We avoid separate tables for simplicity.
-  db.run(
-    `CREATE TABLE IF NOT EXISTS rehearsals (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      youtube TEXT,
-      spotify TEXT,
-      levels_json TEXT DEFAULT '{}',
-      notes_json TEXT DEFAULT '{}',
-      audio_notes_json TEXT DEFAULT '{}',
-      mastered INTEGER NOT NULL DEFAULT 0,
-      creator_id INTEGER NOT NULL,
-      group_id INTEGER NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (creator_id) REFERENCES users(id),
-      FOREIGN KEY (group_id) REFERENCES groups(id)
-    );`
-  );
+      // Ensure salt and role columns exist on existing databases
+      db.all('PRAGMA table_info(users)', (err, rows) => {
+        if (!err && rows) {
+          if (!rows.find((r) => r.name === 'salt')) {
+            db.run('ALTER TABLE users ADD COLUMN salt TEXT');
+          }
+          if (!rows.find((r) => r.name === 'role')) {
+            db.run("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+          }
+        }
+      });
 
-  // Ensure mastered and audio_notes_json columns exist on old databases
-  db.all('PRAGMA table_info(rehearsals)', (err, rows) => {
-    if (!err && rows) {
-      if (!rows.find((r) => r.name === 'mastered')) {
-        db.run('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0');
-      }
-      if (!rows.find((r) => r.name === 'audio_notes_json')) {
-        db.run("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'");
-      }
-      if (!rows.find((r) => r.name === 'group_id')) {
-        db.run('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER');
-        db.run(
-          'UPDATE rehearsals SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
-        );
-      }
-    }
-  });
+      // WebAuthn credentials associated with users
+      db.run(
+        `CREATE TABLE IF NOT EXISTS users_webauthn (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          credential_id TEXT NOT NULL UNIQUE,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );`
+      );
 
-  // Index to speed up rehearsal listings by group and date
-  db.run(
-    'CREATE INDEX IF NOT EXISTS idx_rehearsals_group_created_at ON rehearsals (group_id, created_at)'
-  );
+      // Suggestions table
+      db.run(
+        `CREATE TABLE IF NOT EXISTS suggestions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          author TEXT,
+          url TEXT,
+          youtube TEXT,
+          likes INTEGER NOT NULL DEFAULT 0,
+          creator_id INTEGER NOT NULL,
+          group_id INTEGER NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (creator_id) REFERENCES users(id),
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        );`
+      );
 
-  // Performances: gigs/presentations containing multiple rehearsal IDs and
-  // associated with a creator.  Songs are stored as a JSON array of
-  // integers referencing the rehearsals table.
-  db.run(
-    `CREATE TABLE IF NOT EXISTS performances (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      date TEXT NOT NULL,
-      location TEXT,
-      songs_json TEXT DEFAULT '[]',
-      creator_id INTEGER NOT NULL,
-      group_id INTEGER NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (creator_id) REFERENCES users(id),
-      FOREIGN KEY (group_id) REFERENCES groups(id)
-    );`
-  );
+      // Votes per user on suggestions
+      db.run(
+        `CREATE TABLE IF NOT EXISTS suggestion_votes (
+          suggestion_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          count INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (suggestion_id, user_id),
+          FOREIGN KEY (suggestion_id) REFERENCES suggestions(id),
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );`
+      );
 
-  // Ensure the location column exists on existing databases
-  db.all('PRAGMA table_info(performances)', (err, rows) => {
-    if (!err && rows) {
-      if (!rows.find((r) => r.name === 'location')) {
-        db.run('ALTER TABLE performances ADD COLUMN location TEXT');
-      }
-      if (!rows.find((r) => r.name === 'group_id')) {
-        db.run('ALTER TABLE performances ADD COLUMN group_id INTEGER');
-        db.run(
-          'UPDATE performances SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
-        );
-      }
-    }
-  });
-
-  // Settings: stores a single row with group name, dark mode flag and next
-  // rehearsal date/location.  We insert the default row if the table is empty.
-  db.run(
-    `CREATE TABLE IF NOT EXISTS settings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      group_id INTEGER NOT NULL UNIQUE,
-      group_name TEXT NOT NULL,
-      dark_mode INTEGER NOT NULL DEFAULT 0,
-      template TEXT NOT NULL DEFAULT 'classic',
-      next_rehearsal_date TEXT,
-      next_rehearsal_location TEXT,
-      FOREIGN KEY (group_id) REFERENCES groups(id)
-    );`,
-    () => {
-      // Insert default row if not present
-      db.get('SELECT COUNT(*) AS count FROM settings', (err, row) => {
-        if (!err && row && row.count === 0) {
+      // Ensure new columns exist before creating index
+      db.all('PRAGMA table_info(suggestions)', (err, rows) => {
+        if (!err && rows) {
+          if (!rows.find((r) => r.name === 'likes')) {
+            db.run('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0');
+          }
+          if (!rows.find((r) => r.name === 'author')) {
+            db.run('ALTER TABLE suggestions ADD COLUMN author TEXT');
+          }
+          if (!rows.find((r) => r.name === 'youtube')) {
+            db.run('ALTER TABLE suggestions ADD COLUMN youtube TEXT');
+          }
+          if (!rows.find((r) => r.name === 'group_id')) {
+            db.run('ALTER TABLE suggestions ADD COLUMN group_id INTEGER');
+            db.run(
+              'UPDATE suggestions SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
+            );
+          }
           db.run(
-            "INSERT INTO settings (group_id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) VALUES (1, ?, 0, 'classic', '', '')",
-            ['Groupe de musique']
+            'CREATE INDEX IF NOT EXISTS idx_suggestions_group_likes_created_at ON suggestions (group_id, likes, created_at)'
           );
         }
       });
-    }
-  );
 
-  // Ensure settings table has required columns on old databases
-  db.all('PRAGMA table_info(settings)', (err, rows) => {
-    if (!err && rows) {
-      if (!rows.find((r) => r.name === 'next_rehearsal_date')) {
-        db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_date TEXT');
-      }
-      if (!rows.find((r) => r.name === 'next_rehearsal_location')) {
-        db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_location TEXT');
-      }
-      if (!rows.find((r) => r.name === 'group_id')) {
-        db.run('ALTER TABLE settings ADD COLUMN group_id INTEGER');
-        db.run('UPDATE settings SET group_id = 1 WHERE group_id IS NULL');
-      }
-      if (!rows.find((r) => r.name === 'template')) {
-        db.run("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'");
-      }
-    }
+      // Rehearsals table
+      db.run(
+        `CREATE TABLE IF NOT EXISTS rehearsals (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          youtube TEXT,
+          spotify TEXT,
+          levels_json TEXT DEFAULT '{}',
+          notes_json TEXT DEFAULT '{}',
+          audio_notes_json TEXT DEFAULT '{}',
+          mastered INTEGER NOT NULL DEFAULT 0,
+          creator_id INTEGER NOT NULL,
+          group_id INTEGER NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (creator_id) REFERENCES users(id),
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        );`
+      );
+
+      db.all('PRAGMA table_info(rehearsals)', (err, rows) => {
+        if (!err && rows) {
+          if (!rows.find((r) => r.name === 'mastered')) {
+            db.run('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0');
+          }
+          if (!rows.find((r) => r.name === 'audio_notes_json')) {
+            db.run("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'");
+          }
+          if (!rows.find((r) => r.name === 'group_id')) {
+            db.run('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER');
+            db.run(
+              'UPDATE rehearsals SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
+            );
+          }
+        }
+      });
+
+      db.run(
+        'CREATE INDEX IF NOT EXISTS idx_rehearsals_group_created_at ON rehearsals (group_id, created_at)'
+      );
+
+      // Performances table
+      db.run(
+        `CREATE TABLE IF NOT EXISTS performances (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          date TEXT NOT NULL,
+          location TEXT,
+          songs_json TEXT DEFAULT '[]',
+          creator_id INTEGER NOT NULL,
+          group_id INTEGER NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (creator_id) REFERENCES users(id),
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        );`
+      );
+
+      db.all('PRAGMA table_info(performances)', (err, rows) => {
+        if (!err && rows) {
+          if (!rows.find((r) => r.name === 'location')) {
+            db.run('ALTER TABLE performances ADD COLUMN location TEXT');
+          }
+          if (!rows.find((r) => r.name === 'group_id')) {
+            db.run('ALTER TABLE performances ADD COLUMN group_id INTEGER');
+            db.run(
+              'UPDATE performances SET group_id = (SELECT group_id FROM memberships m WHERE m.user_id = creator_id AND m.active = 1 ORDER BY m.group_id LIMIT 1) WHERE group_id IS NULL'
+            );
+          }
+        }
+      });
+
+      // Settings table
+      db.run(
+        `CREATE TABLE IF NOT EXISTS settings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id INTEGER NOT NULL UNIQUE,
+          group_name TEXT NOT NULL,
+          dark_mode INTEGER NOT NULL DEFAULT 0,
+          template TEXT NOT NULL DEFAULT 'classic',
+          next_rehearsal_date TEXT,
+          next_rehearsal_location TEXT,
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        );`,
+        () => {
+          db.get('SELECT COUNT(*) AS count FROM settings', (err, row) => {
+            if (!err && row && row.count === 0) {
+              db.run(
+                "INSERT INTO settings (group_id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) VALUES (1, ?, 0, 'classic', '', '')",
+                ['Groupe de musique']
+              );
+            }
+          });
+        }
+      );
+
+      db.all('PRAGMA table_info(settings)', (err, rows) => {
+        if (!err && rows) {
+          if (!rows.find((r) => r.name === 'next_rehearsal_date')) {
+            db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_date TEXT');
+          }
+          if (!rows.find((r) => r.name === 'next_rehearsal_location')) {
+            db.run('ALTER TABLE settings ADD COLUMN next_rehearsal_location TEXT');
+          }
+          if (!rows.find((r) => r.name === 'group_id')) {
+            db.run('ALTER TABLE settings ADD COLUMN group_id INTEGER');
+            db.run('UPDATE settings SET group_id = 1 WHERE group_id IS NULL');
+          }
+          if (!rows.find((r) => r.name === 'template')) {
+            db.run("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'");
+          }
+        }
+      });
+
+      // Groups and memberships
+      db.run(
+        `CREATE TABLE IF NOT EXISTS groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          invitation_code TEXT NOT NULL UNIQUE,
+          description TEXT,
+          logo_url TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          owner_id INTEGER NOT NULL
+        );`
+      );
+
+      db.run(
+        `CREATE TABLE IF NOT EXISTS memberships (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          group_id INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          nickname TEXT,
+          joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          active INTEGER NOT NULL DEFAULT 1,
+          FOREIGN KEY (user_id) REFERENCES users(id),
+          FOREIGN KEY (group_id) REFERENCES groups(id),
+          UNIQUE(user_id, group_id)
+        );`
+      );
+
+      db.run(
+        'CREATE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships (user_id, group_id)'
+      );
+
+      // Ensure a default group exists
+      pending++;
+      generateInvitationCode()
+        .then((defaultCode) => {
+          db.run(
+            'INSERT OR IGNORE INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, 1)',
+            ['Groupe de musique', defaultCode]
+          );
+          pending--;
+          checkDone();
+        })
+        .catch((err) => reject(err));
+
+      // Logs table
+      db.run(
+        `CREATE TABLE IF NOT EXISTS logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+          user_id INTEGER,
+          action TEXT NOT NULL,
+          metadata TEXT,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );`
+      );
+
+      checkDone();
+    });
   });
-
-  // Groups and memberships to support multiple ensembles with invitation codes
-  db.run(
-    `CREATE TABLE IF NOT EXISTS groups (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      invitation_code TEXT NOT NULL UNIQUE,
-      description TEXT,
-      logo_url TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      owner_id INTEGER NOT NULL
-    );`
-  );
-
-  db.run(
-    `CREATE TABLE IF NOT EXISTS memberships (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      group_id INTEGER NOT NULL,
-      role TEXT NOT NULL,
-      nickname TEXT,
-      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      active INTEGER NOT NULL DEFAULT 1,
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (group_id) REFERENCES groups(id),
-      UNIQUE(user_id, group_id)
-    );`
-  );
-
-  // Index to accelerate membership lookups (e.g., getMembership)
-  db.run(
-    'CREATE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships (user_id, group_id)'
-  );
-
-  // Ensure a default group exists so first users can join.
-  const defaultCode = generateInvitationCode();
-  db.run(
-    'INSERT OR IGNORE INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, 1)',
-    ['Groupe de musique', defaultCode]
-  );
-
-  // Logs: audit trail of key actions
-  db.run(
-    `CREATE TABLE IF NOT EXISTS logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      user_id INTEGER,
-      action TEXT NOT NULL,
-      metadata TEXT,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    );`
-  );
 }
 
 function generateCode() {
