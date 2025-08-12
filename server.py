@@ -857,6 +857,22 @@ def verify_group_access(user_id: int, group_id: int | None, required_role: str =
     return membership['role']
 
 
+def get_group_members(group_id: int) -> list[dict]:
+    """Return all members for a given group."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        '''SELECT m.id, m.user_id, m.group_id, m.role, m.nickname, m.joined_at, m.active, u.username
+           FROM memberships m JOIN users u ON u.id = m.user_id
+           WHERE m.group_id = ?
+           ORDER BY m.joined_at ASC''',
+        (group_id,),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
 def update_membership(membership_id: int, role: str, nickname: str | None, active: bool) -> int:
     """Update membership details.  Returns number of affected rows."""
     conn = get_db_connection()
@@ -1023,6 +1039,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return self.api_join_group(body, user)
             if path == '/api/groups/renew-code' and method == 'POST':
                 return self.api_renew_group_code(user)
+
+            if path.startswith('/api/groups/') and path.endswith('/members'):
+                parts = path.split('/')
+                if len(parts) >= 5:
+                    try:
+                        gid = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
+                    return self.api_group_members(gid, method, body, user)
 
             # Suggestions
             if path.startswith('/api/suggestions'):
@@ -1456,6 +1481,64 @@ class BandTrackHandler(BaseHTTPRequestHandler):
     def api_get_groups(self, user: dict):
         groups = get_groups_for_user(user['id'])
         send_json(self, HTTPStatus.OK, groups)
+
+    def api_group_members(self, group_id: int, method: str, body: dict, user: dict):
+        role = verify_group_access(user['id'], group_id)
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
+        if method == 'GET':
+            members = get_group_members(group_id)
+            result = []
+            for m in members:
+                result.append({
+                    'id': m['id'],
+                    'userId': m['user_id'],
+                    'username': m['username'],
+                    'role': m['role'],
+                    'nickname': m['nickname'],
+                    'joinedAt': m['joined_at'],
+                    'active': bool(m['active']),
+                })
+            send_json(self, HTTPStatus.OK, result)
+            return
+        if method == 'PUT':
+            if role != 'admin':
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
+            try:
+                membership_id = int(body.get('id'))
+            except (TypeError, ValueError):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
+                return
+            new_role = body.get('role')
+            nickname = body.get('nickname')
+            active = bool(body.get('active', True))
+            if new_role not in ('user', 'moderator', 'admin'):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid role'})
+                return
+            updated = update_membership(membership_id, new_role, nickname, active)
+            if updated:
+                send_json(self, HTTPStatus.OK, {'message': 'Member updated'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+            return
+        if method == 'DELETE':
+            if role != 'admin':
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
+            try:
+                membership_id = int(body.get('id'))
+            except (TypeError, ValueError):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
+                return
+            deleted = delete_membership(membership_id)
+            if deleted:
+                send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+            return
+        raise NotImplementedError
 
     def api_get_suggestions(self, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
