@@ -715,6 +715,51 @@ app.delete('/api/performances/:id', requireAuth, async (req, res) => {
   }
 });
 
+// ----------------- Agenda Routes -----------------
+
+// Get agenda combining rehearsals and performances
+app.get('/api/agenda', requireAuth, async (req, res) => {
+  const role = await verifyGroupAccess(req);
+  if (!role) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const startParam = req.query.start;
+    const endParam = req.query.end;
+    const start = startParam
+      ? startParam + (startParam.includes('T') ? '' : 'T00:00')
+      : null;
+    const end = endParam
+      ? endParam + (endParam.includes('T') ? '' : 'T23:59')
+      : null;
+    const [rehearsals, performances] = await Promise.all([
+      db.getRehearsalEvents(req.session.groupId),
+      db.getPerformances(),
+    ]);
+    let items = [
+      ...rehearsals.map((r) => ({
+        type: 'rehearsal',
+        date: r.date,
+        id: r.id,
+        title: '',
+        location: r.location,
+      })),
+      ...performances.map((p) => ({
+        type: 'performance',
+        date: p.date,
+        id: p.id,
+        title: p.name,
+        location: p.location,
+      })),
+    ];
+    if (start) items = items.filter((i) => i.date >= start);
+    if (end) items = items.filter((i) => i.date <= end);
+    items.sort((a, b) => a.date.localeCompare(b.date));
+    res.json(items);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch agenda' });
+  }
+});
+
 // ----------------- Settings Routes -----------------
 
 // Get settings

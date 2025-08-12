@@ -1475,7 +1475,15 @@
     container.appendChild(header);
     let items = [];
     try {
-      items = await api('/agenda');
+      const params = new URLSearchParams();
+      const now = new Date();
+      const start = now.toISOString().slice(0, 10);
+      const endDate = new Date(now);
+      endDate.setMonth(endDate.getMonth() + 6);
+      const end = endDate.toISOString().slice(0, 10);
+      params.set('start', start);
+      params.set('end', end);
+      items = await api(`/agenda?${params.toString()}`);
     } catch (err) {
       const p = document.createElement('p');
       p.style.color = 'var(--danger-color)';
@@ -1491,7 +1499,7 @@
       li.className = 'agenda-item';
       const link = document.createElement('a');
       link.href = '#';
-      const label = item.name || item.title || '';
+      const label = item.title || item.location || '';
       const typeLabel = item.type === 'performance' ? 'Prestation' : 'Répétition';
       link.textContent = `${item.date} – ${label || typeLabel}`;
       link.onclick = (e) => {
