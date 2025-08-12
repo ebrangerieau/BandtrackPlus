@@ -441,3 +441,18 @@ textarea {
 .logout-btn:hover {
   opacity: 0.9;
 }
+
+/* Agenda */
+.agenda-list {
+  list-style: none;
+  padding: 0;
+}
+
+.agenda-item {
+  margin-bottom: 8px;
+}
+
+.agenda-item a {
+  color: var(--primary-color);
+  text-decoration: none;
+}
