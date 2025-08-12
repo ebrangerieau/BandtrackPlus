@@ -180,6 +180,21 @@ def init_db():
                FOREIGN KEY (group_id) REFERENCES groups(id)
            );'''
     )
+    # Rehearsal events: standalone rehearsal occurrences with date and
+    # location information.  These are distinct from the "rehearsals"
+    # table above, which stores songs to rehearse.
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS rehearsal_events (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               date TEXT NOT NULL,
+               location TEXT,
+               group_id INTEGER NOT NULL,
+               creator_id INTEGER NOT NULL,
+               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+               FOREIGN KEY (group_id) REFERENCES groups(id),
+               FOREIGN KEY (creator_id) REFERENCES users(id)
+           );'''
+    )
     # Groups allow multiple band configurations and are owned by a user
     cur.execute(
         '''CREATE TABLE IF NOT EXISTS groups (
@@ -1140,6 +1155,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         raise NotImplementedError
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
+
+            if path == '/api/agenda' and method == 'GET':
+                return self.api_get_agenda(query, user)
 
             # Settings
             if path == '/api/settings':
@@ -2226,6 +2244,61 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+
+    def api_get_agenda(self, query: dict[str, list[str]], user: dict):
+        """Return combined rehearsal events and performances for the active
+        group.  Supports optional ``start`` and ``end`` query parameters in
+        ISO ``YYYY-MM-DD`` (or ``YYYY-MM-DDTHH:MM``) format to filter the
+        results."""
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
+        # Extract query parameters
+        start_param = query.get('start', [None])[0]
+        end_param = query.get('end', [None])[0]
+        start = (start_param + ('T00:00' if 'T' not in start_param else '')) if start_param else None
+        end = (end_param + ('T23:59' if 'T' not in end_param else '')) if end_param else None
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Fetch rehearsal events
+        cur.execute(
+            'SELECT id, date, location FROM rehearsal_events WHERE group_id = ? ORDER BY date ASC',
+            (user['group_id'],),
+        )
+        rehearsal_rows = [dict(row) for row in cur.fetchall()]
+        # Fetch performances
+        cur.execute(
+            'SELECT id, name, date, location FROM performances WHERE group_id = ? ORDER BY date ASC',
+            (user['group_id'],),
+        )
+        performance_rows = [dict(row) for row in cur.fetchall()]
+        conn.close()
+        items = [
+            {
+                'type': 'rehearsal',
+                'date': r['date'],
+                'id': r['id'],
+                'title': '',
+                'location': r['location'],
+            }
+            for r in rehearsal_rows
+        ] + [
+            {
+                'type': 'performance',
+                'date': p['date'],
+                'id': p['id'],
+                'title': p['name'],
+                'location': p['location'],
+            }
+            for p in performance_rows
+        ]
+        if start:
+            items = [i for i in items if i['date'] >= start]
+        if end:
+            items = [i for i in items if i['date'] <= end]
+        items.sort(key=lambda x: x['date'])
+        send_json(self, HTTPStatus.OK, items)
 
     def api_delete_rehearsal_id(self, rehearsal_id: int, user: dict):
         """Delete a rehearsal by ID.  The rehearsal may be removed by its
