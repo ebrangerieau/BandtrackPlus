@@ -523,19 +523,21 @@
     perfP.textContent = nextPerfText;
     container.appendChild(perfP);
 
-    let nextRehearsalDate = '';
-    let nextRehearsalLocation = '';
+    let nextRehearsalText = 'Prochaine répétition : —';
     try {
-      const settings = await api('/settings');
-      nextRehearsalDate = settings.nextRehearsalDate || '';
-      nextRehearsalLocation = settings.nextRehearsalLocation || '';
+      const list = await api('/rehearsal-events');
+      const now = new Date();
+      const upcoming = list.filter((r) => new Date(r.date) >= now);
+      upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
+      if (upcoming.length > 0) {
+        const r = upcoming[0];
+        nextRehearsalText = `Prochaine répétition : ${r.date}${r.location ? ' – ' + r.location : ''}`;
+      }
     } catch (err) {
-      // ignore
+      // ignore errors
     }
     const rehP = document.createElement('p');
-    rehP.textContent = nextRehearsalDate
-      ? `Prochaine répétition : ${nextRehearsalDate}${nextRehearsalLocation ? ' – ' + nextRehearsalLocation : ''}`
-      : 'Prochaine répétition : —';
+    rehP.textContent = nextRehearsalText;
     container.appendChild(rehP);
 
   }
@@ -2144,45 +2146,88 @@
     return section;
   }
 
-  function renderRehearsalSection(currentSettings) {
+  function renderRehearsalSection() {
     const section = document.createElement('div');
     section.className = 'settings-section';
     const h3 = document.createElement('h3');
-    h3.textContent = 'En cours';
+    h3.textContent = 'Répétitions à venir';
     section.appendChild(h3);
-    const labelDate = document.createElement('label');
-    labelDate.textContent = 'Prochaine répétition (date/heure)';
-    const inputDate = document.createElement('input');
-    inputDate.type = 'datetime-local';
-    inputDate.value = currentSettings.nextRehearsalDate || '';
-    inputDate.style.width = '100%';
-    inputDate.onchange = async () => {
-      currentSettings.nextRehearsalDate = inputDate.value;
+
+    const listDiv = document.createElement('div');
+    section.appendChild(listDiv);
+
+    async function refreshList() {
+      listDiv.innerHTML = '';
       try {
-        await api('/settings', 'PUT', currentSettings);
+        const events = await api('/rehearsal-events');
+        if (events.length === 0) {
+          const p = document.createElement('p');
+          p.textContent = 'Aucune répétition planifiée';
+          listDiv.appendChild(p);
+        } else {
+          const ul = document.createElement('ul');
+          events.forEach((ev) => {
+            const li = document.createElement('li');
+            li.textContent = `${ev.date}${ev.location ? ' – ' + ev.location : ''}`;
+            const delBtn = document.createElement('button');
+            delBtn.textContent = 'Supprimer';
+            delBtn.style.marginLeft = '8px';
+            delBtn.onclick = async () => {
+              if (!confirm('Supprimer cette répétition ?')) return;
+              try {
+                await api(`/rehearsal-events/${ev.id}`, 'DELETE');
+                await refreshList();
+              } catch (err) {
+                alert(err.message);
+              }
+            };
+            li.appendChild(delBtn);
+            ul.appendChild(li);
+          });
+          listDiv.appendChild(ul);
+        }
+      } catch (err) {
+        const p = document.createElement('p');
+        p.style.color = 'var(--danger-color)';
+        p.textContent = 'Impossible de récupérer les répétitions';
+        listDiv.appendChild(p);
+      }
+    }
+
+    const formDiv = document.createElement('div');
+    formDiv.style.marginTop = '12px';
+    const dateInput = document.createElement('input');
+    dateInput.type = 'datetime-local';
+    const locInput = document.createElement('input');
+    locInput.type = 'text';
+    locInput.placeholder = 'Lieu';
+    locInput.style.marginLeft = '8px';
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'Ajouter';
+    addBtn.style.marginLeft = '8px';
+    addBtn.onclick = async () => {
+      if (!dateInput.value) {
+        alert('Date requise');
+        return;
+      }
+      try {
+        await api('/rehearsal-events', 'POST', {
+          date: dateInput.value,
+          location: locInput.value || '',
+        });
+        dateInput.value = '';
+        locInput.value = '';
+        await refreshList();
       } catch (err) {
         alert(err.message);
       }
     };
-    section.appendChild(labelDate);
-    section.appendChild(inputDate);
-    const labelLocation = document.createElement('label');
-    labelLocation.textContent = 'Lieu de la prochaine répétition';
-    labelLocation.style.marginTop = '12px';
-    const inputLocation = document.createElement('input');
-    inputLocation.type = 'text';
-    inputLocation.value = currentSettings.nextRehearsalLocation || '';
-    inputLocation.style.width = '100%';
-    inputLocation.onchange = async () => {
-      currentSettings.nextRehearsalLocation = inputLocation.value;
-      try {
-        await api('/settings', 'PUT', currentSettings);
-      } catch (err) {
-        alert(err.message);
-      }
-    };
-    section.appendChild(labelLocation);
-    section.appendChild(inputLocation);
+    formDiv.appendChild(dateInput);
+    formDiv.appendChild(locInput);
+    formDiv.appendChild(addBtn);
+    section.appendChild(formDiv);
+
+    refreshList();
     return section;
   }
 
@@ -2384,7 +2429,7 @@
     await refreshGroups();
     const themeSection = renderThemeSection(currentSettings);
     container.appendChild(themeSection);
-    const rehearsalSection = renderRehearsalSection(currentSettings);
+    const rehearsalSection = renderRehearsalSection();
     container.appendChild(rehearsalSection);
     const logoutSection = document.createElement('div');
     logoutSection.className = 'settings-section';

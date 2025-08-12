@@ -577,6 +577,54 @@ app.post('/api/rehearsals/:id/to-suggestion', requireAuth, async (req, res) => {
   }
 });
 
+// ----------------- Rehearsal Event Routes -----------------
+
+// Get all rehearsal events for the active group
+app.get('/api/rehearsal-events', requireAuth, async (req, res) => {
+  const role = await verifyGroupAccess(req);
+  if (!role) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const events = await db.getRehearsalEvents(req.session.groupId);
+    res.json(events);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch rehearsal events' });
+  }
+});
+
+// Create a rehearsal event
+app.post('/api/rehearsal-events', requireAuth, async (req, res) => {
+  const role = await verifyGroupAccess(req);
+  if (!role) return res.status(403).json({ error: 'Forbidden' });
+  const { date, location } = req.body;
+  if (!date) return res.status(400).json({ error: 'Date is required' });
+  try {
+    const newId = await db.createRehearsalEvent(date, location || '', req.session.groupId, req.session.userId);
+    const events = await db.getRehearsalEvents(req.session.groupId);
+    const created = events.find((e) => e.id === newId);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create rehearsal event' });
+  }
+});
+
+// Delete a rehearsal event
+app.delete('/api/rehearsal-events/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  const role = await verifyGroupAccess(req);
+  if (!role) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const changes = await db.deleteRehearsalEvent(id, req.session.userId, role);
+    if (changes === 0) return res.status(403).json({ error: 'Not permitted to delete' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete rehearsal event' });
+  }
+});
+
 // ----------------- Performance Routes -----------------
 
 // Get all performances

@@ -1070,6 +1070,69 @@ function deletePerformance(id, userId, role) {
 }
 
 /**
+ * Creates a rehearsal event for a group.
+ */
+function createRehearsalEvent(date, location, groupId, creatorId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)',
+      [date, location || '', groupId, creatorId],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      }
+    );
+  });
+}
+
+/**
+ * Retrieves all rehearsal events for a group.
+ */
+function getRehearsalEvents(groupId) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT r.id, r.date, r.location, r.group_id, r.creator_id, u.username AS creator
+       FROM rehearsal_events r
+       JOIN users u ON u.id = r.creator_id
+       WHERE r.group_id = ?
+       ORDER BY r.date ASC`,
+      [groupId],
+      (err, rows) => {
+        if (err) reject(err);
+        else {
+          const result = rows.map((row) => ({
+            id: row.id,
+            date: row.date,
+            location: row.location,
+            groupId: row.group_id,
+            creatorId: row.creator_id,
+            creator: row.creator,
+          }));
+          resolve(result);
+        }
+      }
+    );
+  });
+}
+
+/**
+ * Deletes a rehearsal event. Admins and moderators can delete any event,
+ * otherwise only the creator can delete.
+ */
+function deleteRehearsalEvent(id, userId, role) {
+  return new Promise((resolve, reject) => {
+    const sql = role === 'admin' || role === 'moderator'
+      ? 'DELETE FROM rehearsal_events WHERE id = ?'
+      : 'DELETE FROM rehearsal_events WHERE id = ? AND creator_id = ?';
+    const params = role === 'admin' || role === 'moderator' ? [id] : [id, userId];
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
+  });
+}
+
+/**
  * Moves a suggestion to the rehearsals table. Returns the created rehearsal
  * row or null if the suggestion does not exist.
  */
@@ -1487,6 +1550,9 @@ module.exports = {
   getPerformance,
   updatePerformance,
   deletePerformance,
+  createRehearsalEvent,
+  getRehearsalEvents,
+  deleteRehearsalEvent,
   getSettings,
   getSettingsForGroup,
   updateSettings,
