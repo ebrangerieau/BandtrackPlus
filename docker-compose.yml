@@ -5,10 +5,10 @@ services:
     build: .
     container_name: bandtrack
     ports:
-      - "3000:3000"
+      - "8080:8080"
     #volumes:
     #  - /volume1/docker/bandtrack/bandtrack.db:/app/bandtrack.db
     environment:
       - HOST=0.0.0.0
-      - PORT=3000
+      - PORT=8080
     restart: unless-stopped

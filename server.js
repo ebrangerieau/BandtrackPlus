@@ -15,7 +15,7 @@ const PBKDF2_ITERATIONS = 200000;
 const db = require('./db');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // In production the SSL certificate is provided via environment variables so
 // that deployments can supply paths to certificates issued by a real CA (e.g.

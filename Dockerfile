@@ -18,7 +18,7 @@ VOLUME ["/data"]
 
 # Set environment variables to configure host/port (optional)
 ENV HOST=0.0.0.0
-ENV PORT=3000
+ENV PORT=8080
 
 # Expose the port the app listens on
 EXPOSE ${PORT}
