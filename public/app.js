@@ -76,6 +76,9 @@
       }
       throw new Error('No membership');
     }
+    if (res.status === 404 && path === '/context' && method === 'GET') {
+      return null;
+    }
     if (!res.ok) {
       throw new Error((json && json.error) || 'Erreur API');
     }
@@ -2145,8 +2148,20 @@
     const h3 = document.createElement('h3');
     h3.textContent = 'Administration';
     section.appendChild(h3);
+    if (activeGroupId == null || currentUser?.needsGroup) {
+      const p = document.createElement('p');
+      p.textContent = 'Aucun groupe actif';
+      section.appendChild(p);
+      return section;
+    }
     try {
       const group = await api('/context');
+      if (!group) {
+        const p = document.createElement('p');
+        p.textContent = 'Aucun groupe actif';
+        section.appendChild(p);
+        return section;
+      }
       const members = await api(`/groups/${activeGroupId}/members`);
       const groupHeader = document.createElement('h4');
       groupHeader.textContent = 'Tableau de bord du groupe';
