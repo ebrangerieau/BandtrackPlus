@@ -87,7 +87,7 @@ Une implémentation équivalente du backend est également fournie en Python. El
 lance simplement avec la commande :
 
 ```bash
-python3 server.py --port 3000
+python3 server.py --port 8080
 ```
 
 Contrairement à la version Node.js, ce serveur ne dépend d'aucun module

@@ -41,12 +41,12 @@ Running the server is as simple as executing this file with Python:
 python3 server.py
 ```
 
-The server listens on port 3000 by default.  You can override the port
+The server listens on port 8080 by default.  You can override the port
 by setting the ``PORT`` environment variable or passing ``--port`` on
 the command line.  Example:
 
 ```
-python3 server.py --port 8080
+python3 server.py --port 5000
 ```
 
 The server automatically creates the database and tables on first run,
@@ -2442,7 +2442,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 # Server entry point
 #############################
 
-def run_server(host: str = '0.0.0.0', port: int = 3000):
+def run_server(host: str = '0.0.0.0', port: int = 8080):
     migrate_to_multigroup()
     init_db()
     migrate_performance_location()
@@ -2458,7 +2458,7 @@ def run_server(host: str = '0.0.0.0', port: int = 3000):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run BandTrack backend server.')
-    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 3000)), help='Port to bind the server on')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 8080)), help='Port to bind the server on')
     parser.add_argument('--host', type=str, default=os.environ.get('HOST', '0.0.0.0'), help='Host/IP to bind the server on')
     args = parser.parse_args()
     run_server(args.host, args.port)
