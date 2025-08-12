@@ -568,6 +568,7 @@
       { key: 'suggestions', label: 'Propositions' },
       { key: 'rehearsals', label: 'En cours' },
       { key: 'performances', label: 'Prestations' },
+      { key: 'agenda', label: 'Agenda' },
     ];
     navItems.forEach((item) => {
       const btn = document.createElement('button');
@@ -591,6 +592,8 @@
       renderRehearsals(pageDiv);
     } else if (currentPage === 'performances') {
       renderPerformances(pageDiv);
+    } else if (currentPage === 'agenda') {
+      renderAgenda(pageDiv);
     } else if (currentPage === 'settings') {
       renderSettings(pageDiv);
     }
@@ -1457,6 +1460,47 @@
     fab.textContent = '+';
     fab.onclick = () => showAddPerformanceModal(container);
     container.appendChild(fab);
+  }
+
+  /**
+   * Affiche l'agenda des répétitions et prestations.
+   * @param {HTMLElement} container
+   */
+  async function renderAgenda(container) {
+    container.innerHTML = '';
+    const header = document.createElement('h2');
+    header.textContent = 'Agenda';
+    container.appendChild(header);
+    let items = [];
+    try {
+      items = await api('/agenda');
+    } catch (err) {
+      const p = document.createElement('p');
+      p.style.color = 'var(--danger-color)';
+      p.textContent = "Impossible de récupérer l'agenda";
+      container.appendChild(p);
+      return;
+    }
+    items.sort((a, b) => a.date.localeCompare(b.date));
+    const list = document.createElement('ul');
+    list.className = 'agenda-list';
+    items.forEach((item) => {
+      const li = document.createElement('li');
+      li.className = 'agenda-item';
+      const link = document.createElement('a');
+      link.href = '#';
+      const label = item.name || item.title || '';
+      const typeLabel = item.type === 'performance' ? 'Prestation' : 'Répétition';
+      link.textContent = `${item.date} – ${label || typeLabel}`;
+      link.onclick = (e) => {
+        e.preventDefault();
+        currentPage = item.type === 'performance' ? 'performances' : 'rehearsals';
+        renderMain(document.getElementById('app'));
+      };
+      li.appendChild(link);
+      list.appendChild(li);
+    });
+    container.appendChild(list);
   }
 
   /**
