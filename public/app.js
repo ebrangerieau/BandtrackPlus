@@ -566,7 +566,7 @@
     const navItems = [
       { key: 'home', label: 'Accueil' },
       { key: 'suggestions', label: 'Propositions' },
-      { key: 'rehearsals', label: 'Répétitions' },
+      { key: 'rehearsals', label: 'En cours' },
       { key: 'performances', label: 'Prestations' },
     ];
     navItems.forEach((item) => {
@@ -2104,7 +2104,7 @@
     const section = document.createElement('div');
     section.className = 'settings-section';
     const h3 = document.createElement('h3');
-    h3.textContent = 'Répétition';
+    h3.textContent = 'En cours';
     section.appendChild(h3);
     const labelDate = document.createElement('label');
     labelDate.textContent = 'Prochaine répétition (date/heure)';

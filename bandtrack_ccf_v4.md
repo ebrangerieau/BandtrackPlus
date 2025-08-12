@@ -57,7 +57,7 @@ Le classement automatique selon les votes positifs aide à prioriser le travail 
 
 Un mécanisme de conversion permet de transformer directement une suggestion approuvée en morceau de répétition, conservant toutes les métadonnées associées et facilitant la transition vers le travail actif.
 
-### 4.2 Répétitions et suivi des progrès
+### 4.2 En cours et suivi des progrès
 Chaque morceau en répétition dispose d'une fiche complète incluant les informations de base et les outils de suivi personnalisé. Les utilisateurs évaluent leur maîtrise via un curseur gradué de 0 à 10, avec coloration visuelle facilitant la lecture rapide des niveaux.
 
 Les notes textuelles personnelles permettent de consigner des observations techniques, des difficultés rencontrées ou des points d'amélioration. Ces notes restent privées à chaque utilisateur tout en contribuant à un suivi précis des progrès.
@@ -76,7 +76,7 @@ Les prestations passées constituent un historique consultatif permettant de sui
 ## 5. Interface utilisateur et expérience
 
 ### 5.1 Navigation et ergonomie
-L'interface adopte une navigation par onglets fixes en bas d'écran, optimisée pour l'usage mobile tout en restant fonctionnelle sur ordinateur. Les sections principales (Suggestions, Répétitions, Prestations, Paramètres) restent accessibles en un clic depuis tout écran.
+L'interface adopte une navigation par onglets fixes en bas d'écran, optimisée pour l'usage mobile tout en restant fonctionnelle sur ordinateur. Les sections principales (Suggestions, En cours, Prestations, Paramètres) restent accessibles en un clic depuis tout écran.
 
 Les fenêtres modales centrées gèrent l'ajout et la modification de contenus, maintenant le contexte visuel tout en offrant suffisamment d'espace pour les formulaires détaillés.
 
