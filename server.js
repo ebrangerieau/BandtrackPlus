@@ -1034,7 +1034,13 @@ app.delete('/api/metrics', requireAuth, (req, res) => {
 // Serve static files for the front‑end.  The new React SPA lives in the
 // `frontend` directory while legacy assets remain in `public`.
 app.use('/public', express.static(path.join(__dirname, 'public')));
-app.use('/', express.static(path.join(__dirname, 'frontend')));
+app.use('/', express.static(path.join(__dirname, 'frontend'), {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.js')) {
+      res.setHeader('Content-Type', 'application/javascript');
+    }
+  }
+}));
 
 // For any unknown route (e.g. /suggestions) that isn’t an API route,
 // return index.html so that the SPA can handle routing on the client side.
