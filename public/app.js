@@ -1168,7 +1168,7 @@
   /**
    * Fenêtre modale pour ajouter un nouveau morceau en répétition.
    */
-  function showAddRehearsalModal(container) {
+  function showAddRehearsalModal(container, afterSave) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -1235,10 +1235,16 @@
       const spotify = inputSp.value.trim();
       try {
         await api('/rehearsals', 'POST', { title, author, youtube, spotify });
-          if (modal.parentNode) {
-            modal.parentNode.removeChild(modal); // or use modal.remove();
-          }
-        renderRehearsals(container);
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal); // or use modal.remove();
+        }
+        try {
+          rehearsalsCache = await apiPaginated('/rehearsals');
+        } catch (err) {
+          // ignore
+        }
+        if (typeof afterSave === 'function') afterSave();
+        else renderRehearsals(container);
       } catch (err) {
         alert(err.message);
       }
@@ -1259,8 +1265,9 @@
    * répétitions est rafraîchie.
    * @param {Object} song L'objet représentant la répétition à éditer
    * @param {HTMLElement} container Le conteneur de la page des répétitions
+   * @param {Function?} afterSave Fonction appelée après sauvegarde
    */
-  function showEditRehearsalModal(song, container) {
+  function showEditRehearsalModal(song, container, afterSave) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -1331,13 +1338,16 @@
       if (!titleVal) return;
       try {
         await api(`/rehearsals/${song.id}`, 'PUT', { title: titleVal, author: authorVal, youtube: ytVal, spotify: spVal });
-          if (modal.parentNode) {
-            modal.parentNode.removeChild(modal); // or use modal.remove();
-          }
-        // Actualiser la page des répétitions
-        renderRehearsals(container);
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal); // or use modal.remove();
+        }
         // Mettre à jour le cache
         rehearsalsCache = await apiPaginated('/rehearsals');
+        if (typeof afterSave === 'function') afterSave();
+        else {
+          // Actualiser la page des répétitions
+          renderRehearsals(container);
+        }
       } catch (err) {
         alert(err.message);
       }
@@ -1473,6 +1483,20 @@
     const header = document.createElement('h2');
     header.textContent = 'Agenda';
     container.appendChild(header);
+    // Actions pour créer répétition ou prestation
+    const topActions = document.createElement('div');
+    topActions.className = 'actions';
+    const addRehearsalBtn = document.createElement('button');
+    addRehearsalBtn.className = 'btn-secondary';
+    addRehearsalBtn.textContent = 'Nouvelle répétition';
+    addRehearsalBtn.onclick = () => showAddRehearsalModal(container, () => renderAgenda(container));
+    const addPerformanceBtn = document.createElement('button');
+    addPerformanceBtn.className = 'btn-secondary';
+    addPerformanceBtn.textContent = 'Nouvelle prestation';
+    addPerformanceBtn.onclick = () => showAddPerformanceModal(container, () => renderAgenda(container));
+    topActions.appendChild(addRehearsalBtn);
+    topActions.appendChild(addPerformanceBtn);
+    container.appendChild(topActions);
     let items = [];
     try {
       const params = new URLSearchParams();
@@ -1491,6 +1515,14 @@
       container.appendChild(p);
       return;
     }
+    // Assurer d'avoir les répétitions en cache pour l'édition
+    if (rehearsalsCache.length === 0) {
+      try {
+        rehearsalsCache = await apiPaginated('/rehearsals');
+      } catch (err) {
+        // ignore
+      }
+    }
     items.sort((a, b) => a.date.localeCompare(b.date));
     const list = document.createElement('ul');
     list.className = 'agenda-list';
@@ -1508,6 +1540,57 @@
         renderMain(document.getElementById('app'));
       };
       li.appendChild(link);
+      // Boutons d'édition/suppression
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn-secondary';
+      editBtn.textContent = 'Modifier';
+      editBtn.onclick = async (e) => {
+        e.preventDefault();
+        if (item.type === 'performance') {
+          try {
+            const perf = await api(`/performances/${item.id}`);
+            showEditPerformanceModal(perf, container, () => renderAgenda(container));
+          } catch (err) {
+            alert(err.message);
+          }
+        } else {
+          let song = rehearsalsCache.find((r) => r.id === item.id);
+          if (!song) {
+            try {
+              rehearsalsCache = await apiPaginated('/rehearsals');
+            } catch (err) {
+              // ignore
+            }
+            song = rehearsalsCache.find((r) => r.id === item.id);
+          }
+          if (song) {
+            showEditRehearsalModal(song, container, () => renderAgenda(container));
+          }
+        }
+      };
+      actions.appendChild(editBtn);
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-danger';
+      delBtn.textContent = 'Supprimer';
+      delBtn.onclick = async (e) => {
+        e.preventDefault();
+        if (!confirm('Supprimer cet événement ?')) return;
+        try {
+          if (item.type === 'performance') {
+            await api(`/performances/${item.id}`, 'DELETE');
+          } else {
+            await api(`/rehearsals/${item.id}`, 'DELETE');
+            rehearsalsCache = rehearsalsCache.filter((r) => r.id !== item.id);
+          }
+          renderAgenda(container);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      actions.appendChild(delBtn);
+      li.appendChild(actions);
       list.appendChild(li);
     });
     container.appendChild(list);
@@ -1516,7 +1599,7 @@
   /**
    * Affiche une modale pour ajouter une prestation.
    */
-  function showAddPerformanceModal(container) {
+  function showAddPerformanceModal(container, afterSave) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -1616,7 +1699,8 @@
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
-        renderPerformances(container);
+        if (typeof afterSave === 'function') afterSave();
+        else renderPerformances(container);
       } catch (err) {
         alert(err.message);
       }
@@ -1633,7 +1717,7 @@
    * Affiche une modale pour modifier une prestation existante.  Les champs
    * sont pré-remplis avec les valeurs actuelles.
    */
-  function showEditPerformanceModal(perf, container) {
+  function showEditPerformanceModal(perf, container, afterSave) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -1737,7 +1821,8 @@
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
-        renderPerformances(container);
+        if (typeof afterSave === 'function') afterSave();
+        else renderPerformances(container);
       } catch (err) {
         alert(err.message);
       }
