@@ -80,11 +80,11 @@ body, html {
 
 /* Container principal */
 #app {
-  padding-bottom: 60px; /* espace pour la barre de navigation */
+  padding-bottom: 8vh; /* espace pour la barre de navigation */
   min-height: 100vh;
   box-sizing: border-box;
   /* Ajout d’un padding en haut pour laisser de la place au logo */
-  padding-top: 60px;
+  padding-top: 8vh;
 }
 
 /* En-tête avec logo */
@@ -93,18 +93,18 @@ body, html {
   top: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  height: 8vh;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 4vw;
   background-color: var(--nav-bg);
   border-bottom: 1px solid var(--nav-border);
   z-index: 200;
 }
 
 .logo-img {
-  height: 40px;
+  height: 5vh;
 }
 
 #group-name {
@@ -115,7 +115,7 @@ body, html {
 #user-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2vw;
 }
 
 #user-name {
@@ -123,16 +123,16 @@ body, html {
 }
 
 #profile-btn img {
-  width: 40px;
-  height: 40px;
+  width: 6vh;
+  height: 6vh;
   border-radius: 50%;
 }
 
 /* Formulaires d'authentification */
 .auth-container {
-  max-width: 400px;
-  margin: 60px auto;
-  padding: 20px;
+  max-width: 90vw;
+  margin: 10vh auto;
+  padding: 4vh 5vw;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -146,15 +146,15 @@ body, html {
 
 .auth-container label {
   display: block;
-  margin-bottom: 6px;
-  margin-top: 12px;
+  margin-bottom: 1vh;
+  margin-top: 2vh;
 }
 
 .auth-container input[type="text"],
 .auth-container input[type="password"],
 .auth-container input[type="date"] {
   width: 100%;
-  padding: 8px;
+  padding: 1vh;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   box-sizing: border-box;
@@ -162,14 +162,14 @@ body, html {
 
 .auth-container button {
   width: 100%;
-  padding: 10px;
-  margin-top: 20px;
+  padding: 1.5vh 0;
+  margin-top: 2vh;
   background-color: var(--primary-color);
   color: #fff;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 2.5vh;
 }
 
 .auth-container button:hover {
@@ -179,7 +179,7 @@ body, html {
 .auth-container .link {
   display: block;
   text-align: center;
-  margin-top: 12px;
+  margin-top: 2vh;
   color: var(--primary-color);
   text-decoration: none;
   cursor: pointer;
@@ -187,9 +187,9 @@ body, html {
 
 /* Page d'accueil après connexion */
 .home-container {
-  max-width: 400px;
-  margin: 60px auto;
-  padding: 20px;
+  max-width: 90vw;
+  margin: 10vh auto;
+  padding: 4vh 5vw;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -198,14 +198,14 @@ body, html {
 }
 
 .home-container button {
-  padding: 10px 20px;
-  margin-top: 20px;
+  padding: 1.5vh 5vw;
+  margin-top: 2vh;
   background-color: var(--primary-color);
   color: #fff;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 2.5vh;
 }
 
 /* Barre de navigation en bas de page */
@@ -214,7 +214,7 @@ body, html {
   bottom: 0;
   left: 0;
   width: 100%;
-  height: 60px;
+  height: 8vh;
   display: flex;
   align-items: center;
   justify-content: space-around;
@@ -229,7 +229,7 @@ body, html {
   flex: 1;
   height: 100%;
   color: var(--text-color);
-  font-size: 14px;
+  font-size: 2vh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -244,7 +244,7 @@ body, html {
 
 /* Contenu de page */
 .page {
-  padding: 20px;
+  padding: 4vh 5vw;
 }
 
 /* Cartes pour les listes */
@@ -252,8 +252,8 @@ body, html {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 16px;
+  padding: 3vh 3vw;
+  margin-bottom: 3vh;
 }
 
 .card.collapsed .card-details {
@@ -273,7 +273,7 @@ body, html {
 
 .like-info {
   display: flex;
-  gap: 6px;
+  gap: 1.5vw;
   align-items: center;
 }
 
@@ -281,21 +281,21 @@ body, html {
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 3vh;
 }
 
 .actions {
-  margin-top: 10px;
+  margin-top: 2vh;
   display: flex;
-  gap: 8px;
+  gap: 2vw;
 }
 
 .actions button {
-  padding: 6px 10px;
+  padding: 1vh 2vw;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 2vh;
 }
 
 .btn-primary {
@@ -316,7 +316,7 @@ body, html {
 /* Inputs spécifiques */
 input[type="range"] {
   width: 100%;
-  margin-top: 8px;
+  margin-top: 1vh;
 }
 
 .level-display {
@@ -341,9 +341,9 @@ input[type="range"] {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 20px;
+  padding: 4vh 5vw;
   width: 90%;
-  max-width: 500px;
+  max-width: 90vw;
 }
 
 .modal-content h3 {
@@ -351,17 +351,17 @@ input[type="range"] {
 }
 
 .modal-actions {
-  margin-top: 20px;
+  margin-top: 2vh;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 2vw;
 }
 
 /* Champ de note */
 textarea {
   width: 100%;
-  min-height: 60px;
-  padding: 8px;
+  min-height: 10vh;
+  padding: 1vh;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   box-sizing: border-box;
@@ -369,54 +369,54 @@ textarea {
 
 /* Séparateurs pour listes de prestations */
 .section-title {
-  margin-top: 24px;
-  margin-bottom: 12px;
-  font-size: 20px;
+  margin-top: 3vh;
+  margin-bottom: 2vh;
+  font-size: 3vh;
   font-weight: bold;
 }
 
 /* Liste d'éléments sélectionnables */
 .select-list {
-  max-height: 200px;
+  max-height: 30vh;
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  padding: 8px;
-  margin-bottom: 12px;
+  padding: 1vh 1vw;
+  margin-bottom: 2vh;
 }
 
 .select-list label {
   display: flex;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 1vh;
 }
 
 .select-list input[type="checkbox"] {
-  margin-right: 8px;
+  margin-right: 2vw;
 }
 
 /* Bouton flottant pour ajout */
 .fab {
   position: fixed;
-  bottom: 80px;
-  right: 20px;
-  width: 56px;
-  height: 56px;
+  bottom: 12vh;
+  right: 4vw;
+  width: 10vh;
+  height: 10vh;
   border-radius: 50%;
   background-color: var(--primary-color);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: 4vh;
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 
 /* Section générique pour les paramètres */
 .settings-section {
-  margin-top: 20px;
-  padding: 10px;
+  margin-top: 2vh;
+  padding: 2vh 2vw;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--card-bg);
@@ -428,8 +428,8 @@ textarea {
 
 /* Bouton de déconnexion */
 .logout-btn {
-  margin-top: 20px;
-  padding: 10px;
+  margin-top: 2vh;
+  padding: 1.5vh 0;
   background-color: var(--danger-color);
   color: #fff;
   border: none;
@@ -449,7 +449,39 @@ textarea {
 }
 
 .agenda-item {
-  margin-bottom: 8px;
+  margin-bottom: 1vh;
+}
+
+@media (max-width: 600px) {
+  .header {
+    height: 10vh;
+    padding: 0 6vw;
+  }
+
+  .nav-bar {
+    height: 10vh;
+  }
+
+  .nav-bar button {
+    font-size: 4vw;
+  }
+
+  .auth-container,
+  .home-container {
+    margin: 8vh auto;
+    padding: 3vh 5vw;
+  }
+
+  .auth-container button,
+  .home-container button {
+    font-size: 4vw;
+    padding: 2vh 0;
+  }
+
+  .card {
+    padding: 4vw;
+    margin-bottom: 4vw;
+  }
 }
 
 .agenda-item a {
