@@ -1116,6 +1116,25 @@ function getRehearsalEvents(groupId) {
 }
 
 /**
+ * Updates a rehearsal event's date and location. Only admins/moderators or
+ * the original creator may update the event.
+ */
+function updateRehearsalEvent(id, date, location, userId, role) {
+  return new Promise((resolve, reject) => {
+    const sql = role === 'admin' || role === 'moderator'
+      ? 'UPDATE rehearsal_events SET date = ?, location = ? WHERE id = ?'
+      : 'UPDATE rehearsal_events SET date = ?, location = ? WHERE id = ? AND creator_id = ?';
+    const params = role === 'admin' || role === 'moderator'
+      ? [date, location, id]
+      : [date, location, id, userId];
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes);
+    });
+  });
+}
+
+/**
  * Deletes a rehearsal event. Admins and moderators can delete any event,
  * otherwise only the creator can delete.
  */
@@ -1552,6 +1571,7 @@ module.exports = {
   deletePerformance,
   createRehearsalEvent,
   getRehearsalEvents,
+  updateRehearsalEvent,
   deleteRehearsalEvent,
   getSettings,
   getSettingsForGroup,
