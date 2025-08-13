@@ -717,6 +717,154 @@ app.delete('/api/performances/:id', requireAuth, async (req, res) => {
 
 // ----------------- Agenda Routes -----------------
 
+// Create agenda item (rehearsal or performance)
+app.post('/api/agenda', requireAuth, async (req, res) => {
+  const role = await verifyGroupAccess(req);
+  if (!role) return res.status(403).json({ error: 'Forbidden' });
+  const { type } = req.body;
+  try {
+    if (type === 'rehearsal') {
+      const { date, location } = req.body;
+      if (!date) return res.status(400).json({ error: 'Date is required' });
+      const newId = await db.createRehearsalEvent(
+        date,
+        location || '',
+        req.session.groupId,
+        req.session.userId
+      );
+      const events = await db.getRehearsalEvents(req.session.groupId);
+      const created = events.find((e) => e.id === newId);
+      res.status(201).json({
+        type: 'rehearsal',
+        date: created.date,
+        id: created.id,
+        title: '',
+        location: created.location,
+      });
+    } else if (type === 'performance') {
+      const { name, date, location, songs } = req.body;
+      if (!name || !date)
+        return res.status(400).json({ error: 'Name and date are required' });
+      const newId = await db.createPerformance(
+        name,
+        date,
+        location || '',
+        songs || [],
+        req.session.userId
+      );
+      const list = await db.getPerformances();
+      const created = list.find((p) => p.id === newId);
+      res.status(201).json({
+        type: 'performance',
+        date: created.date,
+        id: created.id,
+        title: created.name,
+        location: created.location,
+      });
+    } else {
+      res.status(400).json({ error: 'Invalid type' });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create agenda item' });
+  }
+});
+
+// Update agenda item
+app.put('/api/agenda/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  const role = await verifyGroupAccess(req);
+  if (!role) return res.status(403).json({ error: 'Forbidden' });
+  const { type } = req.body;
+  try {
+    if (type === 'rehearsal') {
+      const { date, location } = req.body;
+      if (!date) return res.status(400).json({ error: 'Date is required' });
+      const changes = await db.updateRehearsalEvent(
+        id,
+        date,
+        location || '',
+        req.session.userId,
+        role
+      );
+      if (changes === 0)
+        return res.status(403).json({ error: 'Not permitted to update' });
+      const events = await db.getRehearsalEvents(req.session.groupId);
+      const updated = events.find((e) => e.id === id);
+      if (!updated) return res.status(404).json({ error: 'Not found' });
+      res.json({
+        type: 'rehearsal',
+        date: updated.date,
+        id: updated.id,
+        title: '',
+        location: updated.location,
+      });
+    } else if (type === 'performance') {
+      const { name, date, location, songs } = req.body;
+      if (!name || !date)
+        return res.status(400).json({ error: 'Name and date are required' });
+      const changes = await db.updatePerformance(
+        id,
+        name,
+        date,
+        location || '',
+        songs || [],
+        req.session.userId,
+        role
+      );
+      if (changes === 0)
+        return res.status(403).json({ error: 'Not permitted to update' });
+      const updated = await db.getPerformance(id);
+      await db.logEvent(req.session.userId, 'edit', { entity: 'performance', id });
+      res.json({
+        type: 'performance',
+        date: updated.date,
+        id: updated.id,
+        title: updated.name,
+        location: updated.location,
+      });
+    } else {
+      res.status(400).json({ error: 'Invalid type' });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update agenda item' });
+  }
+});
+
+// Delete agenda item
+app.delete('/api/agenda/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  const role = await verifyGroupAccess(req);
+  if (!role) return res.status(403).json({ error: 'Forbidden' });
+  const type = req.body.type || req.query.type;
+  try {
+    if (type === 'rehearsal') {
+      const changes = await db.deleteRehearsalEvent(
+        id,
+        req.session.userId,
+        role
+      );
+      if (changes === 0)
+        return res.status(403).json({ error: 'Not permitted to delete' });
+      res.json({ success: true });
+    } else if (type === 'performance') {
+      const changes = await db.deletePerformance(id, req.session.userId, role);
+      if (changes === 0)
+        return res.status(403).json({ error: 'Not permitted to delete' });
+      await db.logEvent(req.session.userId, 'delete', { entity: 'performance', id });
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: 'Invalid type' });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete agenda item' });
+  }
+});
+
 // Get agenda combining rehearsals and performances
 app.get('/api/agenda', requireAuth, async (req, res) => {
   const role = await verifyGroupAccess(req);
