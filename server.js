@@ -1031,15 +1031,15 @@ app.delete('/api/metrics', requireAuth, (req, res) => {
 
 // ----------------- Static Files -----------------
 
-// Serve static files for the front‑end.  This allows the SPA to be served
-// directly from the same domain as the API, avoiding CORS issues.  Files
-// live in the `public` directory next to this server file.
-app.use('/', express.static(path.join(__dirname, 'public')));
+// Serve static files for the front‑end.  The new React SPA lives in the
+// `frontend` directory while legacy assets remain in `public`.
+app.use('/public', express.static(path.join(__dirname, 'public')));
+app.use('/', express.static(path.join(__dirname, 'frontend')));
 
 // For any unknown route (e.g. /suggestions) that isn’t an API route,
 // return index.html so that the SPA can handle routing on the client side.
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'frontend', 'index.html'));
 });
 
 // Start the HTTPS server once the database is initialized
