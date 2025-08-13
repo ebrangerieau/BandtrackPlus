@@ -1489,11 +1489,13 @@
     const addRehearsalBtn = document.createElement('button');
     addRehearsalBtn.className = 'btn-secondary';
     addRehearsalBtn.textContent = 'Nouvelle répétition';
-    addRehearsalBtn.onclick = () => showAddRehearsalModal(container, () => renderAgenda(container));
+    addRehearsalBtn.onclick = () =>
+      showAddRehearsalEventModal(container, () => renderAgenda(container));
     const addPerformanceBtn = document.createElement('button');
     addPerformanceBtn.className = 'btn-secondary';
     addPerformanceBtn.textContent = 'Nouvelle prestation';
-    addPerformanceBtn.onclick = () => showAddPerformanceModal(container, () => renderAgenda(container));
+    addPerformanceBtn.onclick = () =>
+      showAddPerformanceModal(container, () => renderAgenda(container));
     topActions.appendChild(addRehearsalBtn);
     topActions.appendChild(addPerformanceBtn);
     container.appendChild(topActions);
@@ -1556,18 +1558,11 @@
             alert(err.message);
           }
         } else {
-          let song = rehearsalsCache.find((r) => r.id === item.id);
-          if (!song) {
-            try {
-              rehearsalsCache = await apiPaginated('/rehearsals');
-            } catch (err) {
-              // ignore
-            }
-            song = rehearsalsCache.find((r) => r.id === item.id);
-          }
-          if (song) {
-            showEditRehearsalModal(song, container, () => renderAgenda(container));
-          }
+          showEditRehearsalEventModal(
+            item,
+            container,
+            () => renderAgenda(container)
+          );
         }
       };
       actions.appendChild(editBtn);
@@ -1581,8 +1576,7 @@
           if (item.type === 'performance') {
             await api(`/performances/${item.id}`, 'DELETE');
           } else {
-            await api(`/rehearsals/${item.id}`, 'DELETE');
-            rehearsalsCache = rehearsalsCache.filter((r) => r.id !== item.id);
+            await api(`/agenda/${item.id}`, 'DELETE', { type: 'rehearsal' });
           }
           renderAgenda(container);
         } catch (err) {
@@ -1594,6 +1588,74 @@
       list.appendChild(li);
     });
     container.appendChild(list);
+  }
+
+  /**
+   * Fenêtre modale pour ajouter une répétition.
+   */
+  function showAddRehearsalEventModal(container, afterSave) {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Ajouter une répétition';
+    content.appendChild(h3);
+    const form = document.createElement('form');
+    form.onsubmit = (e) => e.preventDefault();
+    // Date
+    const labelDate = document.createElement('label');
+    labelDate.textContent = 'Date et heure';
+    const inputDate = document.createElement('input');
+    inputDate.type = 'datetime-local';
+    inputDate.required = true;
+    inputDate.style.width = '100%';
+    // Lieu
+    const labelLoc = document.createElement('label');
+    labelLoc.textContent = 'Lieu';
+    const inputLoc = document.createElement('input');
+    inputLoc.type = 'text';
+    inputLoc.style.width = '100%';
+    form.appendChild(labelDate);
+    form.appendChild(inputDate);
+    form.appendChild(labelLoc);
+    form.appendChild(inputLoc);
+    content.appendChild(form);
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal);
+      }
+    };
+    const okBtn = document.createElement('button');
+    okBtn.className = 'btn-primary';
+    okBtn.textContent = 'Ajouter';
+    okBtn.onclick = async (e) => {
+      e.preventDefault();
+      const date = inputDate.value;
+      if (!date) return;
+      const location = inputLoc.value.trim();
+      try {
+        await api('/agenda', 'POST', { type: 'rehearsal', date, location });
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal);
+        }
+        if (typeof afterSave === 'function') afterSave();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    content.appendChild(actions);
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    setTimeout(() => inputDate.focus(), 50);
   }
 
   /**
@@ -1711,6 +1773,80 @@
     modal.appendChild(content);
     document.body.appendChild(modal);
     setTimeout(() => inputName.focus(), 50);
+  }
+
+  /**
+   * Fenêtre modale pour modifier une répétition.
+   */
+  function showEditRehearsalEventModal(event, container, afterSave) {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Modifier la répétition';
+    content.appendChild(h3);
+    const form = document.createElement('form');
+    form.onsubmit = (e) => e.preventDefault();
+    // Date
+    const labelDate = document.createElement('label');
+    labelDate.textContent = 'Date et heure';
+    const inputDate = document.createElement('input');
+    inputDate.type = 'datetime-local';
+    inputDate.required = true;
+    inputDate.style.width = '100%';
+    inputDate.value = event.date || '';
+    // Lieu
+    const labelLoc = document.createElement('label');
+    labelLoc.textContent = 'Lieu';
+    const inputLoc = document.createElement('input');
+    inputLoc.type = 'text';
+    inputLoc.style.width = '100%';
+    inputLoc.value = event.location || '';
+    form.appendChild(labelDate);
+    form.appendChild(inputDate);
+    form.appendChild(labelLoc);
+    form.appendChild(inputLoc);
+    content.appendChild(form);
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'Annuler';
+    cancelBtn.onclick = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal);
+      }
+    };
+    const okBtn = document.createElement('button');
+    okBtn.className = 'btn-primary';
+    okBtn.textContent = 'Enregistrer';
+    okBtn.onclick = async (e) => {
+      e.preventDefault();
+      const date = inputDate.value;
+      if (!date) return;
+      const location = inputLoc.value.trim();
+      try {
+        await api(`/agenda/${event.id}`, 'PUT', {
+          type: 'rehearsal',
+          date,
+          location,
+        });
+        if (modal.parentNode) {
+          modal.parentNode.removeChild(modal);
+        }
+        if (typeof afterSave === 'function') afterSave();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    content.appendChild(actions);
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    setTimeout(() => inputDate.focus(), 50);
   }
 
   /**
@@ -2251,7 +2387,8 @@
     const addRehearsalBtn = document.createElement('button');
     addRehearsalBtn.className = 'btn-secondary';
     addRehearsalBtn.textContent = 'Nouvelle répétition';
-    addRehearsalBtn.onclick = () => showAddRehearsalModal(settingsContainer, refreshList);
+    addRehearsalBtn.onclick = () =>
+      showAddRehearsalEventModal(settingsContainer, refreshList);
     const addPerformanceBtn = document.createElement('button');
     addPerformanceBtn.className = 'btn-secondary';
     addPerformanceBtn.textContent = 'Nouvelle prestation';
@@ -2326,18 +2463,7 @@
               alert(err.message);
             }
           } else {
-            let song = rehearsalsCache.find((r) => r.id === item.id);
-            if (!song) {
-              try {
-                rehearsalsCache = await apiPaginated('/rehearsals');
-              } catch (err) {
-                // ignore
-              }
-              song = rehearsalsCache.find((r) => r.id === item.id);
-            }
-            if (song) {
-              showEditRehearsalModal(song, settingsContainer, refreshList);
-            }
+            showEditRehearsalEventModal(item, settingsContainer, refreshList);
           }
         };
         actions.appendChild(editBtn);
@@ -2350,8 +2476,7 @@
             if (item.type === 'performance') {
               await api(`/performances/${item.id}`, 'DELETE');
             } else {
-              await api(`/rehearsals/${item.id}`, 'DELETE');
-              rehearsalsCache = rehearsalsCache.filter((r) => r.id !== item.id);
+              await api(`/agenda/${item.id}`, 'DELETE', { type: 'rehearsal' });
             }
             await refreshList();
           } catch (err) {

@@ -1156,8 +1156,25 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
 
-            if path == '/api/agenda' and method == 'GET':
-                return self.api_get_agenda(query, user)
+            if path == '/api/agenda':
+                if method == 'GET':
+                    return self.api_get_agenda(query, user)
+                if method == 'POST':
+                    return self.api_create_agenda(body, user)
+                raise NotImplementedError
+            if path.startswith('/api/agenda/'):
+                parts = path.split('/')
+                if len(parts) == 4:
+                    try:
+                        item_id = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    if method == 'PUT':
+                        return self.api_update_agenda_id(item_id, body, user)
+                    if method == 'DELETE':
+                        return self.api_delete_agenda_id(item_id, body, user)
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
 
             # Settings
             if path == '/api/settings':
@@ -1202,7 +1219,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             # Unknown path
             self.send_error(HTTPStatus.NOT_FOUND)
         except PermissionError:
-            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         except NotImplementedError:
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
         except Exception as exc:
@@ -2244,6 +2261,183 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+
+    def api_create_agenda(self, body: dict, user: dict):
+        item_type = body.get('type')
+        if item_type == 'rehearsal':
+            date = (body.get('date') or '').strip()
+            location = (body.get('location') or '').strip()
+            if not date:
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Date is required'})
+                return
+            role = verify_group_access(user['id'], user['group_id'])
+            if not role:
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute(
+                'INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)',
+                (date, location, user['group_id'], user['id'])
+            )
+            reh_id = cur.lastrowid
+            conn.commit()
+            conn.close()
+            send_json(self, HTTPStatus.CREATED, {
+                'type': 'rehearsal',
+                'id': reh_id,
+                'date': date,
+                'title': '',
+                'location': location,
+            })
+            return
+        if item_type == 'performance':
+            name = (body.get('name') or '').strip()
+            date = (body.get('date') or '').strip()
+            location = (body.get('location') or '').strip()
+            songs = body.get('songs') or []
+            if not name or not date:
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
+                return
+            role = verify_group_access(user['id'], user['group_id'])
+            if not role:
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
+            try:
+                songs_list = [int(s) for s in songs]
+            except (TypeError, ValueError):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
+                return
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute(
+                'INSERT INTO performances (name, date, location, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
+                (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
+            )
+            perf_id = cur.lastrowid
+            conn.commit()
+            conn.close()
+            send_json(self, HTTPStatus.CREATED, {
+                'type': 'performance',
+                'id': perf_id,
+                'date': date,
+                'title': name,
+                'location': location,
+            })
+            return
+        send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid type'})
+
+    def api_update_agenda_id(self, item_id: int, body: dict, user: dict):
+        item_type = body.get('type')
+        if item_type == 'rehearsal':
+            date = (body.get('date') or '').strip()
+            location = (body.get('location') or '').strip()
+            if not date:
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Date is required'})
+                return
+            role = verify_group_access(user['id'], user['group_id'])
+            if not role:
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute(
+                'UPDATE rehearsal_events SET date = ?, location = ? WHERE id = ? AND group_id = ?',
+                (date, location, item_id, user['group_id'])
+            )
+            if cur.rowcount == 0:
+                conn.close()
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
+                return
+            conn.commit()
+            cur.execute('SELECT id, date, location FROM rehearsal_events WHERE id = ?', (item_id,))
+            row = cur.fetchone()
+            conn.close()
+            if not row:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Not found'})
+                return
+            send_json(self, HTTPStatus.OK, {
+                'type': 'rehearsal',
+                'id': row['id'],
+                'date': row['date'],
+                'title': '',
+                'location': row['location'],
+            })
+            return
+        if item_type == 'performance':
+            name = (body.get('name') or '').strip()
+            date = (body.get('date') or '').strip()
+            location = (body.get('location') or '').strip()
+            songs = body.get('songs') or []
+            if not name or not date:
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Name and date are required'})
+                return
+            role = verify_group_access(user['id'], user['group_id'])
+            if not role:
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
+            try:
+                songs_list = [int(s) for s in songs]
+            except (TypeError, ValueError):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
+                return
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute(
+                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
+                (name, date, location, json.dumps(songs_list), item_id, user['group_id'])
+            )
+            if cur.rowcount == 0:
+                conn.close()
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
+                return
+            conn.commit()
+            cur.execute('SELECT id, name, date, location FROM performances WHERE id = ?', (item_id,))
+            row = cur.fetchone()
+            conn.close()
+            if not row:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Not found'})
+                return
+            send_json(self, HTTPStatus.OK, {
+                'type': 'performance',
+                'id': row['id'],
+                'date': row['date'],
+                'title': row['name'],
+                'location': row['location'],
+            })
+            return
+        send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid type'})
+
+    def api_delete_agenda_id(self, item_id: int, body: dict, user: dict):
+        item_type = body.get('type') or ''
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if item_type == 'rehearsal':
+            cur.execute('DELETE FROM rehearsal_events WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
+            if cur.rowcount == 0:
+                conn.close()
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
+                return
+            conn.commit()
+            conn.close()
+            send_json(self, HTTPStatus.OK, {'success': True})
+            return
+        if item_type == 'performance':
+            cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
+            if cur.rowcount == 0:
+                conn.close()
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
+                return
+            conn.commit()
+            conn.close()
+            send_json(self, HTTPStatus.OK, {'success': True})
+            return
+        conn.close()
+        send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid type'})
 
     def api_get_agenda(self, query: dict[str, list[str]], user: dict):
         """Return combined rehearsal events and performances for the active

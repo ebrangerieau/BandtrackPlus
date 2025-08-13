@@ -718,7 +718,7 @@ app.delete('/api/performances/:id', requireAuth, async (req, res) => {
 // ----------------- Agenda Routes -----------------
 
 // Create agenda item (rehearsal or performance)
-app.post('/api/agenda', requireAuth, async (req, res) => {
+app.post('/api/agenda', async (req, res) => {
   const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   const { type } = req.body;
@@ -771,7 +771,7 @@ app.post('/api/agenda', requireAuth, async (req, res) => {
 });
 
 // Update agenda item
-app.put('/api/agenda/:id', requireAuth, async (req, res) => {
+app.put('/api/agenda/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   const role = await verifyGroupAccess(req);
@@ -834,7 +834,7 @@ app.put('/api/agenda/:id', requireAuth, async (req, res) => {
 });
 
 // Delete agenda item
-app.delete('/api/agenda/:id', requireAuth, async (req, res) => {
+app.delete('/api/agenda/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   const role = await verifyGroupAccess(req);
@@ -866,7 +866,7 @@ app.delete('/api/agenda/:id', requireAuth, async (req, res) => {
 });
 
 // Get agenda combining rehearsals and performances
-app.get('/api/agenda', requireAuth, async (req, res) => {
+app.get('/api/agenda', async (req, res) => {
   const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   try {
