@@ -566,24 +566,30 @@
     const nav = document.createElement('div');
     nav.className = 'nav-bar';
     const navItems = [
-      { key: 'home', label: 'Accueil' },
-      { key: 'suggestions', label: 'Propositions' },
-      { key: 'rehearsals', label: 'En cours' },
-      { key: 'performances', label: 'Prestations' },
-      { key: 'agenda', label: 'Agenda' },
+      { key: 'home', label: 'Accueil', icon: 'fa-solid fa-house' },
+      { key: 'suggestions', label: 'Propositions', icon: 'fa-solid fa-lightbulb' },
+      { key: 'rehearsals', label: 'En cours', icon: 'fa-solid fa-clipboard-list' },
+      { key: 'performances', label: 'Prestations', icon: 'fa-solid fa-microphone' },
+      { key: 'agenda', label: 'Agenda', icon: 'fa-solid fa-calendar-days' },
     ];
     navItems.forEach((item) => {
       const btn = document.createElement('button');
-      btn.textContent = item.label;
       btn.className = currentPage === item.key ? 'active' : '';
+      btn.setAttribute('aria-label', item.label);
+      btn.innerHTML = `<i class="${item.icon}" aria-hidden="true"></i><span class="nav-label">${item.label}</span>`;
       btn.onclick = () => {
         if (currentPage !== item.key) {
           currentPage = item.key;
           renderMain(app);
         }
+        nav.classList.remove('open');
       };
       nav.appendChild(btn);
     });
+    const navToggle = document.getElementById('nav-toggle');
+    if (navToggle) {
+      navToggle.onclick = () => nav.classList.toggle('open');
+    }
     app.appendChild(nav);
     // Rendu de la page en fonction de currentPage
     if (currentPage === 'home') {
