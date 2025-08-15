@@ -43,3 +43,32 @@ def test_default_settings_creation(tmp_path):
         assert data['darkMode'] is False
     finally:
         stop_test_server(httpd, thread)
+
+
+def test_settings_update(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+    try:
+        request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
+        status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})
+        cookie = extract_cookie(headers)
+        headers = {'Cookie': cookie}
+
+        status, _, body = request('POST', port, '/api/groups', {'name': 'Band2'}, headers)
+        assert status == 201
+        group_id = json.loads(body)['id']
+
+        status, _, _ = request('PUT', port, f'/api/{group_id}/settings', {
+            'groupName': 'New Band',
+            'darkMode': True,
+            'template': 'modern'
+        }, headers)
+        assert status == 200
+
+        status, _, body = request('GET', port, f'/api/{group_id}/settings', headers=headers)
+        assert status == 200
+        data = json.loads(body)
+        assert data['groupName'] == 'New Band'
+        assert data['darkMode'] is True
+        assert data['template'] == 'modern'
+    finally:
+        stop_test_server(httpd, thread)
