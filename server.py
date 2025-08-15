@@ -20,8 +20,8 @@ Key features
   PBKDF2 with SHA‑256 for security.  Sessions are stored in a
   ``sessions`` table and identified via a randomly generated cookie.
 * Suggestions, rehearsals and performances are persisted in a SQLite
-  database (`bandtrack.db`) with the same structure as the earlier
-  Node/Express prototype.
+  database (`bandtrack.db`) with the same structure as an earlier
+  Node/Express prototype, which has since been retired.
 * A single settings row stores the group name and dark mode flag, which
   are applied at load time for all users.
 * The API endpoints mirror those used by the frontend so that the
