@@ -12,6 +12,14 @@ def generate_code() -> str:
 def migrate() -> bool:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+    # If the core "users" table does not exist yet we are dealing with a
+    # fresh database created by ``init_db`` and there is nothing to migrate.
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if not cur.fetchone():
+        conn.close()
+        return False
+    # Abort early when the migration has already been applied (``groups``
+    # table present).
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='groups'")
     if cur.fetchone():
         conn.close()

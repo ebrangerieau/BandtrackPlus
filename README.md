@@ -47,6 +47,12 @@ docker compose up --build
 
 Les variables d'environnement peuvent aussi être définies dans `docker-compose.yml`.
 
+Lors du démarrage du conteneur, `server.py` exécute automatiquement les
+scripts de migration Python présents dans le dossier `scripts/`
+(`migrate_to_multigroup.py`, `migrate_performance_location.py`,
+`migrate_suggestion_votes.py`). Ils assurent la compatibilité des anciennes
+bases de données sans dépendance à Node.js.
+
 ### Exécution locale sans Docker
 
 ```bash
