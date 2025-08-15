@@ -456,3 +456,46 @@ textarea {
   color: var(--primary-color);
   text-decoration: none;
 }
+
+/* Calendrier mensuel */
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.calendar-day-name {
+  font-weight: bold;
+  text-align: center;
+}
+
+.calendar-cell {
+  border: 1px solid var(--border-color);
+  min-height: 80px;
+  padding: 4px;
+}
+
+.calendar-cell.empty {
+  border: none;
+}
+
+.calendar-date {
+  font-weight: bold;
+}
+
+.calendar-event {
+  background: var(--primary-color);
+  color: #fff;
+  margin-top: 2px;
+  padding: 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
