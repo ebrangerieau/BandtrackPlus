@@ -6,7 +6,12 @@ services:
     container_name: bandtrack
     ports:
       - "8080:8080"
+    volumes:
+      - ./certs:/certs:ro
     environment:
       - HOST=0.0.0.0
       - PORT=8080
+      - SSL_KEY=/certs/key.pem
+      - SSL_CERT=/certs/cert.pem
+      - ORIGIN=https://localhost:8080
     restart: unless-stopped
