@@ -34,6 +34,16 @@
     rehearsalsCache = [];
   }
 
+  // Ferme le menu profil lorsqu'on clique à l'extérieur
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('profile-menu');
+    const btn = document.getElementById('profile-btn');
+    if (!menu || !btn) return;
+    if (menu.classList.contains('show') && !menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+      menu.classList.remove('show');
+    }
+  });
+
   function hasModRights() {
     return currentUser && (currentUser.membershipRole === 'admin' || currentUser.membershipRole === 'moderator');
   }
@@ -563,12 +573,31 @@
   function renderMain(app) {
     app.innerHTML = '';
     const profileBtn = document.getElementById('profile-btn');
-    if (profileBtn) {
-      profileBtn.onclick = () => {
+    const profileMenu = document.getElementById('profile-menu');
+    const perfBtn = document.getElementById('menu-performances');
+    const settingsBtn = document.getElementById('menu-settings');
+    if (profileBtn && profileMenu) {
+      profileBtn.onclick = (e) => {
+        e.stopPropagation();
+        profileMenu.classList.toggle('show');
+      };
+    }
+    if (perfBtn) {
+      perfBtn.onclick = () => {
+        if (currentPage !== 'performances') {
+          currentPage = 'performances';
+          renderMain(app);
+        }
+        profileMenu?.classList.remove('show');
+      };
+    }
+    if (settingsBtn) {
+      settingsBtn.onclick = () => {
         if (currentPage !== 'settings') {
           currentPage = 'settings';
           renderMain(app);
         }
+        profileMenu?.classList.remove('show');
       };
     }
     const pageDiv = document.createElement('div');

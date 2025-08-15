@@ -116,6 +116,7 @@ body, html {
   display: flex;
   align-items: center;
   gap: 8px;
+  position: relative;
 }
 
 #user-name {
@@ -126,6 +127,35 @@ body, html {
   width: 40px;
   height: 40px;
   border-radius: 50%;
+}
+
+#profile-menu {
+  position: absolute;
+  top: 48px;
+  right: 0;
+  background-color: var(--nav-bg);
+  border: 1px solid var(--nav-border);
+  border-radius: 4px;
+  display: none;
+  flex-direction: column;
+  z-index: 300;
+}
+
+#profile-menu.show {
+  display: flex;
+}
+
+#profile-menu button {
+  background: none;
+  border: none;
+  padding: 8px 16px;
+  text-align: left;
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+#profile-menu button:hover {
+  background-color: var(--border-color);
 }
 
 /* Formulaires d'authentification */
