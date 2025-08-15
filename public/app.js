@@ -581,7 +581,6 @@
       { key: 'home', label: 'Accueil' },
       { key: 'suggestions', label: 'Propositions' },
       { key: 'rehearsals', label: 'En cours' },
-      { key: 'performances', label: 'Prestations' },
       { key: 'agenda', label: 'Agenda' },
     ];
     navItems.forEach((item) => {
