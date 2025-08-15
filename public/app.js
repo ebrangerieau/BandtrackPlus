@@ -1585,21 +1585,58 @@
       cell.appendChild(dateLabel);
 
       const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      items
-        .filter((ev) => ev.date === dayStr)
-        .forEach((ev) => {
-          const evDiv = document.createElement('div');
-          evDiv.className = `calendar-event ${ev.type === 'performance' ? 'performance' : 'rehearsal'}`;
-          const label = ev.title || ev.location || '';
-          const typeLabel = ev.type === 'performance' ? 'Prestation' : 'Répétition';
-          evDiv.textContent = label || typeLabel;
-          evDiv.onclick = (e) => {
-            e.preventDefault();
-            currentPage = ev.type === 'performance' ? 'performances' : 'rehearsals';
-            renderMain(document.getElementById('app'));
-          };
-          cell.appendChild(evDiv);
-        });
+      const eventsForDay = items.filter((ev) => ev.date === dayStr);
+      eventsForDay.forEach((ev) => {
+        const evDiv = document.createElement('div');
+        evDiv.className = `calendar-event ${ev.type === 'performance' ? 'performance' : 'rehearsal'}`;
+        const label = ev.title || ev.location || '';
+        const typeLabel = ev.type === 'performance' ? 'Prestation' : 'Répétition';
+        evDiv.textContent = label || typeLabel;
+        evDiv.onclick = async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (ev.type === 'performance') {
+            try {
+              if (rehearsalsCache.length === 0) {
+                rehearsalsCache = await apiPaginated('/rehearsals');
+              }
+              const perfs = await api('/performances');
+              const perf = perfs.find((p) => p.id === ev.id);
+              if (perf) {
+                showEditPerformanceModal(perf, container, () => renderAgenda(container));
+              }
+            } catch (err) {
+              alert(err.message);
+            }
+          } else {
+            showEditRehearsalEventModal(ev, container, () => renderAgenda(container));
+          }
+        };
+        cell.appendChild(evDiv);
+      });
+
+      if (eventsForDay.length === 0) {
+        cell.onclick = async () => {
+          if (!hasModRights()) return;
+          const isPerf = confirm('Ajouter une prestation ? (Annuler pour une répétition)');
+          if (isPerf) {
+            try {
+              if (rehearsalsCache.length === 0) {
+                rehearsalsCache = await apiPaginated('/rehearsals');
+              }
+            } catch (err) {
+              // ignore cache errors
+            }
+            showAddPerformanceModal(container, () => renderAgenda(container), dayStr);
+          } else {
+            showAddRehearsalEventModal(
+              container,
+              () => renderAgenda(container),
+              `${dayStr}T20:00`
+            );
+          }
+        };
+      }
 
       grid.appendChild(cell);
     }
@@ -1610,7 +1647,7 @@
   /**
    * Fenêtre modale pour ajouter une répétition.
    */
-  function showAddRehearsalEventModal(container, afterSave) {
+  function showAddRehearsalEventModal(container, afterSave, initialDate) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -1627,6 +1664,7 @@
     inputDate.type = 'datetime-local';
     inputDate.required = true;
     inputDate.style.width = '100%';
+    if (initialDate) inputDate.value = initialDate;
     // Lieu
     const labelLoc = document.createElement('label');
     labelLoc.textContent = 'Lieu';
@@ -1678,7 +1716,7 @@
   /**
    * Affiche une modale pour ajouter une prestation.
    */
-  function showAddPerformanceModal(container, afterSave) {
+  function showAddPerformanceModal(container, afterSave, initialDate) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -1702,6 +1740,7 @@
     inputDate.type = 'date';
     inputDate.required = true;
     inputDate.style.width = '100%';
+    if (initialDate) inputDate.value = initialDate;
     // Lieu
     const labelLoc = document.createElement('label');
     labelLoc.textContent = 'Lieu';
