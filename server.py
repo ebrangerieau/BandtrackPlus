@@ -233,7 +233,7 @@ def init_db():
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                group_id INTEGER NOT NULL UNIQUE,
                group_name TEXT NOT NULL,
-               dark_mode INTEGER NOT NULL DEFAULT 0,
+               dark_mode INTEGER NOT NULL DEFAULT 1,
                template TEXT NOT NULL DEFAULT 'classic',
                FOREIGN KEY (group_id) REFERENCES groups(id)
            );'''
@@ -243,7 +243,7 @@ def init_db():
     if cur.fetchone()[0] == 0:
         cur.execute(
             'INSERT INTO settings (group_id, group_name, dark_mode, template) '
-            'VALUES (1, ?, 0, ?)',
+            'VALUES (1, ?, 1, ?)',
             ('Groupe de musique', 'classic')
         )
     # Sessions: store session token, associated user and expiry timestamp (epoch)
@@ -741,7 +741,7 @@ def create_group(name: str, invitation_code: str, description: str | None, logo_
     group_id = cur.lastrowid
     # Insert default settings for the new group
     cur.execute(
-        "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 0, 'classic')",
+        "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
         (group_id, name),
     )
     conn.commit()
@@ -2598,13 +2598,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             g = cur.fetchone()
             group_name = g['name'] if g else ''
             cur.execute(
-                "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 0, 'classic')",
+                "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
                 (user['group_id'], group_name),
             )
             conn.commit()
             row = {
                 'group_name': group_name,
-                'dark_mode': 0,
+                'dark_mode': 1,
                 'template': 'classic',
             }
         else:

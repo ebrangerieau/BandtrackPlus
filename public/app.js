@@ -537,9 +537,9 @@
     let nextPerfText = 'Aucune prestation prévue';
     try {
       const list = await api('/performances');
-      const today = new Date().toISOString().split('T')[0];
-      const upcoming = list.filter((p) => p.date >= today);
-      upcoming.sort((a, b) => a.date.localeCompare(b.date));
+      const now = new Date();
+      const upcoming = list.filter((p) => new Date(p.date) >= now);
+      upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
       if (upcoming.length > 0) {
         const p = upcoming[0];
         nextPerfText = `Prochaine prestation : ${p.name} (${formatDateTime(p.date)})`;
@@ -1436,9 +1436,9 @@
         // ignore
       }
     }
-    const today = new Date().toISOString().split('T')[0];
-    const upcoming = list.filter((p) => p.date >= today);
-    const past = list.filter((p) => p.date < today);
+    const now = new Date();
+    const upcoming = list.filter((p) => new Date(p.date) >= now);
+    const past = list.filter((p) => new Date(p.date) < now);
     function renderPerfList(title, arr) {
       const titleDiv = document.createElement('div');
       titleDiv.className = 'section-title';
@@ -1462,7 +1462,7 @@
         const details = document.createElement('div');
         details.className = 'card-details';
         const dateP = document.createElement('p');
-        dateP.textContent = 'Date : ' + perf.date;
+        dateP.textContent = 'Date : ' + formatDateTime(perf.date);
         details.appendChild(dateP);
         if (perf.location) {
           const locP = document.createElement('p');
@@ -1781,6 +1781,13 @@
     inputDate.required = true;
     inputDate.style.width = '100%';
     if (initialDate) inputDate.value = initialDate;
+    // Heure
+    const labelTime = document.createElement('label');
+    labelTime.textContent = 'Heure';
+    const inputTime = document.createElement('input');
+    inputTime.type = 'time';
+    inputTime.required = true;
+    inputTime.style.width = '100%';
     // Lieu
     const labelLoc = document.createElement('label');
     labelLoc.textContent = 'Lieu';
@@ -1805,6 +1812,8 @@
     form.appendChild(inputName);
     form.appendChild(labelDate);
     form.appendChild(inputDate);
+    form.appendChild(labelTime);
+    form.appendChild(inputTime);
     form.appendChild(labelLoc);
     form.appendChild(inputLoc);
     form.appendChild(labelSongs);
@@ -1828,8 +1837,10 @@
       e.preventDefault();
       const name = inputName.value.trim();
       const dateVal = inputDate.value;
+      const timeVal = inputTime.value;
       const locVal = inputLoc.value.trim();
-      if (!name || !dateVal) return;
+      if (!name || !dateVal || !timeVal) return;
+      const dateTime = `${dateVal}T${timeVal}`;
       const selected = [];
       listDiv.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
         if (cb.checked) selected.push(Number(cb.value));
@@ -1853,7 +1864,7 @@
         return;
       }
       try {
-        await api('/performances', 'POST', { name, date: dateVal, location: locVal, songs: selected });
+        await api('/performances', 'POST', { name, date: dateTime, location: locVal, songs: selected });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
@@ -1974,7 +1985,16 @@
     inputDate.type = 'date';
     inputDate.required = true;
     inputDate.style.width = '100%';
-    inputDate.value = perf.date;
+    const [perfDate, perfTime] = (perf.date || '').split('T');
+    inputDate.value = perfDate;
+    // Heure
+    const labelTime = document.createElement('label');
+    labelTime.textContent = 'Heure';
+    const inputTime = document.createElement('input');
+    inputTime.type = 'time';
+    inputTime.required = true;
+    inputTime.style.width = '100%';
+    inputTime.value = (perfTime || '').slice(0, 5);
     // Lieu
     const labelLoc = document.createElement('label');
     labelLoc.textContent = 'Lieu';
@@ -2001,6 +2021,8 @@
     form.appendChild(inputName);
     form.appendChild(labelDate);
     form.appendChild(inputDate);
+    form.appendChild(labelTime);
+    form.appendChild(inputTime);
     form.appendChild(labelLoc);
     form.appendChild(inputLoc);
     form.appendChild(labelSongs);
@@ -2024,8 +2046,10 @@
       e.preventDefault();
       const name = inputName.value.trim();
       const dateVal = inputDate.value;
+      const timeVal = inputTime.value;
       const locVal = inputLoc.value.trim();
-      if (!name || !dateVal) return;
+      if (!name || !dateVal || !timeVal) return;
+      const dateTime = `${dateVal}T${timeVal}`;
       const selected = [];
       listDiv.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
         if (cb.checked) selected.push(Number(cb.value));
@@ -2049,7 +2073,7 @@
         return;
       }
       try {
-        await api(`/performances/${perf.id}`, 'PUT', { name, date: dateVal, location: locVal, songs: selected });
+        await api(`/performances/${perf.id}`, 'PUT', { name, date: dateTime, location: locVal, songs: selected });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
@@ -2080,7 +2104,7 @@
     h3.textContent = perf.name;
     content.appendChild(h3);
     const dateP = document.createElement('p');
-    dateP.textContent = 'Date : ' + perf.date;
+    dateP.textContent = 'Date : ' + formatDateTime(perf.date);
     content.appendChild(dateP);
     if (perf.location) {
       const locP = document.createElement('p');

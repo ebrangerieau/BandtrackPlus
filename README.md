@@ -8,8 +8,8 @@ minimaliste via une API REST.
 - Suggestions de morceaux (votes, édition par auteur ou admin)
 - Suivi des répétitions
 - Conversion suggestions ↔ répétitions
-- Gestion des prestations
-- Paramètres du groupe (nom, mode sombre)
+- Gestion des prestations (avec date et heure)
+- Paramètres du groupe (nom, mode sombre activé par défaut)
 - Écran d'accueil indiquant la prochaine prestation et la date de la prochaine
   répétition
 
