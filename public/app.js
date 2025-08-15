@@ -27,6 +27,9 @@
   let groupsCache = [];
   let activeGroupId = null;
 
+  // Mois actuellement affiché dans l'agenda
+  let agendaDate = new Date();
+
   function resetCaches() {
     rehearsalsCache = [];
   }
@@ -1484,9 +1487,36 @@
    */
   async function renderAgenda(container) {
     container.innerHTML = '';
+
     const header = document.createElement('h2');
     header.textContent = 'Agenda';
     container.appendChild(header);
+
+    // Navigation mois précédent / suivant
+    const nav = document.createElement('div');
+    nav.className = 'calendar-nav';
+    const prev = document.createElement('button');
+    prev.textContent = '<';
+    prev.onclick = () => {
+      agendaDate.setMonth(agendaDate.getMonth() - 1);
+      renderAgenda(container);
+    };
+    const next = document.createElement('button');
+    next.textContent = '>';
+    next.onclick = () => {
+      agendaDate.setMonth(agendaDate.getMonth() + 1);
+      renderAgenda(container);
+    };
+    const label = document.createElement('span');
+    label.textContent = agendaDate.toLocaleDateString(undefined, {
+      month: 'long',
+      year: 'numeric',
+    });
+    nav.appendChild(prev);
+    nav.appendChild(label);
+    nav.appendChild(next);
+    container.appendChild(nav);
+
     // Actions pour créer répétition ou prestation
     const topActions = document.createElement('div');
     topActions.className = 'actions';
@@ -1503,17 +1533,16 @@
     topActions.appendChild(addRehearsalBtn);
     topActions.appendChild(addPerformanceBtn);
     container.appendChild(topActions);
+
+    // Récupération des événements du mois courant
     let items = [];
     try {
-      const params = new URLSearchParams();
-      const now = new Date();
-      const start = now.toISOString().slice(0, 10);
-      const endDate = new Date(now);
-      endDate.setMonth(endDate.getMonth() + 6);
-      const end = endDate.toISOString().slice(0, 10);
-      params.set('start', start);
-      params.set('end', end);
-      items = await api(`/agenda?${params.toString()}`);
+      const year = agendaDate.getFullYear();
+      const month = agendaDate.getMonth() + 1;
+      const monthStr = String(month).padStart(2, '0');
+      const start = `${year}-${monthStr}-01`;
+      const end = `${year}-${monthStr}-31`;
+      items = await api(`/agenda?start=${start}&end=${end}`);
     } catch (err) {
       const p = document.createElement('p');
       p.style.color = 'var(--danger-color)';
@@ -1521,77 +1550,61 @@
       container.appendChild(p);
       return;
     }
-    // Assurer d'avoir les répétitions en cache pour l'édition
-    if (rehearsalsCache.length === 0) {
-      try {
-        rehearsalsCache = await apiPaginated('/rehearsals');
-      } catch (err) {
-        // ignore
-      }
-    }
+
     items.sort((a, b) => a.date.localeCompare(b.date));
-    const list = document.createElement('ul');
-    list.className = 'agenda-list';
-    items.forEach((item) => {
-      const li = document.createElement('li');
-      li.className = 'agenda-item';
-      const link = document.createElement('a');
-      link.href = '#';
-      const label = item.title || item.location || '';
-      const typeLabel = item.type === 'performance' ? 'Prestation' : 'Répétition';
-      link.textContent = `${item.date} – ${label || typeLabel}`;
-      link.onclick = (e) => {
-        e.preventDefault();
-        currentPage = item.type === 'performance' ? 'performances' : 'rehearsals';
-        renderMain(document.getElementById('app'));
-      };
-      li.appendChild(link);
-      // Boutons d'édition/suppression
-      const actions = document.createElement('div');
-      actions.className = 'actions';
-      const editBtn = document.createElement('button');
-      editBtn.className = 'btn-secondary';
-      editBtn.textContent = 'Modifier';
-      editBtn.onclick = async (e) => {
-        e.preventDefault();
-        if (item.type === 'performance') {
-          try {
-            const perf = await api(`/performances/${item.id}`);
-            showEditPerformanceModal(perf, container, () => renderAgenda(container));
-          } catch (err) {
-            alert(err.message);
-          }
-        } else {
-          showEditRehearsalEventModal(
-            item,
-            container,
-            () => renderAgenda(container)
-          );
-        }
-      };
-      actions.appendChild(editBtn);
-      const delBtn = document.createElement('button');
-      delBtn.className = 'btn-danger';
-      delBtn.textContent = 'Supprimer';
-      delBtn.onclick = async (e) => {
-        e.preventDefault();
-        if (!confirm('Supprimer cet événement ?')) return;
-        try {
-          if (item.type === 'performance') {
-            await api(`/performances/${item.id}`, 'DELETE');
-          } else {
-            await api(`/agenda/${item.id}`, 'DELETE', { type: 'rehearsal' });
-          }
-          renderAgenda(container);
-        } catch (err) {
-          alert(err.message);
-        }
-      };
-      actions.appendChild(delBtn);
-      li.appendChild(actions);
-      list.appendChild(li);
+
+    // Construction de la grille du calendrier
+    const grid = document.createElement('div');
+    grid.className = 'calendar-grid';
+
+    const dayNames = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+    dayNames.forEach((d) => {
+      const dn = document.createElement('div');
+      dn.className = 'calendar-day-name';
+      dn.textContent = d;
+      grid.appendChild(dn);
     });
-    container.appendChild(list);
+
+    const year = agendaDate.getFullYear();
+    const month = agendaDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const firstWeekday = (firstDay.getDay() + 6) % 7; // Lundi=0
+    for (let i = 0; i < firstWeekday; i++) {
+      const empty = document.createElement('div');
+      empty.className = 'calendar-cell empty';
+      grid.appendChild(empty);
+    }
+
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const cell = document.createElement('div');
+      cell.className = 'calendar-cell';
+      const dateLabel = document.createElement('div');
+      dateLabel.className = 'calendar-date';
+      dateLabel.textContent = day;
+      cell.appendChild(dateLabel);
+
+      const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      items
+        .filter((ev) => ev.date === dayStr)
+        .forEach((ev) => {
+          const evDiv = document.createElement('div');
+          evDiv.className = 'calendar-event';
+          const label = ev.title || ev.location || '';
+          const typeLabel = ev.type === 'performance' ? 'Prestation' : 'Répétition';
+          evDiv.textContent = label || typeLabel;
+          evDiv.onclick = (e) => {
+            e.preventDefault();
+            currentPage = ev.type === 'performance' ? 'performances' : 'rehearsals';
+            renderMain(document.getElementById('app'));
+          };
+          cell.appendChild(evDiv);
+        });
+
+      grid.appendChild(cell);
+    }
+
+    container.appendChild(grid);
   }
 
   /**
