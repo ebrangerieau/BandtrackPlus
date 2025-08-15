@@ -53,7 +53,14 @@
 
   function formatDateTime(str) {
     if (!str) return '';
-    return str.replace('T', ' ').replace(':', '-');
+    const date = new Date(str);
+    if (isNaN(date)) {
+      return str;
+    }
+    return date.toLocaleString('fr-FR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
   }
 
   /**
