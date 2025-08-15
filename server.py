@@ -235,8 +235,6 @@ def init_db():
                group_name TEXT NOT NULL,
                dark_mode INTEGER NOT NULL DEFAULT 0,
                template TEXT NOT NULL DEFAULT 'classic',
-               next_rehearsal_date TEXT,
-               next_rehearsal_location TEXT,
                FOREIGN KEY (group_id) REFERENCES groups(id)
            );'''
     )
@@ -244,8 +242,8 @@ def init_db():
     cur.execute('SELECT COUNT(*) FROM settings')
     if cur.fetchone()[0] == 0:
         cur.execute(
-            'INSERT INTO settings (group_id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) '
-            "VALUES (1, ?, 0, ?, '', '')",
+            'INSERT INTO settings (group_id, group_name, dark_mode, template) '
+            'VALUES (1, ?, 0, ?)',
             ('Groupe de musique', 'classic')
         )
     # Sessions: store session token, associated user and expiry timestamp (epoch)
@@ -357,8 +355,8 @@ def init_db():
     except Exception:
         pass
 
-    # Settings table: ensure newer columns exist.  Older databases may lack
-    # the "template" or next rehearsal fields, so add them if missing.
+    # Settings table: ensure newer columns exist. Older databases may lack
+    # the "template" field, so add it if missing.
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -366,10 +364,6 @@ def init_db():
         settings_columns = [row['name'] for row in cur.fetchall()]
         if 'template' not in settings_columns:
             cur.execute("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
-        if 'next_rehearsal_date' not in settings_columns:
-            cur.execute('ALTER TABLE settings ADD COLUMN next_rehearsal_date TEXT')
-        if 'next_rehearsal_location' not in settings_columns:
-            cur.execute('ALTER TABLE settings ADD COLUMN next_rehearsal_location TEXT')
         if 'group_id' not in settings_columns:
             cur.execute('ALTER TABLE settings ADD COLUMN group_id INTEGER')
             cur.execute('UPDATE settings SET group_id = 1 WHERE group_id IS NULL')
@@ -747,8 +741,7 @@ def create_group(name: str, invitation_code: str, description: str | None, logo_
     group_id = cur.lastrowid
     # Insert default settings for the new group
     cur.execute(
-        'INSERT INTO settings (group_id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) '
-        "VALUES (?, ?, 0, 'classic', '', '')",
+        "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 0, 'classic')",
         (group_id, name),
     )
     conn.commit()
@@ -2595,8 +2588,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            'SELECT group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location '
-            'FROM settings WHERE group_id = ?',
+            'SELECT group_name, dark_mode, template FROM settings WHERE group_id = ?',
             (user['group_id'],),
         )
         row = cur.fetchone()
@@ -2606,8 +2598,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             g = cur.fetchone()
             group_name = g['name'] if g else ''
             cur.execute(
-                'INSERT INTO settings (group_id, group_name, dark_mode, template, next_rehearsal_date, next_rehearsal_location) '
-                "VALUES (?, ?, 0, 'classic', '', '')",
+                "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 0, 'classic')",
                 (user['group_id'], group_name),
             )
             conn.commit()
@@ -2615,8 +2606,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'group_name': group_name,
                 'dark_mode': 0,
                 'template': 'classic',
-                'next_rehearsal_date': '',
-                'next_rehearsal_location': '',
             }
         else:
             row = dict(row)
@@ -2625,8 +2614,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             'groupName': row['group_name'],
             'darkMode': bool(row['dark_mode']),
             'template': row['template'] or 'classic',
-            'nextRehearsalDate': row['next_rehearsal_date'] or '',
-            'nextRehearsalLocation': row['next_rehearsal_location'] or ''
         })
 
     def api_update_settings(self, body: dict, user: dict):
@@ -2637,8 +2624,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         group_name = (body.get('groupName') or '').strip()
         dark_mode = body.get('darkMode')
         template = body.get('template')
-        next_date = (body.get('nextRehearsalDate') or '').strip()
-        next_loc = (body.get('nextRehearsalLocation') or '').strip()
         if not group_name or dark_mode is None:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'groupName and darkMode are required'})
             return
@@ -2649,13 +2634,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         cur = conn.cursor()
         if template is None:
             cur.execute(
-                'UPDATE settings SET group_name = ?, dark_mode = ?, next_rehearsal_date = ?, next_rehearsal_location = ? WHERE group_id = ?',
-                (group_name, 1 if bool(dark_mode) else 0, next_date, next_loc, user['group_id'])
+                'UPDATE settings SET group_name = ?, dark_mode = ? WHERE group_id = ?',
+                (group_name, 1 if bool(dark_mode) else 0, user['group_id'])
             )
         else:
             cur.execute(
-                'UPDATE settings SET group_name = ?, dark_mode = ?, template = ?, next_rehearsal_date = ?, next_rehearsal_location = ? WHERE group_id = ?',
-                (group_name, 1 if bool(dark_mode) else 0, template, next_date, next_loc, user['group_id'])
+                'UPDATE settings SET group_name = ?, dark_mode = ?, template = ? WHERE group_id = ?',
+                (group_name, 1 if bool(dark_mode) else 0, template, user['group_id'])
             )
         conn.commit()
         conn.close()

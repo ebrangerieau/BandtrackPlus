@@ -26,9 +26,7 @@ def test_default_settings_creation(tmp_path):
         assert data == {
             'groupName': 'Band2',
             'darkMode': False,
-            'template': 'classic',
-            'nextRehearsalDate': '',
-            'nextRehearsalLocation': ''
+            'template': 'classic'
         }
 
         # delete settings row and ensure GET recreates defaults
