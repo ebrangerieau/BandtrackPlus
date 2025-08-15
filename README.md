@@ -62,6 +62,16 @@ python3 server.py --port 8080
 Le serveur utilise uniquement la bibliothèque standard de Python et crée la
 base SQLite `bandtrack.db` au premier lancement.
 
+## Tests
+
+Les tests automatisés ciblent uniquement la version Python et peuvent être exécutés dans le conteneur :
+
+```bash
+pytest
+```
+
+Aucun environnement Node.js n'est nécessaire.
+
 ## Réinitialiser la base de données
 
 ```bash

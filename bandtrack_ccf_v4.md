@@ -19,7 +19,7 @@ La PWA permet une installation directe sur l'écran d'accueil des smartphones et
 ### 2.3 Backend et API
 Le backend Python fournit une API REST complète accessible via les endpoints `/api/*`. Toutes les opérations de création, lecture, mise à jour et suppression transitent par cette API, garantissant une cohérence des données et une sécurité homogène.
 
-L'architecture supporte deux implémentations backend distinctes : une version Python utilisant uniquement la bibliothèque standard, et une version Node.js avec Express pour les déploiements nécessitant un écosystème JavaScript. Les deux implémentations exposent des endpoints identiques et maintiennent une compatibilité totale au niveau API.
+L'architecture repose désormais sur une seule implémentation backend en Python utilisant uniquement la bibliothèque standard. L'ancienne expérimentation Node.js avec Express n'est plus maintenue. L'API REST exposée reste compatible avec les endpoints utilisés par le frontend.
 
 ### 2.4 Persistance et déploiement
 La base de données SQLite stocke l'ensemble des informations applicatives avec une structure optimisée pour les performances et la cohérence. Pour les déploiements nécessitant une montée en charge, une migration vers PostgreSQL ou MySQL reste possible sans modification du code applicatif grâce à une couche d'abstraction appropriée.
