@@ -1589,7 +1589,7 @@
         .filter((ev) => ev.date === dayStr)
         .forEach((ev) => {
           const evDiv = document.createElement('div');
-          evDiv.className = 'calendar-event';
+          evDiv.className = `calendar-event ${ev.type === 'performance' ? 'performance' : 'rehearsal'}`;
           const label = ev.title || ev.location || '';
           const typeLabel = ev.type === 'performance' ? 'Prestation' : 'Répétition';
           evDiv.textContent = label || typeLabel;

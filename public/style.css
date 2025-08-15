@@ -499,3 +499,11 @@ textarea {
   cursor: pointer;
   font-size: 12px;
 }
+
+.calendar-event.performance {
+  background: #f66;
+}
+
+.calendar-event.rehearsal {
+  background: #6cf;
+}
