@@ -70,7 +70,7 @@ def migrate() -> bool:
             (uid, role or 'user'),
         )
     cur.execute(
-        "INSERT OR IGNORE INTO settings (group_id, group_name, dark_mode) VALUES (1, 'Groupe de musique', 0)"
+        "INSERT OR IGNORE INTO settings (group_id, group_name, dark_mode) VALUES (1, 'Groupe de musique', 1)"
     )
     conn.commit()
     conn.close()

@@ -25,7 +25,7 @@ def test_default_settings_creation(tmp_path):
         data = json.loads(body)
         assert data == {
             'groupName': 'Band2',
-            'darkMode': False,
+            'darkMode': True,
             'template': 'classic'
         }
 
@@ -40,7 +40,7 @@ def test_default_settings_creation(tmp_path):
         assert status == 200
         data = json.loads(body)
         assert data['groupName'] == 'Band2'
-        assert data['darkMode'] is False
+        assert data['darkMode'] is True
     finally:
         stop_test_server(httpd, thread)
 
