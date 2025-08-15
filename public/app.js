@@ -2436,125 +2436,6 @@
     return section;
   }
 
-  async function renderEventsSection(settingsContainer) {
-    const section = document.createElement('div');
-    section.className = 'settings-section';
-    const h3 = document.createElement('h3');
-    h3.textContent = 'Événements à venir';
-    section.appendChild(h3);
-
-    const actions = document.createElement('div');
-    actions.className = 'actions';
-    const addRehearsalBtn = document.createElement('button');
-    addRehearsalBtn.className = 'btn-secondary';
-    addRehearsalBtn.textContent = 'Nouvelle répétition';
-    addRehearsalBtn.onclick = () =>
-      showAddRehearsalEventModal(settingsContainer, refreshList);
-    const addPerformanceBtn = document.createElement('button');
-    addPerformanceBtn.className = 'btn-secondary';
-    addPerformanceBtn.textContent = 'Nouvelle prestation';
-    addPerformanceBtn.onclick = async () => {
-      if (rehearsalsCache.length === 0) {
-        try {
-          rehearsalsCache = await apiPaginated('/rehearsals');
-        } catch (err) {
-          // ignore
-        }
-      }
-      showAddPerformanceModal(settingsContainer, refreshList);
-    };
-    actions.appendChild(addRehearsalBtn);
-    actions.appendChild(addPerformanceBtn);
-    section.appendChild(actions);
-
-    const listDiv = document.createElement('div');
-    section.appendChild(listDiv);
-
-    async function refreshList() {
-      listDiv.innerHTML = '';
-      let items = [];
-      try {
-        const params = new URLSearchParams();
-        const now = new Date();
-        const start = now.toISOString().slice(0, 10);
-        const endDate = new Date(now);
-        endDate.setMonth(endDate.getMonth() + 6);
-        const end = endDate.toISOString().slice(0, 10);
-        params.set('start', start);
-        params.set('end', end);
-        items = await api(`/agenda?${params.toString()}`);
-      } catch (err) {
-        const p = document.createElement('p');
-        p.style.color = 'var(--danger-color)';
-        p.textContent = "Impossible de récupérer l'agenda";
-        listDiv.appendChild(p);
-        return;
-      }
-      if (rehearsalsCache.length === 0) {
-        try {
-          rehearsalsCache = await apiPaginated('/rehearsals');
-        } catch (err) {
-          // ignore
-        }
-      }
-      items.sort((a, b) => a.date.localeCompare(b.date));
-      if (items.length === 0) {
-        const p = document.createElement('p');
-        p.textContent = 'Aucun événement prévu';
-        listDiv.appendChild(p);
-        return;
-      }
-      const ul = document.createElement('ul');
-      items.forEach((item) => {
-        const li = document.createElement('li');
-        const label = item.title || item.location || '';
-        const typeLabel = item.type === 'performance' ? 'Prestation' : 'Répétition';
-        li.textContent = `${item.date} – ${label || typeLabel}`;
-        const actions = document.createElement('div');
-        actions.className = 'actions';
-        const editBtn = document.createElement('button');
-        editBtn.className = 'btn-secondary';
-        editBtn.textContent = 'Modifier';
-        editBtn.onclick = async () => {
-          if (item.type === 'performance') {
-            try {
-              const perf = await api(`/performances/${item.id}`);
-              showEditPerformanceModal(perf, settingsContainer, refreshList);
-            } catch (err) {
-              alert(err.message);
-            }
-          } else {
-            showEditRehearsalEventModal(item, settingsContainer, refreshList);
-          }
-        };
-        actions.appendChild(editBtn);
-        const delBtn = document.createElement('button');
-        delBtn.className = 'btn-danger';
-        delBtn.textContent = 'Supprimer';
-        delBtn.onclick = async () => {
-          if (!confirm('Supprimer cet événement ?')) return;
-          try {
-            if (item.type === 'performance') {
-              await api(`/performances/${item.id}`, 'DELETE');
-            } else {
-              await api(`/agenda/${item.id}`, 'DELETE', { type: 'rehearsal' });
-            }
-            await refreshList();
-          } catch (err) {
-            alert(err.message);
-          }
-        };
-        actions.appendChild(delBtn);
-        li.appendChild(actions);
-        ul.appendChild(li);
-      });
-      listDiv.appendChild(ul);
-    }
-
-    refreshList();
-    return section;
-  }
-
   async function renderAdminSection(container) {
     const section = document.createElement('div');
     section.className = 'settings-section';
@@ -2753,8 +2634,6 @@
     await refreshGroups();
     const themeSection = renderThemeSection(currentSettings);
     container.appendChild(themeSection);
-    const eventsSection = await renderEventsSection(container);
-    container.appendChild(eventsSection);
     const logoutSection = document.createElement('div');
     logoutSection.className = 'settings-section';
     const logoutBtn = document.createElement('button');
