@@ -41,6 +41,11 @@
     return currentUser && currentUser.membershipRole === 'admin';
   }
 
+  function formatDateTime(str) {
+    if (!str) return '';
+    return str.replace('T', ' ').replace(':', '-');
+  }
+
   /**
    * Effectue une requête vers l’API.  Ajoute systématiquement le préfixe
    * `/api` et passe l’option `credentials: 'same-origin'` pour que les
@@ -520,7 +525,7 @@
       upcoming.sort((a, b) => a.date.localeCompare(b.date));
       if (upcoming.length > 0) {
         const p = upcoming[0];
-        nextPerfText = `Prochaine prestation : ${p.name} (${p.date})`;
+        nextPerfText = `Prochaine prestation : ${p.name} (${formatDateTime(p.date)})`;
       }
     } catch (err) {
       nextPerfText = 'Impossible de récupérer les prestations';
@@ -538,7 +543,7 @@
       upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
       if (upcoming.length > 0) {
         const r = upcoming[0];
-        nextRehearsalText = `Prochaine répétition : ${r.date}${r.location ? ' – ' + r.location : ''}`;
+        nextRehearsalText = `Prochaine répétition : ${formatDateTime(r.date)}${r.location ? ' – ' + r.location : ''}`;
       }
     } catch (err) {
       // ignore errors
