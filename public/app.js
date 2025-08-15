@@ -1415,7 +1415,7 @@
         const details = document.createElement('div');
         details.className = 'card-details';
         const dateP = document.createElement('p');
-        dateP.textContent = 'Date : ' + perf.date;
+        dateP.textContent = 'Date : ' + new Date(perf.date).toLocaleString();
         details.appendChild(dateP);
         if (perf.location) {
           const locP = document.createElement('p');
@@ -1984,7 +1984,7 @@
     h3.textContent = perf.name;
     content.appendChild(h3);
     const dateP = document.createElement('p');
-    dateP.textContent = 'Date : ' + perf.date;
+    dateP.textContent = 'Date : ' + new Date(perf.date).toLocaleString();
     content.appendChild(dateP);
     if (perf.location) {
       const locP = document.createElement('p');
