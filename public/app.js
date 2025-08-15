@@ -528,9 +528,10 @@
 
     let nextRehearsalText = 'Prochaine répétition : —';
     try {
-      const list = await api('/rehearsal-events');
+      const list = await api('/agenda');
+      const rehearsals = list.filter((item) => item.type === 'rehearsal');
       const now = new Date();
-      const upcoming = list.filter((r) => new Date(r.date) >= now);
+      const upcoming = rehearsals.filter((r) => new Date(r.date) >= now);
       upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
       if (upcoming.length > 0) {
         const r = upcoming[0];
