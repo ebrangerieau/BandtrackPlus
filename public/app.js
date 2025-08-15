@@ -1585,7 +1585,7 @@
       cell.appendChild(dateLabel);
 
       const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const eventsForDay = items.filter((ev) => ev.date === dayStr);
+      const eventsForDay = items.filter((ev) => ev.date?.startsWith(dayStr));
       eventsForDay.forEach((ev) => {
         const evDiv = document.createElement('div');
         evDiv.className = `calendar-event ${ev.type === 'performance' ? 'performance' : 'rehearsal'}`;
