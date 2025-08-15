@@ -6,9 +6,8 @@ FROM python:3.11-slim
 # Working directory in the container
 WORKDIR /app
 
-# Copy the Python server and the front‑end into the container.  We do not
-# copy the Node‑specific db.js or any Node modules because this image runs
-# the Python backend only.  The SQLite database will be created at runtime.
+# Copy the Python server, migration scripts and front‑end assets. The
+# SQLite database will be created at runtime.
 COPY server.py ./
 COPY public ./public
 COPY scripts ./scripts
