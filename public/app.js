@@ -353,6 +353,9 @@
     const p = document.createElement('p');
     p.textContent = 'Vous devez sélectionner ou créer un groupe pour continuer.';
     container.appendChild(p);
+    const p2 = document.createElement('p');
+    p2.textContent = 'Pour rejoindre un groupe existant, munissez-vous de son code d\'invitation.';
+    container.appendChild(p2);
     const btnRow = document.createElement('div');
     const createBtn = document.createElement('button');
     createBtn.className = 'btn-primary';
