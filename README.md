@@ -13,15 +13,39 @@ minimaliste via une API REST.
 - Écran d'accueil indiquant la prochaine prestation et la date de la prochaine
   répétition
 
-## Démarrage rapide avec Docker
+## Déploiement avec Docker
+
+### Générer des certificats SSL
+
+```bash
+mkdir -p certs
+openssl req -x509 -nodes -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -subj "/CN=localhost"
+```
+
+### Construire l'image
+
+```bash
+docker build -t bandtrack .
+```
+
+### Démarrer avec `docker run`
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$(pwd)/certs:/certs:ro" \
+  -e HOST=0.0.0.0 -e PORT=8080 \
+  -e SSL_KEY=/certs/key.pem -e SSL_CERT=/certs/cert.pem \
+  -e ORIGIN=https://localhost:8080 \
+  bandtrack
+```
+
+### Démarrer avec `docker compose`
 
 ```bash
 docker compose up --build
 ```
 
-L'image construit `server.py` et expose l'API sur le port `8080` par défaut.
-Les variables d'environnement `HOST` et `PORT` peuvent être ajustées dans
-`docker-compose.yml` ou passées à `docker run`.
+Les variables d'environnement peuvent aussi être définies dans `docker-compose.yml`.
 
 ### Exécution locale sans Docker
 
