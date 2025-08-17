@@ -3,8 +3,8 @@
   "short_name": "BandTrack",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#1f102d",
-  "theme_color": "#1f102d",
+  "background_color": "#9b59b6",
+  "theme_color": "#9b59b6",
   "icons": [
     {
       "src": "avatar.png",
