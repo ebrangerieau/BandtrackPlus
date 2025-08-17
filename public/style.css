@@ -135,13 +135,7 @@ body, html {
   background-color: var(--nav-bg);
   border: 1px solid var(--nav-border);
   border-radius: 4px;
-  display: none;
-  flex-direction: column;
   z-index: 300;
-}
-
-#profile-menu.show {
-  display: flex;
 }
 
 #profile-menu button {
