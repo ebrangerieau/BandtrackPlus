@@ -60,6 +60,7 @@
     return date.toLocaleString('fr-FR', {
       dateStyle: 'short',
       timeStyle: 'short',
+      hour12: false,
     });
   }
 
