@@ -390,6 +390,15 @@ textarea {
   font-weight: bold;
 }
 
+/* Message affiché lorsqu'aucune donnée n'est disponible */
+.empty-state {
+  text-align: center;
+  color: var(--text-color);
+  opacity: 0.7;
+  font-style: italic;
+  margin-top: 12px;
+}
+
 /* Liste d'éléments sélectionnables */
 .select-list {
   max-height: 200px;
