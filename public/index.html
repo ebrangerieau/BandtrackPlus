@@ -1,42 +1,38 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#222222">
-    <title>BandTrack – Application de suivi musical</title>
-    <!--
-      Cette application est développée conformément au cahier des charges V1 BandTrack.
-      Elle fonctionne comme une Progressive Web App monopage qui stocke les données
-      localement (localStorage) afin d'illustrer les fonctionnalités principales :
-      authentification, suggestions de morceaux, suivi des répétitions,
-      gestion des prestations et paramètres utilisateurs (nom du groupe, mode sombre).
-    -->
-    <link rel="stylesheet" href="style.css">
-    <link rel="apple-touch-icon" href="Logobt-512.png">
-    <link rel="manifest" href="manifest.json">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BandTrack</title>
+  <meta name="description" content="BandTrack – application de suivi musical pour groupes" />
+  <!-- PWA manifest and theme colour -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#1f102d" />
+  <!-- Main stylesheet -->
+  <link rel="stylesheet" href="style.css" />
 </head>
-<body class="dark">
-    <header class="header">
-        <img src="Logobt.png" alt="BandTrack logo" class="logo-img">
-        <span id="group-name"></span>
-        <div id="user-info">
-            <span id="user-name"></span>
-            <button id="profile-btn"><img src="avatar.png" alt="Avatar"></button>
-            <div id="profile-menu">
-                <button id="menu-performances">Prestations</button>
-                <button id="menu-settings">Paramètres</button>
-            </div>
-        </div>
-    </header>
-    <div id="app"></div>
-    <script src="app.js"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('service-worker.js');
-        });
-      }
-    </script>
+<body>
+  <noscript>
+    <p>Veuillez activer JavaScript pour utiliser cette application.</p>
+  </noscript>
+  <!-- Header with group name and profile button -->
+  <header id="header" style="padding: 1rem; display: flex; justify-content: space-between; align-items: center;">
+    <div style="display: flex; flex-direction: column;">
+      <span id="group-name" style="font-size: 1.2rem; font-weight: bold;"></span>
+      <span id="user-name" style="font-size: 0.85rem; color: var(--muted-text);"></span>
+    </div>
+    <button id="profile-btn">
+      <!-- A default avatar will be replaced once the user logs in -->
+      <img src="avatar.png" alt="avatar" />
+    </button>
+    <div id="profile-menu" class="">
+      <a href="#" id="profile-settings-link">Paramètres</a>
+      <button id="logout-btn">Déconnexion</button>
+    </div>
+  </header>
+  <!-- Main application container; populated by public/app.js -->
+  <div id="app"></div>
+  <!-- Application logic -->
+  <script src="app.js"></script>
 </body>
 </html>
