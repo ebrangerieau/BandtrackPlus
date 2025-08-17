@@ -674,7 +674,6 @@
       empty.className = 'empty-state';
       empty.textContent = 'Aucune proposition pour l\u2019instant';
       container.appendChild(empty);
-      return;
     }
     // Afficher la liste
     list.forEach((item) => {
