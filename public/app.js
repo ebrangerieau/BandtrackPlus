@@ -200,30 +200,33 @@
     const select = document.getElementById('group-select');
     const createBtn = document.getElementById('create-group-btn');
     const joinBtn = document.getElementById('join-group-btn');
-    if (!select) return;
     if (createBtn) createBtn.onclick = () => showCreateGroupDialog();
     if (joinBtn) joinBtn.onclick = () => showJoinGroupDialog();
     try {
       groupsCache = await api('/groups');
-      select.innerHTML = '';
-      groupsCache.forEach((g) => {
-        const opt = document.createElement('option');
-        opt.value = g.id;
-        opt.textContent = g.name;
-        select.appendChild(opt);
-      });
       let selected = forceId || localStorage.getItem('activeGroupId');
       if (!groupsCache.some((g) => String(g.id) === String(selected))) {
         selected = groupsCache[0] ? groupsCache[0].id : null;
       }
+      if (select) {
+        select.innerHTML = '';
+        groupsCache.forEach((g) => {
+          const opt = document.createElement('option');
+          opt.value = g.id;
+          opt.textContent = g.name;
+          select.appendChild(opt);
+        });
+        if (selected) {
+          select.value = selected;
+        }
+        select.onchange = async () => {
+          await changeGroup(select.value);
+          renderMain(document.getElementById('app'));
+        };
+      }
       if (selected) {
-        select.value = selected;
         await changeGroup(selected);
       }
-      select.onchange = async () => {
-        await changeGroup(select.value);
-        renderMain(document.getElementById('app'));
-      };
     } catch (err) {
       console.error(err);
     }
