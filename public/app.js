@@ -534,7 +534,7 @@
     container.className = 'home-container';
     app.appendChild(container);
 
-    let nextPerfText = 'Aucune prestation prévue';
+    let nextPerfInfo = 'Aucune prestation prévue';
     try {
       const list = await api('/performances');
       const now = new Date();
@@ -542,16 +542,16 @@
       upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
       if (upcoming.length > 0) {
         const p = upcoming[0];
-        nextPerfText = `Prochaine prestation : ${p.name} (${formatDateTime(p.date)})`;
+        nextPerfInfo = `${p.name} (${formatDateTime(p.date)})`;
       }
     } catch (err) {
-      nextPerfText = 'Impossible de récupérer les prestations';
+      nextPerfInfo = 'Impossible de récupérer les prestations';
     }
     const perfP = document.createElement('p');
-    perfP.textContent = nextPerfText;
+    perfP.innerHTML = `<strong>Prochaine prestation :</strong> ${nextPerfInfo}`;
     container.appendChild(perfP);
 
-    let nextRehearsalText = 'Prochaine répétition : —';
+    let nextRehearsalInfo = '—';
     try {
       const list = await api('/agenda');
       const rehearsals = list.filter((item) => item.type === 'rehearsal');
@@ -560,13 +560,13 @@
       upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
       if (upcoming.length > 0) {
         const r = upcoming[0];
-        nextRehearsalText = `Prochaine répétition : ${formatDateTime(r.date)}${r.location ? ' – ' + r.location : ''}`;
+        nextRehearsalInfo = `${formatDateTime(r.date)}${r.location ? ' – ' + r.location : ''}`;
       }
     } catch (err) {
       // ignore errors
     }
     const rehP = document.createElement('p');
-    rehP.textContent = nextRehearsalText;
+    rehP.innerHTML = `<strong>Prochaine répétition :</strong> ${nextRehearsalInfo}`;
     container.appendChild(rehP);
 
   }

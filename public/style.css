@@ -134,6 +134,7 @@ body, html {
   text-align: left;
   color: var(--text-color);
   cursor: pointer;
+  font-weight: bold;
 }
 
 #profile-menu button:hover {
@@ -198,16 +199,16 @@ body, html {
 }
 
 /* Page d'accueil après connexion */
-.home-container {
-  max-width: 400px;
-  margin: 60px auto;
-  padding: 20px;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  text-align: center;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
+  .home-container {
+    max-width: 400px;
+    margin: 60px auto;
+    padding: 20px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    text-align: left;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
 
 .home-container button {
   padding: 10px 20px;
@@ -247,11 +248,11 @@ body, html {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  font-weight: bold;
 }
 
 .nav-bar button.active {
   color: var(--primary-color);
-  font-weight: bold;
 }
 
 /* Contenu de page */
@@ -272,6 +273,7 @@ body, html {
 .card h3 {
   margin-top: 0;
   cursor: pointer;
+  font-weight: bold;
 }
 
 .card-header {
