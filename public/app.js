@@ -34,15 +34,41 @@
     rehearsalsCache = [];
   }
 
-  // Ferme le menu profil lorsqu'on clique à l'extérieur
+  // Ferme le menu lorsqu'on clique à l'extérieur
   document.addEventListener('click', (e) => {
     const menu = document.getElementById('profile-menu');
-    const btn = document.getElementById('profile-btn');
-    if (!menu || !btn) return;
-    if (menu.classList.contains('show') && !menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
-      menu.classList.remove('show');
+    const profileBtn = document.getElementById('profile-btn');
+    const hamburger = document.getElementById('hamburger');
+    if (!menu) return;
+    if (
+      !menu.classList.contains('hidden') &&
+      !menu.contains(e.target) &&
+      e.target !== profileBtn && !profileBtn?.contains(e.target) &&
+      e.target !== hamburger && !hamburger?.contains(e.target)
+    ) {
+      menu.classList.add('hidden');
+      menu.classList.remove('block', 'open');
+      hamburger?.classList.remove('open');
     }
   });
+
+  function toggleMenu() {
+    const menu = document.getElementById('profile-menu');
+    const btn = document.getElementById('hamburger');
+    if (!menu || !btn) return;
+    menu.classList.toggle('hidden');
+    menu.classList.toggle('block');
+    menu.classList.toggle('open');
+    btn.classList.toggle('open');
+    const bars = btn.querySelectorAll('span');
+    if (bars.length === 3) {
+      bars[0].classList.toggle('translate-y-1.5');
+      bars[0].classList.toggle('rotate-45');
+      bars[1].classList.toggle('opacity-0');
+      bars[2].classList.toggle('-translate-y-1.5');
+      bars[2].classList.toggle('-rotate-45');
+    }
+  }
 
   function hasModRights() {
     return currentUser && (currentUser.membershipRole === 'admin' || currentUser.membershipRole === 'moderator');
@@ -581,13 +607,20 @@
   function renderMain(app) {
     app.innerHTML = '';
     const profileBtn = document.getElementById('profile-btn');
+    const hamburgerBtn = document.getElementById('hamburger');
     const profileMenu = document.getElementById('profile-menu');
     const perfBtn = document.getElementById('menu-performances');
     const settingsBtn = document.getElementById('menu-settings');
     if (profileBtn && profileMenu) {
       profileBtn.onclick = (e) => {
         e.stopPropagation();
-        profileMenu.classList.toggle('show');
+        toggleMenu();
+      };
+    }
+    if (hamburgerBtn && profileMenu) {
+      hamburgerBtn.onclick = (e) => {
+        e.stopPropagation();
+        toggleMenu();
       };
     }
     if (perfBtn) {
@@ -596,7 +629,7 @@
           currentPage = 'performances';
           renderMain(app);
         }
-        profileMenu?.classList.remove('show');
+        if (!profileMenu?.classList.contains('hidden')) toggleMenu();
       };
     }
     if (settingsBtn) {
@@ -605,7 +638,7 @@
           currentPage = 'settings';
           renderMain(app);
         }
-        profileMenu?.classList.remove('show');
+        if (!profileMenu?.classList.contains('hidden')) toggleMenu();
       };
     }
     const pageDiv = document.createElement('div');

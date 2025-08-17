@@ -31,13 +31,18 @@
     <link rel="manifest" href="manifest.json">
 </head>
 <body class="font-sans bg-pastel-50 text-slate-800">
-    <header class="header">
+    <header class="header fixed top-0 w-full bg-pastel-50 transition-transform">
+        <button id="hamburger" class="flex flex-col justify-center items-center w-8 h-8 mr-2">
+            <span class="block w-6 h-0.5 bg-slate-800 mb-1 transition-transform"></span>
+            <span class="block w-6 h-0.5 bg-slate-800 mb-1 transition-transform"></span>
+            <span class="block w-6 h-0.5 bg-slate-800 transition-transform"></span>
+        </button>
         <img src="Logobt.png" alt="BandTrack logo" class="logo-img">
         <span id="group-name"></span>
         <div id="user-info">
             <span id="user-name"></span>
             <button id="profile-btn"><img src="avatar.png" alt="Avatar"></button>
-            <div id="profile-menu">
+            <div id="profile-menu" class="hidden flex flex-col">
                 <button id="menu-performances">Prestations</button>
                 <button id="menu-settings">Paramètres</button>
             </div>
