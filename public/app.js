@@ -1010,68 +1010,80 @@
       details.appendChild(notesLabel);
       details.appendChild(textarea);
 
-      // Note audio pour l'utilisateur courant
+      // Notes audio pour l'utilisateur courant
       const audioSection = document.createElement('div');
       audioSection.style.marginTop = '8px';
-      const userAudio = song.audioNotes && song.audioNotes[currentUser.username];
-      if (userAudio) {
-        const audioPlayer = document.createElement('audio');
-        audioPlayer.controls = true;
-        // userAudio contient désormais une URL de données complète (data:audio/…;base64,XXX)
-        audioPlayer.src = userAudio;
-        audioSection.appendChild(audioPlayer);
-        const delAudioBtn = document.createElement('button');
-        delAudioBtn.className = 'btn-danger';
-        delAudioBtn.textContent = 'Supprimer audio';
-        delAudioBtn.style.marginLeft = '8px';
-        delAudioBtn.onclick = async (e) => {
+      const userAudios =
+        (song.audioNotes && song.audioNotes[currentUser.username]) || [];
+
+      userAudios.forEach((note, idx) => {
+        const wrap = document.createElement('div');
+        wrap.style.marginBottom = '4px';
+        const titleP = document.createElement('p');
+        titleP.style.margin = '0 0 4px 0';
+        titleP.textContent = note.title || `Note ${idx + 1}`;
+        wrap.appendChild(titleP);
+        const audioEl = document.createElement('audio');
+        audioEl.controls = true;
+        audioEl.src = note.data;
+        wrap.appendChild(audioEl);
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn-danger';
+        delBtn.textContent = 'Supprimer';
+        delBtn.style.marginLeft = '8px';
+        delBtn.onclick = async (e) => {
           e.preventDefault();
-          if (!confirm('Supprimer la note audio ?')) return;
+          if (!confirm('Supprimer cette note audio ?')) return;
           try {
-            await api(`/rehearsals/${song.id}`, 'PUT', { audio: '' });
-            // Rafraîchir la liste après suppression
+            await api(`/rehearsals/${song.id}`, 'PUT', {
+              audio: '',
+              audioTitle: note.title || '',
+            });
             renderRehearsals(container);
           } catch (err) {
             alert(err.message);
           }
         };
-        audioSection.appendChild(delAudioBtn);
-      } else {
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = 'audio/*';
-        fileInput.style.display = 'none';
-        const uploadBtn = document.createElement('button');
-        uploadBtn.className = 'btn-secondary';
-        uploadBtn.textContent = 'Ajouter une note audio';
-        uploadBtn.onclick = (e) => {
-          e.preventDefault();
-          fileInput.click();
-        };
-        fileInput.onchange = async () => {
-          const file = fileInput.files[0];
-          if (!file) return;
-          // Limiter la taille du fichier à 5 Mo
-          if (file.size > 5 * 1024 * 1024) {
-            alert('Le fichier audio est trop volumineux (max 5 Mo).');
-            return;
+        wrap.appendChild(delBtn);
+        audioSection.appendChild(wrap);
+      });
+
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'audio/*';
+      fileInput.style.display = 'none';
+      const uploadBtn = document.createElement('button');
+      uploadBtn.className = 'btn-secondary';
+      uploadBtn.textContent = 'Ajouter une note audio';
+      uploadBtn.onclick = (e) => {
+        e.preventDefault();
+        fileInput.click();
+      };
+      fileInput.onchange = async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) {
+          alert('Le fichier audio est trop volumineux (max 5 Mo).');
+          return;
+        }
+        const title = prompt('Titre de la note audio ?') || '';
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          const dataUrl = (ev.target?.result || '').toString();
+          try {
+            await api(`/rehearsals/${song.id}`, 'PUT', {
+              audio: dataUrl,
+              audioTitle: title,
+            });
+            renderRehearsals(container);
+          } catch (err) {
+            alert(err.message);
           }
-          const reader = new FileReader();
-          reader.onload = async (ev) => {
-            // Utiliser l’URL de données complète (avec le type MIME) comme valeur de la note audio
-            const dataUrl = (ev.target?.result || '').toString();
-            try {
-              await api(`/rehearsals/${song.id}`, 'PUT', { audio: dataUrl });
-              renderRehearsals(container);
-            } catch (err) {
-              alert(err.message);
-            }
-          };
-          reader.readAsDataURL(file);
         };
-        audioSection.appendChild(uploadBtn);
-        audioSection.appendChild(fileInput);
-      }
+        reader.readAsDataURL(file);
+      };
+      audioSection.appendChild(uploadBtn);
+      audioSection.appendChild(fileInput);
       details.appendChild(audioSection);
       // Afficher les notes et niveaux des autres membres
       // Filtrer les autres membres en ignorant la casse afin d’éviter de voir
@@ -1093,16 +1105,19 @@
           pUser.style.margin = '0';
           pUser.innerHTML = `<strong>${u}</strong> – Niveau ${lev}/10${note ? ' – ' + note : ''}`;
           wrapper.appendChild(pUser);
-          const otherAudio = song.audioNotes && song.audioNotes[u];
-          if (otherAudio) {
+          const otherAudios = (song.audioNotes && song.audioNotes[u]) || [];
+          otherAudios.forEach((a, i) => {
+            const titleP = document.createElement('p');
+            titleP.style.margin = '4px 0 0 0';
+            titleP.textContent = a.title || `Note ${i + 1}`;
+            wrapper.appendChild(titleP);
             const audioEl = document.createElement('audio');
             audioEl.controls = true;
-            // otherAudio est un DataURL complet
-            audioEl.src = otherAudio;
+            audioEl.src = a.data;
             audioEl.style.display = 'block';
-            audioEl.style.marginTop = '4px';
+            audioEl.style.marginTop = '2px';
             wrapper.appendChild(audioEl);
-          }
+          });
           othersDiv.appendChild(wrapper);
         });
         details.appendChild(othersDiv);
@@ -2125,74 +2140,90 @@
     content.appendChild(notesLabel);
     content.appendChild(textarea);
 
-    // Note audio pour l'utilisateur courant
+    // Notes audio pour l'utilisateur courant
     const audioSection = document.createElement('div');
     audioSection.style.marginTop = '8px';
-    const myAudio = song.audioNotes && song.audioNotes[currentUser.username];
-    if (myAudio) {
-      const audioPlayer2 = document.createElement('audio');
-      audioPlayer2.controls = true;
-      // La note audio est stockée sous forme de DataURL complet
-      audioPlayer2.src = myAudio;
-      audioSection.appendChild(audioPlayer2);
-      const delAudioBtn2 = document.createElement('button');
-      delAudioBtn2.className = 'btn-danger';
-      delAudioBtn2.textContent = 'Supprimer audio';
-      delAudioBtn2.style.marginLeft = '8px';
-      delAudioBtn2.onclick = async (e) => {
+    const myAudios =
+      (song.audioNotes && song.audioNotes[currentUser.username]) || [];
+
+    myAudios.forEach((note, idx) => {
+      const wrap = document.createElement('div');
+      wrap.style.marginBottom = '4px';
+      const titleP = document.createElement('p');
+      titleP.style.margin = '0 0 4px 0';
+      titleP.textContent = note.title || `Note ${idx + 1}`;
+      wrap.appendChild(titleP);
+      const audioEl = document.createElement('audio');
+      audioEl.controls = true;
+      audioEl.src = note.data;
+      wrap.appendChild(audioEl);
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-danger';
+      delBtn.textContent = 'Supprimer';
+      delBtn.style.marginLeft = '8px';
+      delBtn.onclick = async (e) => {
         e.preventDefault();
-        if (!confirm('Supprimer la note audio ?')) return;
+        if (!confirm('Supprimer cette note audio ?')) return;
         try {
-          await api(`/rehearsals/${song.id}`, 'PUT', { audio: '' });
-          // Mettre à jour l'objet local et rafraîchir l'affichage
-          delete song.audioNotes[currentUser.username];
-          // Fermer la modale actuelle et en ouvrir une nouvelle pour refléter l'état
+          await api(`/rehearsals/${song.id}`, 'PUT', {
+            audio: '',
+            audioTitle: note.title || '',
+          });
+          const arr =
+            (song.audioNotes && song.audioNotes[currentUser.username]) || [];
+          arr.splice(idx, 1);
+          if (arr.length === 0) delete song.audioNotes[currentUser.username];
           modal.remove();
           showSongDetail(song);
         } catch (err) {
           alert(err.message);
         }
       };
-      audioSection.appendChild(delAudioBtn2);
-    } else {
-      const fileInp = document.createElement('input');
-      fileInp.type = 'file';
-      fileInp.accept = 'audio/*';
-      fileInp.style.display = 'none';
-      const addBtn = document.createElement('button');
-      addBtn.className = 'btn-secondary';
-      addBtn.textContent = 'Ajouter une note audio';
-      addBtn.onclick = (e) => {
-        e.preventDefault();
-        fileInp.click();
-      };
-      fileInp.onchange = async () => {
-        const f = fileInp.files[0];
-        if (!f) return;
-        if (f.size > 5 * 1024 * 1024) {
-          alert('Le fichier audio est trop volumineux (max 5 Mo).');
-          return;
+      wrap.appendChild(delBtn);
+      audioSection.appendChild(wrap);
+    });
+
+    const fileInp = document.createElement('input');
+    fileInp.type = 'file';
+    fileInp.accept = 'audio/*';
+    fileInp.style.display = 'none';
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn-secondary';
+    addBtn.textContent = 'Ajouter une note audio';
+    addBtn.onclick = (e) => {
+      e.preventDefault();
+      fileInp.click();
+    };
+    fileInp.onchange = async () => {
+      const f = fileInp.files[0];
+      if (!f) return;
+      if (f.size > 5 * 1024 * 1024) {
+        alert('Le fichier audio est trop volumineux (max 5 Mo).');
+        return;
+      }
+      const title = prompt('Titre de la note audio ?') || '';
+      const reader2 = new FileReader();
+      reader2.onload = async (ev) => {
+        const dataUrl = (ev.target?.result || '').toString();
+        try {
+          await api(`/rehearsals/${song.id}`, 'PUT', {
+            audio: dataUrl,
+            audioTitle: title,
+          });
+          song.audioNotes = song.audioNotes || {};
+          const arr = (song.audioNotes[currentUser.username] =
+            song.audioNotes[currentUser.username] || []);
+          arr.push({ title, data: dataUrl });
+          modal.remove();
+          showSongDetail(song);
+        } catch (err) {
+          alert(err.message);
         }
-        const reader2 = new FileReader();
-        reader2.onload = async (ev) => {
-          // Transmettez l’URL de données complète (avec MIME type)
-          const dataUrl = (ev.target?.result || '').toString();
-          try {
-            await api(`/rehearsals/${song.id}`, 'PUT', { audio: dataUrl });
-            song.audioNotes = song.audioNotes || {};
-            song.audioNotes[currentUser.username] = dataUrl;
-            // Réafficher la modale avec l'audio nouvellement ajouté
-            modal.remove();
-            showSongDetail(song);
-          } catch (err) {
-            alert(err.message);
-          }
-        };
-        reader2.readAsDataURL(f);
       };
-      audioSection.appendChild(addBtn);
-      audioSection.appendChild(fileInp);
-    }
+      reader2.readAsDataURL(f);
+    };
+    audioSection.appendChild(addBtn);
+    audioSection.appendChild(fileInp);
     content.appendChild(audioSection);
     // Autres membres
     // Filtrer en ignorant la casse pour éviter la duplication de l’utilisateur courant
@@ -2214,17 +2245,20 @@
         p.style.margin = '0';
         p.innerHTML = `<strong>${u}</strong> – Niveau ${lev}/10${note ? ' – ' + note : ''}`;
         wrapper.appendChild(p);
-        // Afficher la note audio pour cet utilisateur si elle existe
-        const audioB64 = song.audioNotes && song.audioNotes[u];
-        if (audioB64) {
+        // Afficher les notes audio pour cet utilisateur si elles existent
+        const audioArr = (song.audioNotes && song.audioNotes[u]) || [];
+        audioArr.forEach((a, i) => {
+          const titleP = document.createElement('p');
+          titleP.style.margin = '4px 0 0 0';
+          titleP.textContent = a.title || `Note ${i + 1}`;
+          wrapper.appendChild(titleP);
           const audioEl = document.createElement('audio');
           audioEl.controls = true;
-          // audioB64 contient désormais une URL de données complète
-          audioEl.src = audioB64;
+          audioEl.src = a.data;
           audioEl.style.display = 'block';
-          audioEl.style.marginTop = '4px';
+          audioEl.style.marginTop = '2px';
           wrapper.appendChild(audioEl);
-        }
+        });
         othersDiv.appendChild(wrapper);
       });
       content.appendChild(othersDiv);
