@@ -530,6 +530,33 @@ def log_event(user_id: int | None, action: str, metadata: dict | None = None) ->
     conn.close()
 
 
+def parse_audio_notes_json(data: str | None) -> dict:
+    """Return audio notes as a mapping of user to list of notes.
+
+    Each note is represented as ``{"title": str, "audio": str}``.  Older
+    representations that stored a single base64 string per user are converted
+    to the new list-based structure."""
+
+    raw = json.loads(data or '{}')
+    result: dict[str, list[dict]] = {}
+    for user, notes in raw.items():
+        if isinstance(notes, list):
+            parsed_list = []
+            for item in notes:
+                if isinstance(item, dict):
+                    parsed_list.append({
+                        'title': item.get('title', ''),
+                        'audio': item.get('audio', ''),
+                    })
+                elif isinstance(item, str):
+                    parsed_list.append({'title': '', 'audio': item})
+            if parsed_list:
+                result[user] = parsed_list
+        elif isinstance(notes, str):
+            result[user] = [{'title': '', 'audio': notes}]
+    return result
+
+
 def add_webauthn_credential(user_id: int, credential_id: str) -> int:
     """Store a WebAuthn credential for a user."""
     conn = get_db_connection()
@@ -680,7 +707,7 @@ def move_suggestion_to_rehearsal(sug_id: int):
         'author': new_row['author'],
         'youtube': new_row['youtube'],
         'spotify': new_row['spotify'],
-        'audioNotes': json.loads(new_row['audio_notes_json'] or '{}'),
+        'audioNotes': parse_audio_notes_json(new_row['audio_notes_json']),
         'levels': json.loads(new_row['levels_json'] or '{}'),
         'notes': json.loads(new_row['notes_json'] or '{}'),
         'mastered': bool(new_row['mastered']),
@@ -1702,7 +1729,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         for row in cur.fetchall():
             levels = json.loads(row['levels_json'] or '{}')
             notes = json.loads(row['notes_json'] or '{}')
-            audio_notes = json.loads(row['audio_notes_json'] or '{}')
+            audio_notes = parse_audio_notes_json(row['audio_notes_json'])
             rows.append({
                 'id': row['id'],
                 'title': row['title'],
@@ -2047,8 +2074,22 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         level = body.get('level')
         note = body.get('note')
         audio_b64 = body.get('audio')
+        audio_title = body.get('audioTitle')
+        audio_index = body.get('audioIndex')
         # If nothing to update, return error
-        if all(v is None for v in (title, author, youtube, spotify, level, note, audio_b64)):
+        if all(
+            v is None
+            for v in (
+                title,
+                author,
+                youtube,
+                spotify,
+                level,
+                note,
+                audio_b64,
+                audio_index,
+            )
+        ):
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing to update'})
             return
         conn = get_db_connection()
@@ -2089,11 +2130,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             updated_metadata = cur.rowcount > 0
         # Update level/note/audio if provided
         updated_levels_notes_audio = False
-        if level is not None or note is not None or audio_b64 is not None:
+        if level is not None or note is not None or audio_b64 is not None or audio_index is not None:
             # Parse JSON fields
             levels = json.loads(row['levels_json'] or '{}')
             notes = json.loads(row['notes_json'] or '{}')
-            audio_notes = json.loads(row['audio_notes_json'] or '{}')
+            audio_notes = parse_audio_notes_json(row['audio_notes_json'])
             if level is not None:
                 try:
                     level_val = float(level)
@@ -2105,15 +2146,33 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if note is not None:
                 notes[user['username']] = str(note)
             if audio_b64 is not None:
-                # Accept empty string to clear audio
+                # Accept empty string to clear all notes for user
                 if audio_b64 == '':
-                    if user['username'] in audio_notes:
-                        audio_notes.pop(user['username'], None)
+                    audio_notes.pop(user['username'], None)
                 else:
-                    audio_notes[user['username']] = str(audio_b64)
+                    note_obj = {'title': (audio_title or '').strip(), 'audio': str(audio_b64)}
+                    audio_notes.setdefault(user['username'], []).append(note_obj)
+            elif audio_index is not None:
+                user_list = audio_notes.get(user['username'], [])
+                try:
+                    idx = int(audio_index)
+                    if 0 <= idx < len(user_list):
+                        del user_list[idx]
+                    if user_list:
+                        audio_notes[user['username']] = user_list
+                    else:
+                        audio_notes.pop(user['username'], None)
+                except (TypeError, ValueError):
+                    pass
             cur.execute(
                 'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ? AND group_id = ?',
-                (json.dumps(levels), json.dumps(notes), json.dumps(audio_notes), rehearsal_id, user['group_id'])
+                (
+                    json.dumps(levels),
+                    json.dumps(notes),
+                    json.dumps(audio_notes),
+                    rehearsal_id,
+                    user['group_id'],
+                ),
             )
             updated_levels_notes_audio = cur.rowcount > 0
         conn.commit()
@@ -2154,7 +2213,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if updated:
             levels = json.loads(updated['levels_json'] or '{}')
             notes = json.loads(updated['notes_json'] or '{}')
-            audio_notes = json.loads(updated['audio_notes_json'] or '{}')
+            audio_notes = parse_audio_notes_json(updated['audio_notes_json'])
             send_json(
                 self,
                 HTTPStatus.OK,
