@@ -6,26 +6,26 @@
 */
 
 :root {
-  --bg-color: #f7f7f7;
+  --bg-color: #f3e8ff;
   --text-color: #222222;
-  --primary-color: #3366ff;
+  --primary-color: #9b59b6;
   --card-bg: #ffffff;
-  --border-color: #e0e0e0;
-  --nav-bg: #ffffff;
-  --nav-border: #cccccc;
+  --border-color: #e0d4f7;
+  --nav-bg: #f5efff;
+  --nav-border: #d8c7ef;
   --danger-color: #d9534f;
   --success-color: #5cb85c;
 }
 
 /* Thème sombre (écrase certaines variables) */
 body.dark {
-  --bg-color: #1e1e1e;
+  --bg-color: #1f102d;
   --text-color: #e0e0e0;
-  --primary-color: #6699ff;
-  --card-bg: #2b2b2b;
-  --border-color: #444444;
-  --nav-bg: #2b2b2b;
-  --nav-border: #555555;
+  --primary-color: #9b59b6;
+  --card-bg: #2a173c;
+  --border-color: #4b3b59;
+  --nav-bg: #2a173c;
+  --nav-border: #4b3b59;
   --danger-color: #e57373;
   --success-color: #81c784;
 }
