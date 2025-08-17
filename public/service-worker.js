@@ -1,7 +1,7 @@
 // Service worker for BandTrack PWA
 // Cache assets for offline use and provide a fallback page when offline.
 
-const CACHE_NAME = 'bandtrack-cache-v2';
+const CACHE_NAME = 'bandtrack-cache-v3';
 const ASSETS = [
   '/',
   '/index.html',
