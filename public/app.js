@@ -37,13 +37,11 @@
   // Ferme le menu lorsqu'on clique à l'extérieur
   document.addEventListener('click', (e) => {
     const menu = document.getElementById('profile-menu');
-    const profileBtn = document.getElementById('profile-btn');
     const hamburger = document.getElementById('hamburger');
     if (!menu) return;
     if (
       !menu.classList.contains('hidden') &&
       !menu.contains(e.target) &&
-      e.target !== profileBtn && !profileBtn?.contains(e.target) &&
       e.target !== hamburger && !hamburger?.contains(e.target)
     ) {
       menu.classList.add('hidden');
@@ -163,10 +161,6 @@
     try {
       const user = await api('/me');
       currentUser = user;
-      const userNameEl = document.getElementById('user-name');
-      if (userNameEl) userNameEl.textContent = currentUser.username;
-      const profileImg = document.querySelector('#profile-btn img');
-      if (profileImg) profileImg.src = currentUser?.avatarUrl || 'avatar.png';
       if (!user.needsGroup) {
         // Récupère les paramètres (notamment le mode sombre) pour appliquer le thème
         const settings = await api('/settings');
@@ -178,10 +172,6 @@
       }
     } catch (err) {
       currentUser = null;
-      const userNameEl = document.getElementById('user-name');
-      if (userNameEl) userNameEl.textContent = '';
-      const profileImg = document.querySelector('#profile-btn img');
-      if (profileImg) profileImg.src = 'avatar.png';
     }
   }
 
@@ -380,10 +370,6 @@
   function renderApp() {
     const app = document.getElementById('app');
     if (!currentUser) {
-      const userNameEl = document.getElementById('user-name');
-      if (userNameEl) userNameEl.textContent = '';
-      const profileImg = document.querySelector('#profile-btn img');
-      if (profileImg) profileImg.src = 'avatar.png';
       const groupNameEl = document.getElementById('group-name');
       if (groupNameEl) groupNameEl.textContent = '';
       resetCaches();
@@ -606,17 +592,10 @@
    */
   function renderMain(app) {
     app.innerHTML = '';
-    const profileBtn = document.getElementById('profile-btn');
     const hamburgerBtn = document.getElementById('hamburger');
     const profileMenu = document.getElementById('profile-menu');
     const perfBtn = document.getElementById('menu-performances');
     const settingsBtn = document.getElementById('menu-settings');
-    if (profileBtn && profileMenu) {
-      profileBtn.onclick = (e) => {
-        e.stopPropagation();
-        toggleMenu();
-      };
-    }
     if (hamburgerBtn && profileMenu) {
       hamburgerBtn.onclick = (e) => {
         e.stopPropagation();
@@ -2782,6 +2761,11 @@
     const header = document.createElement('h2');
     header.textContent = 'Paramètres';
     container.appendChild(header);
+    if (currentUser) {
+      const info = document.createElement('p');
+      info.textContent = `Utilisateur connecté: ${currentUser.username}`;
+      container.appendChild(info);
+    }
     let settings;
     try {
       settings = await api('/settings');

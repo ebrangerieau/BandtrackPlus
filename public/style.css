@@ -111,21 +111,10 @@ body, html {
   text-align: center;
 }
 
-#user-info {
+#menu-container {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  position: relative;
-}
-
-#user-name {
-  font-weight: bold;
-}
-
-#profile-btn img {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
 }
 
 #profile-menu {
