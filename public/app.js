@@ -986,12 +986,25 @@
     list.forEach((song) => {
       const card = document.createElement('div');
       card.className = 'card collapsed';
+      // Niveau courant de l'utilisateur pour ce morceau
+      const currentLevel =
+        song.levels[currentUser.username] != null
+          ? song.levels[currentUser.username]
+          : 0;
+      // En-tête du carton avec titre et niveau
+      const headerDiv = document.createElement('div');
+      headerDiv.className = 'card-header';
       const h3 = document.createElement('h3');
       h3.textContent = song.title;
       h3.onclick = () => {
         card.classList.toggle('collapsed');
       };
-      card.appendChild(h3);
+      headerDiv.appendChild(h3);
+      const levelBadge = document.createElement('span');
+      levelBadge.className = 'level-badge';
+      levelBadge.textContent = currentLevel;
+      headerDiv.appendChild(levelBadge);
+      card.appendChild(headerDiv);
       const details = document.createElement('div');
       details.className = 'card-details';
       // Auteur
@@ -1013,7 +1026,6 @@
       // Niveau pour utilisateur courant
       const levelWrapper = document.createElement('div');
       levelWrapper.style.marginTop = '8px';
-      const currentLevel = song.levels[currentUser.username] != null ? song.levels[currentUser.username] : 0;
       const levelLabel = document.createElement('label');
       levelLabel.textContent = `Votre niveau (${currentLevel}/10)`;
       levelLabel.className = 'level-display';
@@ -1033,6 +1045,7 @@
       range.oninput = async () => {
         const val = Number(range.value);
         levelLabel.textContent = `Votre niveau (${val}/10)`;
+        levelBadge.textContent = val;
         updateRangeColor(val);
         try {
           await api(`/rehearsals/${song.id}`, 'PUT', { level: val });
@@ -1815,11 +1828,27 @@
     listDiv.className = 'select-list';
     rehearsalsCache.forEach((song) => {
       const row = document.createElement('label');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = song.id;
-      row.appendChild(checkbox);
-      row.appendChild(document.createTextNode(song.title));
+      const titleSpan = document.createElement('span');
+      titleSpan.textContent = song.title;
+      titleSpan.style.marginLeft = '4px';
+      const leftWrap = document.createElement('span');
+      leftWrap.appendChild(checkbox);
+      leftWrap.appendChild(titleSpan);
+      const levelSpan = document.createElement('span');
+      levelSpan.className = 'level-badge';
+      const lvl =
+        song.levels && song.levels[currentUser.username] != null
+          ? song.levels[currentUser.username]
+          : 0;
+      levelSpan.textContent = lvl;
+      row.appendChild(leftWrap);
+      row.appendChild(levelSpan);
       listDiv.appendChild(row);
     });
     form.appendChild(labelName);
@@ -2023,12 +2052,28 @@
     listDiv.className = 'select-list';
     rehearsalsCache.forEach((song) => {
       const row = document.createElement('label');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = song.id;
       if (perf.songs.includes(song.id)) checkbox.checked = true;
-      row.appendChild(checkbox);
-      row.appendChild(document.createTextNode(song.title));
+      const titleSpan = document.createElement('span');
+      titleSpan.textContent = song.title;
+      titleSpan.style.marginLeft = '4px';
+      const leftWrap = document.createElement('span');
+      leftWrap.appendChild(checkbox);
+      leftWrap.appendChild(titleSpan);
+      const levelSpan = document.createElement('span');
+      levelSpan.className = 'level-badge';
+      const lvl =
+        song.levels && song.levels[currentUser.username] != null
+          ? song.levels[currentUser.username]
+          : 0;
+      levelSpan.textContent = lvl;
+      row.appendChild(leftWrap);
+      row.appendChild(levelSpan);
       listDiv.appendChild(row);
     });
     form.appendChild(labelName);
