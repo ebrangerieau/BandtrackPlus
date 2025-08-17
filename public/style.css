@@ -535,9 +535,10 @@ textarea {
 }
 
 .calendar-event.performance {
-  background: #f66;
+  background: #b76ef5;
+  color: #000;
 }
 
 .calendar-event.rehearsal {
-  background: #6cf;
+  background: #7a42c4;
 }
