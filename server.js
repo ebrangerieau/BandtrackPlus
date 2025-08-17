@@ -518,7 +518,7 @@ app.post('/api/rehearsals', requireAuth, async (req, res) => {
 // Update the current user's level/notes/audio for a rehearsal
 app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { level, note, audio, title, author, youtube, spotify } = req.body;
+  const { level, note, audio, audioTitle, title, author, youtube, spotify } = req.body;
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   const role = await verifyGroupAccess(req);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
@@ -530,7 +530,7 @@ app.put('/api/rehearsals/:id', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Not allowed to edit rehearsal details' });
       }
     } else {
-      await db.updateRehearsalUserData(id, req.session.username, level, note, audio);
+      await db.updateRehearsalUserData(id, req.session.username, level, note, audio, audioTitle);
     }
     const updated = await db.getRehearsalById(id, req.session.groupId);
     await db.logEvent(req.session.userId, 'edit', { entity: 'rehearsal', id });

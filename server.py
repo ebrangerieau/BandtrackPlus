@@ -77,6 +77,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
 from scripts.migrate_suggestion_votes import migrate as migrate_suggestion_votes
 from scripts.migrate_performance_location import migrate as migrate_performance_location
+from scripts.migrate_audio_notes_array import migrate as migrate_audio_notes_array
 
 #############################
 # Database initialisation
@@ -626,6 +627,15 @@ def send_json(handler: BaseHTTPRequestHandler, status: int, data: dict, *, cooki
     handler.end_headers()
     handler.wfile.write(payload)
 
+
+def parse_audio_notes(json_str: str) -> dict:
+    notes = json.loads(json_str or '{}')
+    for user, val in list(notes.items()):
+        if isinstance(val, list):
+            continue
+        notes[user] = [{'title': '', 'data': val}] if val else []
+    return notes
+
 def send_text_file(handler: BaseHTTPRequestHandler, filepath: str) -> None:
     """Serve a static file from disk.  Sets an appropriate MIME type.
     If the file is not found, a 404 response is sent instead."""
@@ -686,7 +696,7 @@ def move_suggestion_to_rehearsal(sug_id: int):
         'author': new_row['author'],
         'youtube': new_row['youtube'],
         'spotify': new_row['spotify'],
-        'audioNotes': json.loads(new_row['audio_notes_json'] or '{}'),
+        'audioNotes': parse_audio_notes(new_row['audio_notes_json']),
         'levels': json.loads(new_row['levels_json'] or '{}'),
         'notes': json.loads(new_row['notes_json'] or '{}'),
         'mastered': bool(new_row['mastered']),
@@ -1709,7 +1719,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         for row in cur.fetchall():
             levels = json.loads(row['levels_json'] or '{}')
             notes = json.loads(row['notes_json'] or '{}')
-            audio_notes = json.loads(row['audio_notes_json'] or '{}')
+            audio_notes = parse_audio_notes(row['audio_notes_json'])
             rows.append({
                 'id': row['id'],
                 'title': row['title'],
@@ -2054,6 +2064,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         level = body.get('level')
         note = body.get('note')
         audio_b64 = body.get('audio')
+        audio_title = body.get('audioTitle')
         # If nothing to update, return error
         if all(v is None for v in (title, author, youtube, spotify, level, note, audio_b64)):
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing to update'})
@@ -2100,7 +2111,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             # Parse JSON fields
             levels = json.loads(row['levels_json'] or '{}')
             notes = json.loads(row['notes_json'] or '{}')
-            audio_notes = json.loads(row['audio_notes_json'] or '{}')
+            audio_notes = parse_audio_notes(row['audio_notes_json'])
             if level is not None:
                 try:
                     level_val = float(level)
@@ -2114,10 +2125,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if audio_b64 is not None:
                 # Accept empty string to clear audio
                 if audio_b64 == '':
-                    if user['username'] in audio_notes:
-                        audio_notes.pop(user['username'], None)
+                    audio_notes.pop(user['username'], None)
                 else:
-                    audio_notes[user['username']] = str(audio_b64)
+                    user_notes = audio_notes.setdefault(user['username'], [])
+                    user_notes.append({'title': audio_title or '', 'data': str(audio_b64)})
             cur.execute(
                 'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ? AND group_id = ?',
                 (json.dumps(levels), json.dumps(notes), json.dumps(audio_notes), rehearsal_id, user['group_id'])
@@ -2161,7 +2172,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if updated:
             levels = json.loads(updated['levels_json'] or '{}')
             notes = json.loads(updated['notes_json'] or '{}')
-            audio_notes = json.loads(updated['audio_notes_json'] or '{}')
+            audio_notes = parse_audio_notes(updated['audio_notes_json'])
             send_json(
                 self,
                 HTTPStatus.OK,
@@ -2714,6 +2725,7 @@ def run_server(host: str = '0.0.0.0', port: int = 8080):
     init_db()
     migrate_performance_location()
     migrate_suggestion_votes()
+    migrate_audio_notes_array()
     server = ThreadingHTTPServer((host, port), BandTrackHandler)
     print(f"BandTrack server running on http://{host}:{port} (Ctrl-C to stop)")
     try:
