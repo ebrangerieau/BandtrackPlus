@@ -271,6 +271,11 @@ body, html {
   align-items: center;
 }
 
+.card-header .song-level {
+  font-weight: bold;
+  margin-left: auto;
+}
+
 .like-info {
   display: flex;
   gap: 6px;

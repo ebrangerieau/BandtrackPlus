@@ -938,12 +938,19 @@
     list.forEach((song) => {
       const card = document.createElement('div');
       card.className = 'card collapsed';
-      const h3 = document.createElement('h3');
-      h3.textContent = song.title;
-      h3.onclick = () => {
+      const currentLevel = song.levels?.[currentUser.username] ?? 0;
+      const header = document.createElement('div');
+      header.className = 'card-header';
+      const titleEl = document.createElement('h3');
+      titleEl.textContent = song.title;
+      titleEl.onclick = () => {
         card.classList.toggle('collapsed');
       };
-      card.appendChild(h3);
+      const levelEl = document.createElement('span');
+      levelEl.className = 'song-level';
+      levelEl.textContent = currentLevel;
+      header.append(titleEl, levelEl);
+      card.appendChild(header);
       const details = document.createElement('div');
       details.className = 'card-details';
       // Auteur
@@ -965,7 +972,6 @@
       // Niveau pour utilisateur courant
       const levelWrapper = document.createElement('div');
       levelWrapper.style.marginTop = '8px';
-      const currentLevel = song.levels[currentUser.username] != null ? song.levels[currentUser.username] : 0;
       const levelLabel = document.createElement('label');
       levelLabel.textContent = `Votre niveau (${currentLevel}/10)`;
       levelLabel.className = 'level-display';
@@ -985,6 +991,7 @@
       range.oninput = async () => {
         const val = Number(range.value);
         levelLabel.textContent = `Votre niveau (${val}/10)`;
+        levelEl.textContent = val;
         updateRangeColor(val);
         try {
           await api(`/rehearsals/${song.id}`, 'PUT', { level: val });
@@ -2056,9 +2063,16 @@
     modal.className = 'modal';
     const content = document.createElement('div');
     content.className = 'modal-content';
-    const h3 = document.createElement('h3');
-    h3.textContent = song.title;
-    content.appendChild(h3);
+    const currentLevel = song.levels?.[currentUser.username] ?? 0;
+    const header = document.createElement('div');
+    header.className = 'card-header';
+    const titleEl = document.createElement('h3');
+    titleEl.textContent = song.title;
+    const levelEl = document.createElement('span');
+    levelEl.className = 'song-level';
+    levelEl.textContent = currentLevel;
+    header.append(titleEl, levelEl);
+    content.appendChild(header);
     // Afficher le titre et les métadonnées (auteur et liens)
     const metaDiv = document.createElement('div');
     if (song.author) {
@@ -2092,7 +2106,6 @@
     // Niveau
     const levelWrapper = document.createElement('div');
     levelWrapper.style.marginTop = '8px';
-    const currentLevel = song.levels[currentUser.username] != null ? song.levels[currentUser.username] : 0;
     const levelLabel = document.createElement('label');
     levelLabel.textContent = `Votre niveau (${currentLevel}/10)`;
     levelLabel.className = 'level-display';
@@ -2112,6 +2125,7 @@
     range.oninput = async () => {
       const val = Number(range.value);
       levelLabel.textContent = `Votre niveau (${val}/10)`;
+      levelEl.textContent = val;
       updateRangeColor(val);
       try {
         await api(`/rehearsals/${song.id}`, 'PUT', { level: val });
