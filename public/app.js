@@ -989,6 +989,13 @@
       container.appendChild(p);
       return;
     }
+    if (list.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Aucun morceau en répétition';
+      container.appendChild(empty);
+      return;
+    }
     list.forEach((song) => {
       const card = document.createElement('div');
       card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-blue-50';
