@@ -142,9 +142,10 @@
       const profileImg = document.querySelector('#profile-btn img');
       if (profileImg) profileImg.src = currentUser?.avatarUrl || 'avatar.png';
       if (!user.needsGroup) {
-        // Récupère les paramètres (notamment le mode sombre) pour appliquer le thème
+        // Récupère les paramètres pour appliquer le thème et le modèle
         const settings = await api('/settings');
-        applyTheme(settings.darkMode);
+        // Force le mode sombre par défaut
+        applyTheme(true);
         applyTemplate(settings.template || 'classic');
         document.title = `${settings.groupName} – BandTrack`;
         const groupNameEl = document.getElementById('group-name');
