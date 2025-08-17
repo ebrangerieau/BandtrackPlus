@@ -783,6 +783,16 @@ function createRehearsal(title, author, youtube, spotify, creatorId, groupId) {
   });
 }
 
+function parseAudioNotes(json) {
+  const parsed = JSON.parse(json || '{}');
+  for (const user of Object.keys(parsed)) {
+    const val = parsed[user];
+    if (Array.isArray(val)) continue;
+    parsed[user] = val ? [{ title: '', data: val }] : [];
+  }
+  return parsed;
+}
+
 /**
  * Returns all rehearsals.  Parses JSON fields into objects.
  */
@@ -810,7 +820,7 @@ function getRehearsals(groupId, limit = 100, offset = 0) {
               spotify: row.spotify,
               levels: JSON.parse(row.levels_json || '{}'),
               notes: JSON.parse(row.notes_json || '{}'),
-              audioNotes: JSON.parse(row.audio_notes_json || '{}'),
+              audioNotes: parseAudioNotes(row.audio_notes_json),
               mastered: !!row.mastered,
               creatorId: row.creator_id,
               creator: row.creator,
@@ -846,7 +856,7 @@ function getRehearsalById(id, groupId) {
           spotify: row.spotify,
           levels: JSON.parse(row.levels_json || '{}'),
           notes: JSON.parse(row.notes_json || '{}'),
-          audioNotes: JSON.parse(row.audio_notes_json || '{}'),
+          audioNotes: parseAudioNotes(row.audio_notes_json),
           mastered: !!row.mastered,
           creatorId: row.creator_id,
           creator: row.creator,
@@ -860,7 +870,7 @@ function getRehearsalById(id, groupId) {
  * Updates the level and note for the given rehearsal and user.  Only the
  * current user's values are changed.  Returns a promise.
  */
-function updateRehearsalUserData(id, username, level, note, audio) {
+function updateRehearsalUserData(id, username, level, note, audio, audioTitle) {
   return new Promise((resolve, reject) => {
     // Retrieve existing levels and notes
     db.get(
@@ -871,7 +881,7 @@ function updateRehearsalUserData(id, username, level, note, audio) {
         if (!row) return reject(new Error('Rehearsal not found'));
         const levels = JSON.parse(row.levels_json || '{}');
         const notes = JSON.parse(row.notes_json || '{}');
-        const audioNotes = JSON.parse(row.audio_notes_json || '{}');
+        const audioNotes = parseAudioNotes(row.audio_notes_json);
         if (level !== undefined) {
           levels[username] = level;
         }
@@ -879,7 +889,14 @@ function updateRehearsalUserData(id, username, level, note, audio) {
           notes[username] = note;
         }
         if (audio !== undefined) {
-          audioNotes[username] = audio;
+          if (audio === '') {
+            delete audioNotes[username];
+          } else {
+            if (!Array.isArray(audioNotes[username])) {
+              audioNotes[username] = [];
+            }
+            audioNotes[username].push({ title: audioTitle || '', data: audio });
+          }
         }
         db.run(
           'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ?',
@@ -945,7 +962,7 @@ function toggleRehearsalMastered(id) {
                   spotify: updated.spotify,
                   levels: JSON.parse(updated.levels_json || '{}'),
                   notes: JSON.parse(updated.notes_json || '{}'),
-                  audioNotes: JSON.parse(updated.audio_notes_json || '{}'),
+                  audioNotes: parseAudioNotes(updated.audio_notes_json),
                   mastered: !!updated.mastered,
                   creatorId: updated.creator_id,
                   creator: updated.creator,
@@ -1188,7 +1205,7 @@ function moveSuggestionToRehearsal(id) {
                       spotify: rrow.spotify,
                       levels: JSON.parse(rrow.levels_json || '{}'),
                       notes: JSON.parse(rrow.notes_json || '{}'),
-                      audioNotes: JSON.parse(rrow.audio_notes_json || '{}'),
+                      audioNotes: parseAudioNotes(rrow.audio_notes_json),
                       mastered: !!rrow.mastered,
                       creatorId: rrow.creator_id,
                       creator: rrow.creator,

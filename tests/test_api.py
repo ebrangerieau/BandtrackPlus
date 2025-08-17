@@ -147,6 +147,30 @@ def test_rehearsals_crud(tmp_path):
         status, _, _ = request("PUT", port, f"/api/1/rehearsals/{reh_id}", {"level": 5, "note": "ok"}, headers)
         assert status == 200
 
+        status, _, _ = request(
+            "PUT",
+            port,
+            f"/api/1/rehearsals/{reh_id}",
+            {"audio": "a1", "audioTitle": "t1"},
+            headers,
+        )
+        assert status == 200
+
+        status, _, _ = request(
+            "PUT",
+            port,
+            f"/api/1/rehearsals/{reh_id}",
+            {"audio": "a2", "audioTitle": "t2"},
+            headers,
+        )
+        assert status == 200
+
+        status, _, body = request("GET", port, "/api/1/rehearsals", headers=headers)
+        rehearsals = json.loads(body)
+        notes = rehearsals[0]["audioNotes"]["carol"]
+        assert len(notes) == 2
+        assert [n["title"] for n in notes] == ["t1", "t2"]
+
         status, _, body = request("PUT", port, f"/api/1/rehearsals/{reh_id}/mastered", headers=headers)
         assert status == 200
         assert json.loads(body)["mastered"] is True
