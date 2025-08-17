@@ -706,7 +706,7 @@
     // Afficher la liste
     list.forEach((item) => {
       const card = document.createElement('div');
-      card.className = 'card collapsed';
+      card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-pink-50';
 
       const headerRow = document.createElement('div');
       headerRow.className = 'card-header';
@@ -1018,7 +1018,7 @@
     }
     list.forEach((song) => {
       const card = document.createElement('div');
-      card.className = 'card collapsed';
+      card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-blue-50';
       // Niveau courant de l'utilisateur pour ce morceau
       const currentLevel =
         song.levels[currentUser.username] != null
@@ -1512,7 +1512,7 @@
       }
       arr.forEach((perf) => {
         const card = document.createElement('div');
-        card.className = 'card collapsed';
+        card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-green-50';
         const h3 = document.createElement('h3');
         h3.textContent = perf.name;
         h3.onclick = () => {
@@ -2472,7 +2472,7 @@
 
   function renderGroupSection(currentSettings) {
     const section = document.createElement('div');
-    section.className = 'settings-section';
+    section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const h3 = document.createElement('h3');
     h3.textContent = 'Groupes';
     section.appendChild(h3);
@@ -2544,7 +2544,7 @@
 
   function renderThemeSection(currentSettings) {
     const section = document.createElement('div');
-    section.className = 'settings-section';
+    section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const h3 = document.createElement('h3');
     h3.textContent = 'Thème';
     section.appendChild(h3);
@@ -2602,7 +2602,7 @@
 
   async function renderAdminSection(container) {
     const section = document.createElement('div');
-    section.className = 'settings-section';
+    section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const h3 = document.createElement('h3');
     h3.textContent = 'Administration';
     section.appendChild(h3);
@@ -2799,7 +2799,7 @@
     const themeSection = renderThemeSection(currentSettings);
     container.appendChild(themeSection);
     const logoutSection = document.createElement('div');
-    logoutSection.className = 'settings-section';
+    logoutSection.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const logoutBtn = document.createElement('button');
     logoutBtn.className = 'logout-btn';
     logoutBtn.textContent = 'Se déconnecter';
