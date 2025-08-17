@@ -301,6 +301,10 @@ body, html {
   align-items: center;
 }
 
+.level-badge {
+  font-weight: bold;
+}
+
 .like-info {
   display: flex;
   gap: 6px;
