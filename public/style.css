@@ -272,10 +272,7 @@ body, html {
 
 /* Cartes pour les listes */
 .card {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 16px;
+  /* Tailwind classes handle background, border, radius and padding */
   margin-bottom: 16px;
 }
 
@@ -442,11 +439,8 @@ textarea {
 
 /* Section générique pour les paramètres */
 .settings-section {
+  /* Tailwind classes will style the container */
   margin-top: 20px;
-  padding: 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--card-bg);
 }
 
 .settings-section h3 {
