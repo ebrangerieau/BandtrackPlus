@@ -669,6 +669,13 @@
       container.appendChild(p);
       return;
     }
+    if (list.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Aucune proposition pour l\u2019instant';
+      container.appendChild(empty);
+      return;
+    }
     // Afficher la liste
     list.forEach((item) => {
       const card = document.createElement('div');
