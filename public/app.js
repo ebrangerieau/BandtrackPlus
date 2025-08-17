@@ -2459,26 +2459,26 @@
     joinBtn.textContent = 'Rejoindre';
     joinBtn.style.marginLeft = '8px';
     groupBtnRow.appendChild(joinBtn);
-    section.appendChild(groupBtnRow);
-    const labelName = document.createElement('label');
-    labelName.textContent = 'Nom du groupe';
-    const inputName = document.createElement('input');
-    inputName.type = 'text';
-    inputName.value = currentSettings.groupName;
-    inputName.style.width = '100%';
-    inputName.onchange = async () => {
-      currentSettings.groupName = inputName.value;
+    const renameBtn = document.createElement('button');
+    renameBtn.id = 'rename-group-btn';
+    renameBtn.className = 'btn-secondary';
+    renameBtn.textContent = 'Renommer';
+    renameBtn.style.marginLeft = '8px';
+    renameBtn.onclick = async () => {
+      const newName = prompt('Nouveau nom du groupe', currentSettings.groupName);
+      if (!newName || newName.trim() === '' || newName === currentSettings.groupName) return;
+      currentSettings.groupName = newName.trim();
       try {
         await api('/settings', 'PUT', currentSettings);
-        document.title = `${inputName.value} – BandTrack`;
+        document.title = `${currentSettings.groupName} – BandTrack`;
         const groupNameEl = document.getElementById('group-name');
-        if (groupNameEl) groupNameEl.textContent = inputName.value;
+        if (groupNameEl) groupNameEl.textContent = currentSettings.groupName;
       } catch (err) {
         alert(err.message);
       }
     };
-    section.appendChild(labelName);
-    section.appendChild(inputName);
+    groupBtnRow.appendChild(renameBtn);
+    section.appendChild(groupBtnRow);
     if (isAdmin()) {
       const inviteDiv = document.createElement('div');
       inviteDiv.style.marginTop = '8px';
