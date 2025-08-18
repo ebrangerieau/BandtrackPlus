@@ -2277,30 +2277,35 @@
     const content = document.createElement('div');
     content.className = 'modal-content';
     const h3 = document.createElement('h3');
-    h3.textContent = song.title;
+    h3.style.fontWeight = 'normal';
+    h3.innerHTML = '<strong>Titre :</strong> ' + song.title;
     content.appendChild(h3);
-    // Afficher le titre et les métadonnées (auteur et liens)
+    // Afficher les métadonnées (auteur et liens)
     const metaDiv = document.createElement('div');
     if (song.author) {
       const pAuth = document.createElement('p');
       pAuth.style.fontStyle = 'italic';
-      pAuth.textContent = 'Auteur : ' + song.author;
+      pAuth.innerHTML = '<strong>Auteur :</strong> ' + song.author;
       metaDiv.appendChild(pAuth);
     }
     if (song.versionOf) {
       const pVer = document.createElement('p');
       pVer.style.fontStyle = 'italic';
-      pVer.textContent = 'Version de : ' + song.versionOf;
+      pVer.innerHTML = '<strong>Version de :</strong> ' + song.versionOf;
       metaDiv.appendChild(pVer);
     }
     if (song.youtube) {
+      const ytP = document.createElement('p');
+      const ytStrong = document.createElement('strong');
+      ytStrong.textContent = 'Lien Youtube : ';
+      ytP.appendChild(ytStrong);
       const ytA = document.createElement('a');
       ytA.href = song.youtube;
       ytA.target = '_blank';
       ytA.rel = 'noopener noreferrer';
       ytA.textContent = song.youtube;
-      ytA.style.display = 'block';
-      metaDiv.appendChild(ytA);
+      ytP.appendChild(ytA);
+      metaDiv.appendChild(ytP);
     }
     if (song.spotify) {
       const spA = document.createElement('a');
