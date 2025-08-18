@@ -738,6 +738,12 @@
         authP.textContent = 'Auteur : ' + item.author;
         details.appendChild(authP);
       }
+      if (item.versionOf) {
+        const verP = document.createElement('p');
+        verP.style.fontStyle = 'italic';
+        verP.textContent = 'Version de : ' + item.versionOf;
+        details.appendChild(verP);
+      }
       const yt = item.youtube || item.url;
       if (yt) {
         const link = document.createElement('a');
@@ -833,6 +839,12 @@
     const inputAuthor = document.createElement('input');
     inputAuthor.type = 'text';
     inputAuthor.style.width = '100%';
+    // Version de
+    const labelVersion = document.createElement('label');
+    labelVersion.textContent = 'Version de';
+    const inputVersion = document.createElement('input');
+    inputVersion.type = 'text';
+    inputVersion.style.width = '100%';
     // Lien YouTube
     const labelYt = document.createElement('label');
     labelYt.textContent = 'Lien YouTube';
@@ -843,6 +855,8 @@
     form.appendChild(inputTitle);
     form.appendChild(labelAuthor);
     form.appendChild(inputAuthor);
+    form.appendChild(labelVersion);
+    form.appendChild(inputVersion);
     form.appendChild(labelYt);
     form.appendChild(inputYt);
     content.appendChild(form);
@@ -864,10 +878,11 @@
       e.preventDefault();
       const title = inputTitle.value.trim();
       const author = inputAuthor.value.trim();
+      const versionOf = inputVersion.value.trim();
       const youtube = inputYt.value.trim();
       if (!title) return;
       try {
-        await api('/suggestions', 'POST', { title, author, youtube });
+        await api('/suggestions', 'POST', { title, author, youtube, versionOf });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
@@ -910,6 +925,12 @@
     inputAuthor.type = 'text';
     inputAuthor.style.width = '100%';
     inputAuthor.value = item.author || '';
+    const labelVersion = document.createElement('label');
+    labelVersion.textContent = 'Version de';
+    const inputVersion = document.createElement('input');
+    inputVersion.type = 'text';
+    inputVersion.style.width = '100%';
+    inputVersion.value = item.versionOf || '';
 
     const labelYt = document.createElement('label');
     labelYt.textContent = 'Lien YouTube';
@@ -921,6 +942,8 @@
     form.appendChild(inputTitle);
     form.appendChild(labelAuthor);
     form.appendChild(inputAuthor);
+    form.appendChild(labelVersion);
+    form.appendChild(inputVersion);
     form.appendChild(labelYt);
     form.appendChild(inputYt);
     content.appendChild(form);
@@ -941,12 +964,14 @@
       e.preventDefault();
       const titleVal = inputTitle.value.trim();
       const authorVal = inputAuthor.value.trim();
+      const versionVal = inputVersion.value.trim();
       const youtubeVal = inputYt.value.trim();
       if (!titleVal) return;
       try {
         await api(`/suggestions/${item.id}`, 'PUT', {
           title: titleVal,
           author: authorVal,
+          versionOf: versionVal,
           youtube: youtubeVal,
         });
         if (modal.parentNode) {
@@ -1289,6 +1314,12 @@
     const inputSp = document.createElement('input');
     inputSp.type = 'url';
     inputSp.style.width = '100%';
+    // Version de
+    const labelVersion = document.createElement('label');
+    labelVersion.textContent = 'Version de';
+    const inputVersion = document.createElement('input');
+    inputVersion.type = 'text';
+    inputVersion.style.width = '100%';
     form.appendChild(labelTitle);
     form.appendChild(inputTitle);
     form.appendChild(labelAuthor);
@@ -1297,6 +1328,8 @@
     form.appendChild(inputYt);
     form.appendChild(labelSp);
     form.appendChild(inputSp);
+    form.appendChild(labelVersion);
+    form.appendChild(inputVersion);
     content.appendChild(form);
     // Actions
     const actions = document.createElement('div');
@@ -1319,8 +1352,9 @@
       const author = inputAuthor.value.trim();
       const youtube = inputYt.value.trim();
       const spotify = inputSp.value.trim();
+      const versionOf = inputVersion.value.trim();
       try {
-        await api('/rehearsals', 'POST', { title, author, youtube, spotify });
+        await api('/rehearsals', 'POST', { title, author, youtube, spotify, versionOf });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
@@ -1392,6 +1426,13 @@
     inputSp.type = 'url';
     inputSp.style.width = '100%';
     inputSp.value = song.spotify || '';
+    // Version de
+    const labelVersion = document.createElement('label');
+    labelVersion.textContent = 'Version de';
+    const inputVersion = document.createElement('input');
+    inputVersion.type = 'text';
+    inputVersion.style.width = '100%';
+    inputVersion.value = song.versionOf || '';
     form.appendChild(labelTitle);
     form.appendChild(inputTitle);
     form.appendChild(labelAuthor);
@@ -1400,6 +1441,8 @@
     form.appendChild(inputYt);
     form.appendChild(labelSp);
     form.appendChild(inputSp);
+    form.appendChild(labelVersion);
+    form.appendChild(inputVersion);
     content.appendChild(form);
     // Actions
     const actions = document.createElement('div');
@@ -1421,9 +1464,10 @@
       const authorVal = inputAuthor.value.trim();
       const ytVal = inputYt.value.trim();
       const spVal = inputSp.value.trim();
+      const versionVal = inputVersion.value.trim();
       if (!titleVal) return;
       try {
-        await api(`/rehearsals/${song.id}`, 'PUT', { title: titleVal, author: authorVal, youtube: ytVal, spotify: spVal });
+        await api(`/rehearsals/${song.id}`, 'PUT', { title: titleVal, author: authorVal, youtube: ytVal, spotify: spVal, versionOf: versionVal });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
@@ -2242,6 +2286,12 @@
       pAuth.style.fontStyle = 'italic';
       pAuth.textContent = 'Auteur : ' + song.author;
       metaDiv.appendChild(pAuth);
+    }
+    if (song.versionOf) {
+      const pVer = document.createElement('p');
+      pVer.style.fontStyle = 'italic';
+      pVer.textContent = 'Version de : ' + song.versionOf;
+      metaDiv.appendChild(pVer);
     }
     if (song.youtube) {
       const ytA = document.createElement('a');
