@@ -592,6 +592,8 @@ textarea {
   border: 1px solid var(--border-color);
   min-height: 80px;
   padding: 4px;
+  /* Ajout d'une trame translucide pour mettre en valeur la date */
+  background-color: rgba(255, 255, 255, 0.4);
 }
 
 .calendar-cell.empty {
@@ -600,6 +602,11 @@ textarea {
 
 .calendar-date {
   font-weight: bold;
+  /* Fond léger derrière le numéro pour une meilleure lisibilité */
+  display: inline-block;
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 2px 4px;
+  border-radius: 4px;
 }
 
 .calendar-event {
