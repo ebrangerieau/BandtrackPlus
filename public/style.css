@@ -35,6 +35,7 @@ body.dark {
    classe ``template-classic`` correspond au style par défaut.  La
    classe ``template-groove`` propose un look inspiré des applications
    modernes de streaming musical, avec des tons bleu foncé et vert.
+   La classe ``template-violet`` ajoute un dégradé violet.
 */
 
 /* Template classique – hérite des valeurs définies dans :root et .dark */
@@ -45,25 +46,51 @@ body.template-classic {
 /* Template groove (mode clair) – pastel contrasté, légèrement plus foncé que le classique */
 body.template-groove {
   --bg-color: #e6eff5;
-  --text-color: #1f2d3d;
+  --text-color: #0e1a24; /* texte plus foncé pour un meilleur contraste */
   --primary-color: #4ea3a5;
   --card-bg: #ffffff;
-  --border-color: #b0c4cc;
-  --nav-bg: #d2e4ee;
-  --nav-border: #a5c0cb;
+  --border-color: #96b3bf;
+  --nav-bg: #c6dde8; /* arrière-plan légèrement éclairci */
+  --nav-border: #8fb1c4;
   --danger-color: #e57373;
   --success-color: #81c784;
 }
 
 /* Template groove en mode sombre – palette pastel assombrie */
 body.template-groove.dark {
-  --bg-color: #2d3e4d;
-  --text-color: #e8f0f5;
+  --bg-color: #1b2a38; /* fond plus sombre */
+  --text-color: #f1f8ff; /* texte éclairci */
   --primary-color: #4ea3a5;
-  --card-bg: #364d5a;
-  --border-color: #426174;
-  --nav-bg: #2a3c49;
-  --nav-border: #426174;
+  --card-bg: #243a4b;
+  --border-color: #40596b;
+  --nav-bg: #16232e; /* navigation plus foncée */
+  --nav-border: #40596b;
+  --danger-color: #ef9a9a;
+  --success-color: #a5d6a7;
+}
+
+/* Template violet (mode clair) – dégradé violet doux */
+body.template-violet {
+  --bg-color: linear-gradient(135deg, #f3e5f5, #d1c4e9);
+  --text-color: #2d0d57;
+  --primary-color: #7b1fa2;
+  --card-bg: #ffffff;
+  --border-color: #b39ddb;
+  --nav-bg: rgba(243, 229, 245, 0.9);
+  --nav-border: #b39ddb;
+  --danger-color: #e57373;
+  --success-color: #81c784;
+}
+
+/* Template violet en mode sombre – dégradé violet foncé */
+body.template-violet.dark {
+  --bg-color: linear-gradient(135deg, #4a148c, #12005e);
+  --text-color: #f3e5f5;
+  --primary-color: #ba68c8;
+  --card-bg: rgba(49, 27, 146, 0.8);
+  --border-color: #5e35b1;
+  --nav-bg: rgba(49, 27, 146, 0.9);
+  --nav-border: #7e57c2;
   --danger-color: #ef9a9a;
   --success-color: #a5d6a7;
 }
@@ -73,7 +100,7 @@ body, html {
   margin: 0;
   padding: 0;
   height: 100%;
-  background-color: var(--bg-color);
+  background: var(--bg-color);
   color: var(--text-color);
 }
 
@@ -97,7 +124,7 @@ body, html {
   justify-content: space-between;
   align-items: center;
   padding: 0 16px;
-  background-color: var(--nav-bg);
+  background: var(--nav-bg);
   border-bottom: 1px solid var(--nav-border);
   z-index: 200;
 }
@@ -121,7 +148,7 @@ body, html {
   position: absolute;
   top: 48px;
   right: 0;
-  background-color: var(--nav-bg);
+  background: var(--nav-bg);
   border: 1px solid var(--nav-border);
   border-radius: 4px;
   z-index: 300;
@@ -260,7 +287,7 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-around;
-  background-color: var(--nav-bg);
+  background: var(--nav-bg);
   border-top: 1px solid var(--nav-border);
   z-index: 100;
 }
