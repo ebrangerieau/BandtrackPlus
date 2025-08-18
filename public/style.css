@@ -36,6 +36,7 @@ body.dark {
    classe ``template-groove`` propose un look inspiré des applications
    modernes de streaming musical, avec des tons bleu foncé et vert.
    La classe ``template-violet`` ajoute un dégradé violet.
+   La classe ``template-imgbg`` applique une image de fond aux tons jaune/orangé/marron.
 */
 
 /* Template classique – hérite des valeurs définies dans :root et .dark */
@@ -91,6 +92,32 @@ body.template-violet.dark {
   --border-color: #5e35b1;
   --nav-bg: rgba(49, 27, 146, 0.9);
   --nav-border: #7e57c2;
+  --danger-color: #ef9a9a;
+  --success-color: #a5d6a7;
+}
+
+/* Template imgbg (mode clair) – image de fond avec palette pastel jaune/orangé/marron */
+body.template-imgbg {
+  --bg-color: url('img_bg.png') center/cover no-repeat fixed #fff8e1;
+  --text-color: #5d4037;
+  --primary-color: #ffb74d;
+  --card-bg: rgba(255, 255, 255, 0.8);
+  --border-color: #e0c097;
+  --nav-bg: rgba(255, 248, 225, 0.9);
+  --nav-border: #ffcc80;
+  --danger-color: #e57373;
+  --success-color: #81c784;
+}
+
+/* Template imgbg en mode sombre – palette pastel assombrie */
+body.template-imgbg.dark {
+  --bg-color: url('img_bg.png') center/cover no-repeat fixed #5d4037;
+  --text-color: #fff8e1;
+  --primary-color: #ffcc80;
+  --card-bg: rgba(93, 64, 55, 0.8);
+  --border-color: #a1887f;
+  --nav-bg: rgba(93, 64, 55, 0.9);
+  --nav-border: #a1887f;
   --danger-color: #ef9a9a;
   --success-color: #a5d6a7;
 }
@@ -438,12 +465,20 @@ textarea {
   box-sizing: border-box;
 }
 
-/* Séparateurs pour listes de prestations */
+/* Titre des sections (pages, séparateurs de prestations, etc.) */
 .section-title {
   margin-top: 24px;
   margin-bottom: 12px;
+  margin-left: auto;
+  margin-right: auto;
   font-size: 20px;
   font-weight: bold;
+  text-align: center;
+  background-color: rgba(255, 255, 255, 0.7);
+  color: #000;
+  padding: 10px 15px;
+  border-radius: 8px;
+  width: fit-content;
 }
 
 /* Message affiché lorsqu'aucune donnée n'est disponible */
@@ -540,23 +575,57 @@ textarea {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  justify-content: center;
+  /* Trame de fond pour mieux distinguer la navigation */
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+/* Boutons de navigation (flèches) */
+.calendar-nav button {
+  background: var(--primary-color);
+  color: #fff;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.calendar-nav button:hover {
+  opacity: 0.9;
+}
+
+/* Libellé mois/année */
+.calendar-nav span {
+  font-weight: bold;
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 4px;
+  margin-top: 10px;
 }
 
 .calendar-day-name {
   font-weight: bold;
   text-align: center;
+  /* Fond léger pour les jours de la semaine */
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 4px 0;
+  border-radius: 4px;
 }
 
 .calendar-cell {
   border: 1px solid var(--border-color);
   min-height: 80px;
   padding: 4px;
+  /* Ajout d'une trame translucide pour mettre en valeur la date */
+  background-color: rgba(255, 255, 255, 0.4);
 }
 
 .calendar-cell.empty {
@@ -565,6 +634,11 @@ textarea {
 
 .calendar-date {
   font-weight: bold;
+  /* Fond léger derrière le numéro pour une meilleure lisibilité */
+  display: inline-block;
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 2px 4px;
+  border-radius: 4px;
 }
 
 .calendar-event {

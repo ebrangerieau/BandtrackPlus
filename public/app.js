@@ -173,7 +173,8 @@
   /**
    * Applique le modèle visuel (template) choisi.  Le nom du template
    * correspond à une classe CSS ajoutée sur le <body>, par exemple
-   * ``template-classic``, ``template-groove`` ou ``template-violet``.  Cette classe
+   * ``template-classic``, ``template-groove``, ``template-violet`` ou
+   * ``template-imgbg``.  Cette classe
    * permet de définir des variables CSS spécifiques dans ``style.css``.
    * @param {string} templateName
    */
@@ -658,6 +659,7 @@
     container.innerHTML = '';
     const header = document.createElement('h2');
     header.textContent = 'Morceaux suggérés';
+    header.className = 'section-title';
     container.appendChild(header);
     let list = [];
     try {
@@ -1000,6 +1002,7 @@
     container.innerHTML = '';
     const header = document.createElement('h2');
     header.textContent = 'Morceaux en cours de travail';
+    header.className = 'section-title';
     container.appendChild(header);
     let list = [];
     try {
@@ -1613,6 +1616,7 @@
 
     const header = document.createElement('h2');
     header.textContent = 'Agenda';
+    header.className = 'section-title';
     container.appendChild(header);
 
     // Navigation mois précédent / suivant
@@ -2611,6 +2615,7 @@
       { value: 'classic', label: 'Classique' },
       { value: 'groove', label: 'Groove' },
       { value: 'violet', label: 'Violet' },
+      { value: 'imgbg', label: 'Image' },
     ];
     templateOptions.forEach((opt) => {
       const optEl = document.createElement('option');
