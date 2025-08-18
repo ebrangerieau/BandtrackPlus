@@ -1860,7 +1860,14 @@
   /**
    * Affiche une modale pour ajouter une prestation.
    */
-  function showAddPerformanceModal(container, afterSave, initialDate) {
+  async function showAddPerformanceModal(container, afterSave, initialDate) {
+    // Refresh song list to ensure up-to-date averages
+    try {
+      rehearsalsCache = await api('/rehearsals');
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -2081,7 +2088,14 @@
    * Affiche une modale pour modifier une prestation existante.  Les champs
    * sont pré-remplis avec les valeurs actuelles.
    */
-  function showEditPerformanceModal(perf, container, afterSave) {
+  async function showEditPerformanceModal(perf, container, afterSave) {
+    // Refresh song list to ensure up-to-date averages
+    try {
+      rehearsalsCache = await api('/rehearsals');
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
