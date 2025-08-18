@@ -1860,7 +1860,14 @@
   /**
    * Affiche une modale pour ajouter une prestation.
    */
-  function showAddPerformanceModal(container, afterSave, initialDate) {
+  async function showAddPerformanceModal(container, afterSave, initialDate) {
+    // Refresh song list to ensure up-to-date averages
+    try {
+      rehearsalsCache = await api('/rehearsals');
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -1919,11 +1926,12 @@
       leftWrap.appendChild(titleSpan);
       const levelSpan = document.createElement('span');
       levelSpan.className = 'level-badge';
-      const lvl =
-        song.levels && song.levels[currentUser.username] != null
-          ? song.levels[currentUser.username]
+      const levels = Object.values(song.levels || {}).map(Number);
+      const avg =
+        levels.length > 0
+          ? levels.reduce((sum, val) => sum + val, 0) / levels.length
           : 0;
-      levelSpan.textContent = lvl;
+      levelSpan.textContent = avg.toFixed(1);
       row.appendChild(leftWrap);
       row.appendChild(levelSpan);
       listDiv.appendChild(row);
@@ -2080,7 +2088,14 @@
    * Affiche une modale pour modifier une prestation existante.  Les champs
    * sont pré-remplis avec les valeurs actuelles.
    */
-  function showEditPerformanceModal(perf, container, afterSave) {
+  async function showEditPerformanceModal(perf, container, afterSave) {
+    // Refresh song list to ensure up-to-date averages
+    try {
+      rehearsalsCache = await api('/rehearsals');
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
     const modal = document.createElement('div');
     modal.className = 'modal';
     const content = document.createElement('div');
@@ -2144,11 +2159,12 @@
       leftWrap.appendChild(titleSpan);
       const levelSpan = document.createElement('span');
       levelSpan.className = 'level-badge';
-      const lvl =
-        song.levels && song.levels[currentUser.username] != null
-          ? song.levels[currentUser.username]
+      const levels = Object.values(song.levels || {}).map(Number);
+      const avg =
+        levels.length > 0
+          ? levels.reduce((sum, val) => sum + val, 0) / levels.length
           : 0;
-      levelSpan.textContent = lvl;
+      levelSpan.textContent = avg.toFixed(1);
       row.appendChild(leftWrap);
       row.appendChild(levelSpan);
       listDiv.appendChild(row);
