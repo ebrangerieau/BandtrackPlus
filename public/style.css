@@ -575,6 +575,33 @@ textarea {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  justify-content: center;
+  /* Trame de fond pour mieux distinguer la navigation */
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+/* Boutons de navigation (flèches) */
+.calendar-nav button {
+  background: var(--primary-color);
+  color: #fff;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.calendar-nav button:hover {
+  opacity: 0.9;
+}
+
+/* Libellé mois/année */
+.calendar-nav span {
+  font-weight: bold;
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .calendar-grid {
@@ -586,6 +613,10 @@ textarea {
 .calendar-day-name {
   font-weight: bold;
   text-align: center;
+  /* Fond léger pour les jours de la semaine */
+  background-color: rgba(255, 255, 255, 0.7);
+  padding: 4px 0;
+  border-radius: 4px;
 }
 
 .calendar-cell {
