@@ -1,0 +1,20 @@
+{
+  "name": "bandtrack",
+  "version": "1.0.0",
+  "description": "BandTrack est une application de suivi musical. L'interface web fonctionne comme une Progressive Web App monopage et communique avec un backend Python minimaliste via une API REST.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:css": "tailwindcss -i ./src/tailwind.css -o ./public/tailwind.css --minify"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "tailwindcss": "^3.4.1"
+  }
+}

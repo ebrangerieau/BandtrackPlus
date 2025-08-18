@@ -35,6 +35,7 @@ body.dark {
    classe ``template-classic`` correspond au style par défaut.  La
    classe ``template-groove`` propose un look inspiré des applications
    modernes de streaming musical, avec des tons bleu foncé et vert.
+   La classe ``template-violet`` ajoute un dégradé violet.
 */
 
 /* Template classique – hérite des valeurs définies dans :root et .dark */
@@ -42,30 +43,56 @@ body.template-classic {
   /* Pas de redéfinition nécessaire pour l’instant */
 }
 
-/* Template groove (mode clair) */
+/* Template groove (mode clair) – pastel contrasté, légèrement plus foncé que le classique */
 body.template-groove {
-  --bg-color: #022b43;
-  --text-color: #e0f7fa;
-  --primary-color: #00b894;
-  --card-bg: #03324a;
-  --border-color: #01496c;
-  --nav-bg: #021f33;
-  --nav-border: #01496c;
-  --danger-color: #e74c3c;
-  --success-color: #2ecc71;
+  --bg-color: #e6eff5;
+  --text-color: #0e1a24; /* texte plus foncé pour un meilleur contraste */
+  --primary-color: #4ea3a5;
+  --card-bg: #ffffff;
+  --border-color: #96b3bf;
+  --nav-bg: #c6dde8; /* arrière-plan légèrement éclairci */
+  --nav-border: #8fb1c4;
+  --danger-color: #e57373;
+  --success-color: #81c784;
 }
 
-/* Template groove en mode sombre – renforce les contrastes */
+/* Template groove en mode sombre – palette pastel assombrie */
 body.template-groove.dark {
-  --bg-color: #011a2b;
-  --text-color: #cce7f0;
-  --primary-color: #00b894;
-  --card-bg: #02253b;
-  --border-color: #013a59;
-  --nav-bg: #011e31;
-  --nav-border: #013a59;
-  --danger-color: #e74c3c;
-  --success-color: #2ecc71;
+  --bg-color: #1b2a38; /* fond plus sombre */
+  --text-color: #f1f8ff; /* texte éclairci */
+  --primary-color: #4ea3a5;
+  --card-bg: #243a4b;
+  --border-color: #40596b;
+  --nav-bg: #16232e; /* navigation plus foncée */
+  --nav-border: #40596b;
+  --danger-color: #ef9a9a;
+  --success-color: #a5d6a7;
+}
+
+/* Template violet (mode clair) – dégradé violet doux */
+body.template-violet {
+  --bg-color: linear-gradient(135deg, #f3e5f5, #d1c4e9);
+  --text-color: #2d0d57;
+  --primary-color: #7b1fa2;
+  --card-bg: #ffffff;
+  --border-color: #b39ddb;
+  --nav-bg: rgba(243, 229, 245, 0.9);
+  --nav-border: #b39ddb;
+  --danger-color: #e57373;
+  --success-color: #81c784;
+}
+
+/* Template violet en mode sombre – dégradé violet foncé */
+body.template-violet.dark {
+  --bg-color: linear-gradient(135deg, #4a148c, #12005e);
+  --text-color: #f3e5f5;
+  --primary-color: #ba68c8;
+  --card-bg: rgba(49, 27, 146, 0.8);
+  --border-color: #5e35b1;
+  --nav-bg: rgba(49, 27, 146, 0.9);
+  --nav-border: #7e57c2;
+  --danger-color: #ef9a9a;
+  --success-color: #a5d6a7;
 }
 
 /* Réinitialisation de base */
@@ -73,8 +100,7 @@ body, html {
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: Arial, Helvetica, sans-serif;
-  background-color: var(--bg-color);
+  background: var(--bg-color);
   color: var(--text-color);
 }
 
@@ -98,7 +124,7 @@ body, html {
   justify-content: space-between;
   align-items: center;
   padding: 0 16px;
-  background-color: var(--nav-bg);
+  background: var(--nav-bg);
   border-bottom: 1px solid var(--nav-border);
   z-index: 200;
 }
@@ -112,37 +138,20 @@ body, html {
   text-align: center;
 }
 
-#user-info {
+#menu-container {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  position: relative;
-}
-
-#user-name {
-  font-weight: bold;
-}
-
-#profile-btn img {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
 }
 
 #profile-menu {
   position: absolute;
   top: 48px;
   right: 0;
-  background-color: var(--nav-bg);
+  background: var(--nav-bg);
   border: 1px solid var(--nav-border);
   border-radius: 4px;
-  display: none;
-  flex-direction: column;
   z-index: 300;
-}
-
-#profile-menu.show {
-  display: flex;
 }
 
 #profile-menu button {
@@ -152,6 +161,7 @@ body, html {
   text-align: left;
   color: var(--text-color);
   cursor: pointer;
+  font-weight: bold;
 }
 
 #profile-menu button:hover {
@@ -215,17 +225,46 @@ body, html {
   cursor: pointer;
 }
 
-/* Page d'accueil après connexion */
-.home-container {
-  max-width: 400px;
-  margin: 60px auto;
-  padding: 20px;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  text-align: center;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+/* Styles généraux pour les champs de formulaire texte */
+input[type="text"],
+input[type="password"],
+input[type="date"],
+input[type="time"],
+input[type="url"],
+input[type="email"],
+input[type="number"],
+input[type="datetime-local"],
+textarea,
+select {
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  transition: box-shadow 0.2s ease;
 }
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="date"]:focus,
+input[type="time"]:focus,
+input[type="url"]:focus,
+input[type="email"]:focus,
+input[type="number"]:focus,
+input[type="datetime-local"]:focus,
+textarea:focus,
+select:focus {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+  outline: none;
+}
+
+/* Page d'accueil après connexion */
+  .home-container {
+    max-width: 400px;
+    margin: 60px auto;
+    padding: 20px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    text-align: left;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
 
 .home-container button {
   padding: 10px 20px;
@@ -248,7 +287,7 @@ body, html {
   display: flex;
   align-items: center;
   justify-content: space-around;
-  background-color: var(--nav-bg);
+  background: var(--nav-bg);
   border-top: 1px solid var(--nav-border);
   z-index: 100;
 }
@@ -265,11 +304,11 @@ body, html {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  font-weight: bold;
 }
 
 .nav-bar button.active {
   color: var(--primary-color);
-  font-weight: bold;
 }
 
 /* Contenu de page */
@@ -279,10 +318,7 @@ body, html {
 
 /* Cartes pour les listes */
 .card {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 16px;
+  /* Tailwind classes handle background, border, radius and padding */
   margin-bottom: 16px;
 }
 
@@ -293,6 +329,7 @@ body, html {
 .card h3 {
   margin-top: 0;
   cursor: pointer;
+  font-weight: bold;
 }
 
 .card-header {
@@ -409,6 +446,15 @@ textarea {
   font-weight: bold;
 }
 
+/* Message affiché lorsqu'aucune donnée n'est disponible */
+.empty-state {
+  text-align: center;
+  color: var(--text-color);
+  opacity: 0.7;
+  font-style: italic;
+  margin-top: 12px;
+}
+
 /* Liste d'éléments sélectionnables */
 .select-list {
   max-height: 200px;
@@ -449,11 +495,8 @@ textarea {
 
 /* Section générique pour les paramètres */
 .settings-section {
+  /* Tailwind classes will style the container */
   margin-top: 20px;
-  padding: 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--card-bg);
 }
 
 .settings-section h3 {

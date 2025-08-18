@@ -34,15 +34,39 @@
     rehearsalsCache = [];
   }
 
-  // Ferme le menu profil lorsqu'on clique à l'extérieur
+  // Ferme le menu lorsqu'on clique à l'extérieur
   document.addEventListener('click', (e) => {
     const menu = document.getElementById('profile-menu');
-    const btn = document.getElementById('profile-btn');
-    if (!menu || !btn) return;
-    if (menu.classList.contains('show') && !menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
-      menu.classList.remove('show');
+    const hamburger = document.getElementById('hamburger');
+    if (!menu) return;
+    if (
+      !menu.classList.contains('hidden') &&
+      !menu.contains(e.target) &&
+      e.target !== hamburger && !hamburger?.contains(e.target)
+    ) {
+      menu.classList.add('hidden');
+      menu.classList.remove('block', 'open');
+      hamburger?.classList.remove('open');
     }
   });
+
+  function toggleMenu() {
+    const menu = document.getElementById('profile-menu');
+    const btn = document.getElementById('hamburger');
+    if (!menu || !btn) return;
+    menu.classList.toggle('hidden');
+    menu.classList.toggle('block');
+    menu.classList.toggle('open');
+    btn.classList.toggle('open');
+    const bars = btn.querySelectorAll('span');
+    if (bars.length === 3) {
+      bars[0].classList.toggle('translate-y-1.5');
+      bars[0].classList.toggle('rotate-45');
+      bars[1].classList.toggle('opacity-0');
+      bars[2].classList.toggle('-translate-y-1.5');
+      bars[2].classList.toggle('-rotate-45');
+    }
+  }
 
   function hasModRights() {
     return currentUser && (currentUser.membershipRole === 'admin' || currentUser.membershipRole === 'moderator');
@@ -111,22 +135,6 @@
     return json;
   }
 
-  /**
-   * Récupère toutes les pages d'un point d'API paginé.
-   * @param {string} path Chemin de base (ex: '/suggestions')
-   * @param {number} limit Nombre d'éléments par page
-   */
-  async function apiPaginated(path, limit = 50) {
-    let offset = 0;
-    let all = [];
-    while (true) {
-      const page = await api(`${path}?limit=${limit}&offset=${offset}`);
-      all = all.concat(page);
-      if (!Array.isArray(page) || page.length < limit) break;
-      offset += limit;
-    }
-    return all;
-  }
 
   /**
    * Vérifie si un utilisateur est connecté en appelant `/api/me`.  Si c’est le
@@ -137,10 +145,6 @@
     try {
       const user = await api('/me');
       currentUser = user;
-      const userNameEl = document.getElementById('user-name');
-      if (userNameEl) userNameEl.textContent = currentUser.username;
-      const profileImg = document.querySelector('#profile-btn img');
-      if (profileImg) profileImg.src = currentUser?.avatarUrl || 'avatar.png';
       if (!user.needsGroup) {
         // Récupère les paramètres (notamment le mode sombre) pour appliquer le thème
         const settings = await api('/settings');
@@ -152,10 +156,6 @@
       }
     } catch (err) {
       currentUser = null;
-      const userNameEl = document.getElementById('user-name');
-      if (userNameEl) userNameEl.textContent = '';
-      const profileImg = document.querySelector('#profile-btn img');
-      if (profileImg) profileImg.src = 'avatar.png';
     }
   }
 
@@ -173,7 +173,7 @@
   /**
    * Applique le modèle visuel (template) choisi.  Le nom du template
    * correspond à une classe CSS ajoutée sur le <body>, par exemple
-   * ``template-classic`` ou ``template-groove``.  Cette classe
+   * ``template-classic``, ``template-groove`` ou ``template-violet``.  Cette classe
    * permet de définir des variables CSS spécifiques dans ``style.css``.
    * @param {string} templateName
    */
@@ -200,30 +200,33 @@
     const select = document.getElementById('group-select');
     const createBtn = document.getElementById('create-group-btn');
     const joinBtn = document.getElementById('join-group-btn');
-    if (!select) return;
     if (createBtn) createBtn.onclick = () => showCreateGroupDialog();
     if (joinBtn) joinBtn.onclick = () => showJoinGroupDialog();
     try {
       groupsCache = await api('/groups');
-      select.innerHTML = '';
-      groupsCache.forEach((g) => {
-        const opt = document.createElement('option');
-        opt.value = g.id;
-        opt.textContent = g.name;
-        select.appendChild(opt);
-      });
       let selected = forceId || localStorage.getItem('activeGroupId');
       if (!groupsCache.some((g) => String(g.id) === String(selected))) {
         selected = groupsCache[0] ? groupsCache[0].id : null;
       }
+      if (select) {
+        select.innerHTML = '';
+        groupsCache.forEach((g) => {
+          const opt = document.createElement('option');
+          opt.value = g.id;
+          opt.textContent = g.name;
+          select.appendChild(opt);
+        });
+        if (selected) {
+          select.value = selected;
+        }
+        select.onchange = async () => {
+          await changeGroup(select.value);
+          renderMain(document.getElementById('app'));
+        };
+      }
       if (selected) {
-        select.value = selected;
         await changeGroup(selected);
       }
-      select.onchange = async () => {
-        await changeGroup(select.value);
-        renderMain(document.getElementById('app'));
-      };
     } catch (err) {
       console.error(err);
     }
@@ -354,10 +357,6 @@
   function renderApp() {
     const app = document.getElementById('app');
     if (!currentUser) {
-      const userNameEl = document.getElementById('user-name');
-      if (userNameEl) userNameEl.textContent = '';
-      const profileImg = document.querySelector('#profile-btn img');
-      if (profileImg) profileImg.src = 'avatar.png';
       const groupNameEl = document.getElementById('group-name');
       if (groupNameEl) groupNameEl.textContent = '';
       resetCaches();
@@ -535,7 +534,7 @@
     container.className = 'home-container';
     app.appendChild(container);
 
-    let nextPerfText = 'Aucune prestation prévue';
+    let nextPerfInfo = 'Aucune prestation prévue';
     try {
       const list = await api('/performances');
       const now = new Date();
@@ -543,16 +542,16 @@
       upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
       if (upcoming.length > 0) {
         const p = upcoming[0];
-        nextPerfText = `Prochaine prestation : ${p.name} (${formatDateTime(p.date)})`;
+        nextPerfInfo = `${p.name} (${formatDateTime(p.date)})`;
       }
     } catch (err) {
-      nextPerfText = 'Impossible de récupérer les prestations';
+      nextPerfInfo = 'Impossible de récupérer les prestations';
     }
     const perfP = document.createElement('p');
-    perfP.textContent = nextPerfText;
+    perfP.innerHTML = `<strong>Prochaine prestation :</strong> ${nextPerfInfo}`;
     container.appendChild(perfP);
 
-    let nextRehearsalText = 'Prochaine répétition : —';
+    let nextRehearsalInfo = '—';
     try {
       const list = await api('/agenda');
       const rehearsals = list.filter((item) => item.type === 'rehearsal');
@@ -561,13 +560,13 @@
       upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
       if (upcoming.length > 0) {
         const r = upcoming[0];
-        nextRehearsalText = `Prochaine répétition : ${formatDateTime(r.date)}${r.location ? ' – ' + r.location : ''}`;
+        nextRehearsalInfo = `${formatDateTime(r.date)}${r.location ? ' – ' + r.location : ''}`;
       }
     } catch (err) {
       // ignore errors
     }
     const rehP = document.createElement('p');
-    rehP.textContent = nextRehearsalText;
+    rehP.innerHTML = `<strong>Prochaine répétition :</strong> ${nextRehearsalInfo}`;
     container.appendChild(rehP);
 
   }
@@ -580,14 +579,14 @@
    */
   function renderMain(app) {
     app.innerHTML = '';
-    const profileBtn = document.getElementById('profile-btn');
+    const hamburgerBtn = document.getElementById('hamburger');
     const profileMenu = document.getElementById('profile-menu');
     const perfBtn = document.getElementById('menu-performances');
     const settingsBtn = document.getElementById('menu-settings');
-    if (profileBtn && profileMenu) {
-      profileBtn.onclick = (e) => {
+    if (hamburgerBtn && profileMenu) {
+      hamburgerBtn.onclick = (e) => {
         e.stopPropagation();
-        profileMenu.classList.toggle('show');
+        toggleMenu();
       };
     }
     if (perfBtn) {
@@ -596,7 +595,7 @@
           currentPage = 'performances';
           renderMain(app);
         }
-        profileMenu?.classList.remove('show');
+        if (!profileMenu?.classList.contains('hidden')) toggleMenu();
       };
     }
     if (settingsBtn) {
@@ -605,7 +604,7 @@
           currentPage = 'settings';
           renderMain(app);
         }
-        profileMenu?.classList.remove('show');
+        if (!profileMenu?.classList.contains('hidden')) toggleMenu();
       };
     }
     const pageDiv = document.createElement('div');
@@ -662,7 +661,7 @@
     container.appendChild(header);
     let list = [];
     try {
-      list = await apiPaginated('/suggestions');
+      list = await api('/suggestions');
     } catch (err) {
       const p = document.createElement('p');
       p.style.color = 'var(--danger-color)';
@@ -670,10 +669,16 @@
       container.appendChild(p);
       return;
     }
+    if (list.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Aucune proposition pour l\u2019instant';
+      container.appendChild(empty);
+    }
     // Afficher la liste
     list.forEach((item) => {
       const card = document.createElement('div');
-      card.className = 'card collapsed';
+      card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-pink-50';
 
       const headerRow = document.createElement('div');
       headerRow.className = 'card-header';
@@ -733,6 +738,12 @@
         authP.textContent = 'Auteur : ' + item.author;
         details.appendChild(authP);
       }
+      if (item.versionOf) {
+        const verP = document.createElement('p');
+        verP.style.fontStyle = 'italic';
+        verP.textContent = 'Version de : ' + item.versionOf;
+        details.appendChild(verP);
+      }
       const yt = item.youtube || item.url;
       if (yt) {
         const link = document.createElement('a');
@@ -765,7 +776,7 @@
           e.stopPropagation();
           try {
             await api(`/suggestions/${item.id}/to-rehearsal`, 'POST');
-            rehearsalsCache = await apiPaginated('/rehearsals');
+            rehearsalsCache = await api('/rehearsals');
             renderSuggestions(container);
           } catch (err) {
             alert(err.message);
@@ -828,6 +839,12 @@
     const inputAuthor = document.createElement('input');
     inputAuthor.type = 'text';
     inputAuthor.style.width = '100%';
+    // Version de
+    const labelVersion = document.createElement('label');
+    labelVersion.textContent = 'Version de';
+    const inputVersion = document.createElement('input');
+    inputVersion.type = 'text';
+    inputVersion.style.width = '100%';
     // Lien YouTube
     const labelYt = document.createElement('label');
     labelYt.textContent = 'Lien YouTube';
@@ -838,6 +855,8 @@
     form.appendChild(inputTitle);
     form.appendChild(labelAuthor);
     form.appendChild(inputAuthor);
+    form.appendChild(labelVersion);
+    form.appendChild(inputVersion);
     form.appendChild(labelYt);
     form.appendChild(inputYt);
     content.appendChild(form);
@@ -859,10 +878,11 @@
       e.preventDefault();
       const title = inputTitle.value.trim();
       const author = inputAuthor.value.trim();
+      const versionOf = inputVersion.value.trim();
       const youtube = inputYt.value.trim();
       if (!title) return;
       try {
-        await api('/suggestions', 'POST', { title, author, youtube });
+        await api('/suggestions', 'POST', { title, author, youtube, versionOf });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
@@ -905,6 +925,12 @@
     inputAuthor.type = 'text';
     inputAuthor.style.width = '100%';
     inputAuthor.value = item.author || '';
+    const labelVersion = document.createElement('label');
+    labelVersion.textContent = 'Version de';
+    const inputVersion = document.createElement('input');
+    inputVersion.type = 'text';
+    inputVersion.style.width = '100%';
+    inputVersion.value = item.versionOf || '';
 
     const labelYt = document.createElement('label');
     labelYt.textContent = 'Lien YouTube';
@@ -916,6 +942,8 @@
     form.appendChild(inputTitle);
     form.appendChild(labelAuthor);
     form.appendChild(inputAuthor);
+    form.appendChild(labelVersion);
+    form.appendChild(inputVersion);
     form.appendChild(labelYt);
     form.appendChild(inputYt);
     content.appendChild(form);
@@ -936,12 +964,14 @@
       e.preventDefault();
       const titleVal = inputTitle.value.trim();
       const authorVal = inputAuthor.value.trim();
+      const versionVal = inputVersion.value.trim();
       const youtubeVal = inputYt.value.trim();
       if (!titleVal) return;
       try {
         await api(`/suggestions/${item.id}`, 'PUT', {
           title: titleVal,
           author: authorVal,
+          versionOf: versionVal,
           youtube: youtubeVal,
         });
         if (modal.parentNode) {
@@ -973,7 +1003,7 @@
     container.appendChild(header);
     let list = [];
     try {
-      list = await apiPaginated('/rehearsals');
+      list = await api('/rehearsals');
       // Mettez en cache pour d’autres pages (prestations)
       rehearsalsCache = list;
     } catch (err) {
@@ -983,9 +1013,16 @@
       container.appendChild(p);
       return;
     }
+    if (list.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Aucun morceau en répétition';
+      container.appendChild(empty);
+    }
+
     list.forEach((song) => {
       const card = document.createElement('div');
-      card.className = 'card collapsed';
+      card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-blue-50';
       // Niveau courant de l'utilisateur pour ce morceau
       const currentLevel =
         song.levels[currentUser.username] != null
@@ -1219,7 +1256,7 @@
             // Rafraîchir la liste des répétitions et des prestations
             renderRehearsals(container);
             // Mettre à jour le cache des répétitions
-            rehearsalsCache = await apiPaginated('/rehearsals');
+            rehearsalsCache = await api('/rehearsals');
           } catch (err) {
             alert(err.message);
           }
@@ -1277,6 +1314,12 @@
     const inputSp = document.createElement('input');
     inputSp.type = 'url';
     inputSp.style.width = '100%';
+    // Version de
+    const labelVersion = document.createElement('label');
+    labelVersion.textContent = 'Version de';
+    const inputVersion = document.createElement('input');
+    inputVersion.type = 'text';
+    inputVersion.style.width = '100%';
     form.appendChild(labelTitle);
     form.appendChild(inputTitle);
     form.appendChild(labelAuthor);
@@ -1285,6 +1328,8 @@
     form.appendChild(inputYt);
     form.appendChild(labelSp);
     form.appendChild(inputSp);
+    form.appendChild(labelVersion);
+    form.appendChild(inputVersion);
     content.appendChild(form);
     // Actions
     const actions = document.createElement('div');
@@ -1307,13 +1352,14 @@
       const author = inputAuthor.value.trim();
       const youtube = inputYt.value.trim();
       const spotify = inputSp.value.trim();
+      const versionOf = inputVersion.value.trim();
       try {
-        await api('/rehearsals', 'POST', { title, author, youtube, spotify });
+        await api('/rehearsals', 'POST', { title, author, youtube, spotify, versionOf });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
         try {
-          rehearsalsCache = await apiPaginated('/rehearsals');
+          rehearsalsCache = await api('/rehearsals');
         } catch (err) {
           // ignore
         }
@@ -1380,6 +1426,13 @@
     inputSp.type = 'url';
     inputSp.style.width = '100%';
     inputSp.value = song.spotify || '';
+    // Version de
+    const labelVersion = document.createElement('label');
+    labelVersion.textContent = 'Version de';
+    const inputVersion = document.createElement('input');
+    inputVersion.type = 'text';
+    inputVersion.style.width = '100%';
+    inputVersion.value = song.versionOf || '';
     form.appendChild(labelTitle);
     form.appendChild(inputTitle);
     form.appendChild(labelAuthor);
@@ -1388,6 +1441,8 @@
     form.appendChild(inputYt);
     form.appendChild(labelSp);
     form.appendChild(inputSp);
+    form.appendChild(labelVersion);
+    form.appendChild(inputVersion);
     content.appendChild(form);
     // Actions
     const actions = document.createElement('div');
@@ -1409,14 +1464,15 @@
       const authorVal = inputAuthor.value.trim();
       const ytVal = inputYt.value.trim();
       const spVal = inputSp.value.trim();
+      const versionVal = inputVersion.value.trim();
       if (!titleVal) return;
       try {
-        await api(`/rehearsals/${song.id}`, 'PUT', { title: titleVal, author: authorVal, youtube: ytVal, spotify: spVal });
+        await api(`/rehearsals/${song.id}`, 'PUT', { title: titleVal, author: authorVal, youtube: ytVal, spotify: spVal, versionOf: versionVal });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
         // Mettre à jour le cache
-        rehearsalsCache = await apiPaginated('/rehearsals');
+        rehearsalsCache = await api('/rehearsals');
         if (typeof afterSave === 'function') afterSave();
         else {
           // Actualiser la page des répétitions
@@ -1458,7 +1514,7 @@
     // Assurer d’avoir les répétitions en cache pour afficher les titres
     if (rehearsalsCache.length === 0) {
       try {
-        rehearsalsCache = await apiPaginated('/rehearsals');
+        rehearsalsCache = await api('/rehearsals');
       } catch (err) {
         // ignore
       }
@@ -1479,7 +1535,7 @@
       }
       arr.forEach((perf) => {
         const card = document.createElement('div');
-        card.className = 'card collapsed';
+        card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-green-50';
         const h3 = document.createElement('h3');
         h3.textContent = perf.name;
         h3.onclick = () => {
@@ -1665,7 +1721,7 @@
           if (ev.type === 'performance') {
             try {
               if (rehearsalsCache.length === 0) {
-                rehearsalsCache = await apiPaginated('/rehearsals');
+                rehearsalsCache = await api('/rehearsals');
               }
               const perfs = await api('/performances');
               const perf = perfs.find((p) => p.id === ev.id);
@@ -1689,7 +1745,7 @@
           if (isPerf) {
             try {
               if (rehearsalsCache.length === 0) {
-                rehearsalsCache = await apiPaginated('/rehearsals');
+                rehearsalsCache = await api('/rehearsals');
               }
             } catch (err) {
               // ignore cache errors
@@ -2221,24 +2277,35 @@
     const content = document.createElement('div');
     content.className = 'modal-content';
     const h3 = document.createElement('h3');
-    h3.textContent = song.title;
+    h3.style.fontWeight = 'normal';
+    h3.innerHTML = '<strong>Titre :</strong> ' + song.title;
     content.appendChild(h3);
-    // Afficher le titre et les métadonnées (auteur et liens)
+    // Afficher les métadonnées (auteur et liens)
     const metaDiv = document.createElement('div');
     if (song.author) {
       const pAuth = document.createElement('p');
       pAuth.style.fontStyle = 'italic';
-      pAuth.textContent = 'Auteur : ' + song.author;
+      pAuth.innerHTML = '<strong>Auteur :</strong> ' + song.author;
       metaDiv.appendChild(pAuth);
     }
+    if (song.versionOf) {
+      const pVer = document.createElement('p');
+      pVer.style.fontStyle = 'italic';
+      pVer.innerHTML = '<strong>Version de :</strong> ' + song.versionOf;
+      metaDiv.appendChild(pVer);
+    }
     if (song.youtube) {
+      const ytP = document.createElement('p');
+      const ytStrong = document.createElement('strong');
+      ytStrong.textContent = 'Lien Youtube : ';
+      ytP.appendChild(ytStrong);
       const ytA = document.createElement('a');
       ytA.href = song.youtube;
       ytA.target = '_blank';
       ytA.rel = 'noopener noreferrer';
       ytA.textContent = song.youtube;
-      ytA.style.display = 'block';
-      metaDiv.appendChild(ytA);
+      ytP.appendChild(ytA);
+      metaDiv.appendChild(ytP);
     }
     if (song.spotify) {
       const spA = document.createElement('a');
@@ -2439,7 +2506,7 @@
 
   function renderGroupSection(currentSettings) {
     const section = document.createElement('div');
-    section.className = 'settings-section';
+    section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const h3 = document.createElement('h3');
     h3.textContent = 'Groupes';
     section.appendChild(h3);
@@ -2459,26 +2526,26 @@
     joinBtn.textContent = 'Rejoindre';
     joinBtn.style.marginLeft = '8px';
     groupBtnRow.appendChild(joinBtn);
-    section.appendChild(groupBtnRow);
-    const labelName = document.createElement('label');
-    labelName.textContent = 'Nom du groupe';
-    const inputName = document.createElement('input');
-    inputName.type = 'text';
-    inputName.value = currentSettings.groupName;
-    inputName.style.width = '100%';
-    inputName.onchange = async () => {
-      currentSettings.groupName = inputName.value;
+    const renameBtn = document.createElement('button');
+    renameBtn.id = 'rename-group-btn';
+    renameBtn.className = 'btn-secondary';
+    renameBtn.textContent = 'Renommer';
+    renameBtn.style.marginLeft = '8px';
+    renameBtn.onclick = async () => {
+      const newName = prompt('Nouveau nom du groupe', currentSettings.groupName);
+      if (!newName || newName.trim() === '' || newName === currentSettings.groupName) return;
+      currentSettings.groupName = newName.trim();
       try {
         await api('/settings', 'PUT', currentSettings);
-        document.title = `${inputName.value} – BandTrack`;
+        document.title = `${currentSettings.groupName} – BandTrack`;
         const groupNameEl = document.getElementById('group-name');
-        if (groupNameEl) groupNameEl.textContent = inputName.value;
+        if (groupNameEl) groupNameEl.textContent = currentSettings.groupName;
       } catch (err) {
         alert(err.message);
       }
     };
-    section.appendChild(labelName);
-    section.appendChild(inputName);
+    groupBtnRow.appendChild(renameBtn);
+    section.appendChild(groupBtnRow);
     if (isAdmin()) {
       const inviteDiv = document.createElement('div');
       inviteDiv.style.marginTop = '8px';
@@ -2511,7 +2578,7 @@
 
   function renderThemeSection(currentSettings) {
     const section = document.createElement('div');
-    section.className = 'settings-section';
+    section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const h3 = document.createElement('h3');
     h3.textContent = 'Thème';
     section.appendChild(h3);
@@ -2543,6 +2610,7 @@
     const templateOptions = [
       { value: 'classic', label: 'Classique' },
       { value: 'groove', label: 'Groove' },
+      { value: 'violet', label: 'Violet' },
     ];
     templateOptions.forEach((opt) => {
       const optEl = document.createElement('option');
@@ -2569,7 +2637,7 @@
 
   async function renderAdminSection(container) {
     const section = document.createElement('div');
-    section.className = 'settings-section';
+    section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const h3 = document.createElement('h3');
     h3.textContent = 'Administration';
     section.appendChild(h3);
@@ -2749,6 +2817,11 @@
     const header = document.createElement('h2');
     header.textContent = 'Paramètres';
     container.appendChild(header);
+    if (currentUser) {
+      const info = document.createElement('p');
+      info.textContent = `Utilisateur connecté: ${currentUser.username}`;
+      container.appendChild(info);
+    }
     let settings;
     try {
       settings = await api('/settings');
@@ -2766,7 +2839,7 @@
     const themeSection = renderThemeSection(currentSettings);
     container.appendChild(themeSection);
     const logoutSection = document.createElement('div');
-    logoutSection.className = 'settings-section';
+    logoutSection.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const logoutBtn = document.createElement('button');
     logoutBtn.className = 'logout-btn';
     logoutBtn.textContent = 'Se déconnecter';

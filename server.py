@@ -126,6 +126,7 @@ def init_db():
                author TEXT,
                youtube TEXT,
                url TEXT,
+               version_of TEXT,
                likes INTEGER NOT NULL DEFAULT 0,
                creator_id INTEGER NOT NULL,
                group_id INTEGER NOT NULL,
@@ -154,6 +155,7 @@ def init_db():
                author TEXT,
                youtube TEXT,
                spotify TEXT,
+               version_of TEXT,
                levels_json TEXT DEFAULT '{}',
                notes_json TEXT DEFAULT '{}',
                audio_notes_json TEXT DEFAULT '{}',
@@ -293,6 +295,8 @@ def init_db():
             cur.execute('ALTER TABLE suggestions ADD COLUMN author TEXT')
         if 'youtube' not in s_columns:
             cur.execute('ALTER TABLE suggestions ADD COLUMN youtube TEXT')
+        if 'version_of' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN version_of TEXT')
         if 'likes' not in s_columns:
             cur.execute('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0')
         if 'group_id' not in s_columns:
@@ -321,6 +325,8 @@ def init_db():
             cur.execute("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
         if 'mastered' not in r_columns:
             cur.execute('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0')
+        if 'version_of' not in r_columns:
+            cur.execute('ALTER TABLE rehearsals ADD COLUMN version_of TEXT')
         if 'group_id' not in r_columns:
             cur.execute('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER')
             cur.execute(
@@ -673,7 +679,7 @@ def move_suggestion_to_rehearsal(sug_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        'SELECT title, author, youtube, url, creator_id, group_id FROM suggestions WHERE id = ?',
+        'SELECT title, author, youtube, url, version_of, creator_id, group_id FROM suggestions WHERE id = ?',
         (sug_id,)
     )
     row = cur.fetchone()
@@ -682,13 +688,13 @@ def move_suggestion_to_rehearsal(sug_id: int):
         return None
     yt = row['youtube'] or row['url']
     cur.execute(
-        'INSERT INTO rehearsals (title, author, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        (row['title'], row['author'], yt, None, json.dumps({}), json.dumps({}), json.dumps({}), 0, row['creator_id'], row['group_id']),
+        'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        (row['title'], row['author'], yt, None, row['version_of'], json.dumps({}), json.dumps({}), json.dumps({}), 0, row['creator_id'], row['group_id']),
     )
     new_id = cur.lastrowid
     cur.execute(
-        '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.audio_notes_json,
+        '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                   r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
                   u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
            WHERE r.id = ?''',
@@ -707,6 +713,7 @@ def move_suggestion_to_rehearsal(sug_id: int):
         'author': new_row['author'],
         'youtube': new_row['youtube'],
         'spotify': new_row['spotify'],
+        'versionOf': new_row['version_of'],
         'audioNotes': parse_audio_notes_json(new_row['audio_notes_json']),
         'levels': json.loads(new_row['levels_json'] or '{}'),
         'notes': json.loads(new_row['notes_json'] or '{}'),
@@ -721,7 +728,7 @@ def move_rehearsal_to_suggestion(reh_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        'SELECT title, author, youtube, creator_id, group_id FROM rehearsals WHERE id = ?',
+        'SELECT title, author, youtube, version_of, creator_id, group_id FROM rehearsals WHERE id = ?',
         (reh_id,),
     )
     row = cur.fetchone()
@@ -729,12 +736,12 @@ def move_rehearsal_to_suggestion(reh_id: int):
         conn.close()
         return None
     cur.execute(
-        'INSERT INTO suggestions (title, author, youtube, url, likes, creator_id, group_id) VALUES (?, ?, ?, ?, 0, ?, ?)',
-        (row['title'], row['author'], row['youtube'], row['youtube'], row['creator_id'], row['group_id']),
+        'INSERT INTO suggestions (title, author, youtube, url, version_of, likes, creator_id, group_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
+        (row['title'], row['author'], row['youtube'], row['youtube'], row['version_of'], row['creator_id'], row['group_id']),
     )
     new_id = cur.lastrowid
     cur.execute(
-        '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at,
+        '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
                   u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
            WHERE s.id = ?''',
         (new_id,),
@@ -750,6 +757,7 @@ def move_rehearsal_to_suggestion(reh_id: int):
         'title': new_row['title'],
         'author': new_row['author'],
         'youtube': new_row['youtube'] or new_row['url'],
+        'versionOf': new_row['version_of'],
         'creatorId': new_row['creator_id'],
         'creator': new_row['creator'],
         'createdAt': new_row['created_at'],
@@ -1603,7 +1611,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at, u.username AS creator
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at, u.username AS creator
                FROM suggestions s
                JOIN users u ON u.id = s.creator_id
                WHERE s.group_id = ?
@@ -1624,6 +1632,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'creator': r['creator'],
                 'createdAt': r['created_at'],
                 'likes': r['likes'],
+                'versionOf': r['version_of'],
             }
             result.append(entry)
         send_json(self, HTTPStatus.OK, result)
@@ -1632,6 +1641,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         title = (body.get('title') or '').strip()
         author = (body.get('author') or '').strip() or None
         youtube = (body.get('youtube') or body.get('url') or '').strip() or None
+        version_of = (body.get('versionOf') or '').strip() or None
         if not title:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
             return
@@ -1642,13 +1652,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            'INSERT INTO suggestions (title, author, youtube, url, group_id, creator_id) VALUES (?, ?, ?, ?, ?, ?)',
-            (title, author, youtube, youtube, user['group_id'], user['id'])
+            'INSERT INTO suggestions (title, author, youtube, url, version_of, group_id, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (title, author, youtube, youtube, version_of, user['group_id'], user['id'])
         )
         suggestion_id = cur.lastrowid
         # Retrieve the created row with creator username and timestamp
         cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes,
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes,
                      s.creator_id, s.created_at, u.username AS creator
                FROM suggestions s JOIN users u ON u.id = s.creator_id
                WHERE s.id = ? AND s.group_id = ?''',
@@ -1667,6 +1677,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'creator': row['creator'],
                 'createdAt': row['created_at'],
                 'likes': row['likes'],
+                'versionOf': row['version_of'],
             }
             send_json(self, HTTPStatus.CREATED, result)
         else:
@@ -1719,7 +1730,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.audio_notes_json, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
+            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
                FROM rehearsals r JOIN users u ON u.id = r.creator_id
                WHERE r.group_id = ?
                ORDER BY r.created_at ASC''',
@@ -1736,6 +1747,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'author': row['author'],
                 'youtube': row['youtube'],
                 'spotify': row['spotify'],
+                'versionOf': row['version_of'],
                 'audioNotes': audio_notes,
                 'levels': levels,
                 'notes': notes,
@@ -1752,6 +1764,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         author = (body.get('author') or '').strip() or None
         youtube = (body.get('youtube') or '').strip() or None
         spotify = (body.get('spotify') or '').strip() or None
+        version_of = (body.get('versionOf') or '').strip() or None
         if not title:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
             return
@@ -1762,13 +1775,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            'INSERT INTO rehearsals (title, author, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (title, author, youtube, spotify, json.dumps({}), json.dumps({}), json.dumps({}), 0, user['id'], user['group_id'])
+            'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (title, author, youtube, spotify, version_of, json.dumps({}), json.dumps({}), json.dumps({}), 0, user['id'], user['group_id'])
         )
         rehearsal_id = cur.lastrowid
         conn.commit()
         conn.close()
-        send_json(self, HTTPStatus.CREATED, {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify, 'mastered': False})
+        send_json(self, HTTPStatus.CREATED, {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify, 'mastered': False, 'versionOf': version_of})
 
     def api_update_rehearsal(self, body: dict, user: dict):
         """Backward‑compatible endpoint for updating a rehearsal.  The
@@ -1941,7 +1954,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         likes = cur.fetchone()[0]
         cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
         cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at,
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
                       u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
                WHERE s.id = ? AND s.group_id = ?''',
             (sug_id, user['group_id'])
@@ -1959,6 +1972,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'creator': row['creator'],
                 'createdAt': row['created_at'],
                 'likes': row['likes'],
+                'versionOf': row['version_of'],
             }
             log_event(user['id'], 'vote', {'suggestionId': sug_id})
             send_json(self, HTTPStatus.OK, result)
@@ -1984,7 +1998,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         likes = cur.fetchone()[0]
         cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
         cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.likes, s.creator_id, s.created_at,
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
                       u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
                WHERE s.id = ? AND s.group_id = ?''',
             (sug_id, user['group_id'])
@@ -2002,6 +2016,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'creator': row['creator'],
                 'createdAt': row['created_at'],
                 'likes': row['likes'],
+                'versionOf': row['version_of'],
             }
             log_event(user['id'], 'unvote', {'suggestionId': sug_id})
             send_json(self, HTTPStatus.OK, result)
@@ -2013,6 +2028,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         title = (body.get('title') or '').strip()
         author = (body.get('author') or '').strip() or None
         youtube = (body.get('youtube') or body.get('url') or '').strip() or None
+        version_of = (body.get('versionOf') or '').strip() or None
         if not title:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Title is required'})
             return
@@ -2024,13 +2040,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         cur = conn.cursor()
         if role in ('admin', 'moderator'):
             cur.execute(
-                'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ? WHERE id = ? AND group_id = ?',
-                (title, author, youtube, youtube, sug_id, user['group_id']),
+                'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ?, version_of = ? WHERE id = ? AND group_id = ?',
+                (title, author, youtube, youtube, version_of, sug_id, user['group_id']),
             )
         else:
             cur.execute(
-                'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
-                (title, author, youtube, youtube, sug_id, user['id'], user['group_id']),
+                'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ?, version_of = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
+                (title, author, youtube, youtube, version_of, sug_id, user['id'], user['group_id']),
             )
         updated = cur.rowcount
         if updated:
@@ -2071,6 +2087,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         author = body.get('author')
         youtube = body.get('youtube')
         spotify = body.get('spotify')
+        version_of = body.get('versionOf')
         level = body.get('level')
         note = body.get('note')
         audio_b64 = body.get('audio')
@@ -2084,6 +2101,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 author,
                 youtube,
                 spotify,
+                version_of,
                 level,
                 note,
                 audio_b64,
@@ -2096,7 +2114,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         cur = conn.cursor()
         # Fetch current rehearsal record including author and audio notes JSON
         cur.execute(
-            'SELECT title, author, youtube, spotify, levels_json, notes_json, audio_notes_json, mastered, creator_id '
+            'SELECT title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id '
             'FROM rehearsals WHERE id = ? AND group_id = ?',
             (rehearsal_id, user['group_id'])
         )
@@ -2108,7 +2126,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # Prepare modifications
         updated_metadata = False
         # Check if we need to update metadata
-        if any(v is not None for v in (title, author, youtube, spotify)):
+        if any(v is not None for v in (title, author, youtube, spotify, version_of)):
             # Only creator, moderator or admin can modify metadata
             if not (role in ('admin', 'moderator') or user['id'] == row['creator_id']):
                 conn.close()
@@ -2122,10 +2140,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             new_youtube = new_youtube or None
             new_spotify = (spotify or '').strip() if spotify is not None else row['spotify']
             new_spotify = new_spotify or None
+            new_version = (version_of or '').strip() if version_of is not None else row['version_of']
+            new_version = new_version or None
             # Update the row
             cur.execute(
-                'UPDATE rehearsals SET title = ?, author = ?, youtube = ?, spotify = ? WHERE id = ? AND group_id = ?',
-                (new_title, new_author, new_youtube, new_spotify, rehearsal_id, user['group_id'])
+                'UPDATE rehearsals SET title = ?, author = ?, youtube = ?, spotify = ?, version_of = ? WHERE id = ? AND group_id = ?',
+                (new_title, new_author, new_youtube, new_spotify, new_version, rehearsal_id, user['group_id'])
             )
             updated_metadata = cur.rowcount > 0
         # Update level/note/audio if provided
@@ -2202,7 +2222,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         cur.execute('UPDATE rehearsals SET mastered = ? WHERE id = ? AND group_id = ?', (new_val, rehearsal_id, user['group_id']))
         conn.commit()
         cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.audio_notes_json,
+            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                       r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
                       u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
                WHERE r.id = ? AND r.group_id = ?''',
@@ -2223,6 +2243,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     'author': updated['author'],
                     'youtube': updated['youtube'],
                     'spotify': updated['spotify'],
+                    'versionOf': updated['version_of'],
                     'audioNotes': audio_notes,
                     'levels': levels,
                     'notes': notes,
