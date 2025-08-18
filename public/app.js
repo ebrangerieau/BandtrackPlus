@@ -173,7 +173,7 @@
   /**
    * Applique le modèle visuel (template) choisi.  Le nom du template
    * correspond à une classe CSS ajoutée sur le <body>, par exemple
-   * ``template-classic`` ou ``template-groove``.  Cette classe
+   * ``template-classic``, ``template-groove`` ou ``template-violet``.  Cette classe
    * permet de définir des variables CSS spécifiques dans ``style.css``.
    * @param {string} templateName
    */
@@ -2610,6 +2610,7 @@
     const templateOptions = [
       { value: 'classic', label: 'Classique' },
       { value: 'groove', label: 'Groove' },
+      { value: 'violet', label: 'Violet' },
     ];
     templateOptions.forEach((opt) => {
       const optEl = document.createElement('option');
