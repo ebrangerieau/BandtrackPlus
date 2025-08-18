@@ -659,6 +659,7 @@
     container.innerHTML = '';
     const header = document.createElement('h2');
     header.textContent = 'Morceaux suggérés';
+    header.className = 'section-title';
     container.appendChild(header);
     let list = [];
     try {
@@ -1001,6 +1002,7 @@
     container.innerHTML = '';
     const header = document.createElement('h2');
     header.textContent = 'Morceaux en cours de travail';
+    header.className = 'section-title';
     container.appendChild(header);
     let list = [];
     try {
@@ -1614,6 +1616,7 @@
 
     const header = document.createElement('h2');
     header.textContent = 'Agenda';
+    header.className = 'section-title';
     container.appendChild(header);
 
     // Navigation mois précédent / suivant
