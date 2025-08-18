@@ -1732,8 +1732,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         cur.execute(
             '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
                FROM rehearsals r JOIN users u ON u.id = r.creator_id
-               WHERE r.group_id = ?
-               ORDER BY r.created_at ASC''',
+               WHERE r.group_id = ?''',
             (user['group_id'],)
         )
         rows = []
@@ -1741,6 +1740,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             levels = json.loads(row['levels_json'] or '{}')
             notes = json.loads(row['notes_json'] or '{}')
             audio_notes = parse_audio_notes_json(row['audio_notes_json'])
+            avg = (
+                sum(float(v) for v in levels.values()) / len(levels)
+                if levels
+                else 0.0
+            )
             rows.append({
                 'id': row['id'],
                 'title': row['title'],
@@ -1755,7 +1759,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'creatorId': row['creator_id'],
                 'creator': row['creator'],
                 'createdAt': row['created_at'],
+                'avgLevel': avg,
             })
+        rows.sort(key=lambda r: r['avgLevel'], reverse=True)
         conn.close()
         send_json(self, HTTPStatus.OK, rows)
 
