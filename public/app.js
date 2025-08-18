@@ -1919,11 +1919,12 @@
       leftWrap.appendChild(titleSpan);
       const levelSpan = document.createElement('span');
       levelSpan.className = 'level-badge';
-      const lvl =
-        song.levels && song.levels[currentUser.username] != null
-          ? song.levels[currentUser.username]
+      const levels = Object.values(song.levels || {}).map(Number);
+      const avg =
+        levels.length > 0
+          ? levels.reduce((sum, val) => sum + val, 0) / levels.length
           : 0;
-      levelSpan.textContent = lvl;
+      levelSpan.textContent = avg.toFixed(1);
       row.appendChild(leftWrap);
       row.appendChild(levelSpan);
       listDiv.appendChild(row);
@@ -2144,11 +2145,12 @@
       leftWrap.appendChild(titleSpan);
       const levelSpan = document.createElement('span');
       levelSpan.className = 'level-badge';
-      const lvl =
-        song.levels && song.levels[currentUser.username] != null
-          ? song.levels[currentUser.username]
+      const levels = Object.values(song.levels || {}).map(Number);
+      const avg =
+        levels.length > 0
+          ? levels.reduce((sum, val) => sum + val, 0) / levels.length
           : 0;
-      levelSpan.textContent = lvl;
+      levelSpan.textContent = avg.toFixed(1);
       row.appendChild(leftWrap);
       row.appendChild(levelSpan);
       listDiv.appendChild(row);
