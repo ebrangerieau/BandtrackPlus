@@ -110,7 +110,7 @@ def test_suggestions_crud(tmp_path):
         cookie = extract_cookie(headers)
         headers = {"Cookie": cookie}
 
-        status, _, body = request("POST", port, "/api/1/suggestions", {"title": "Song"}, headers)
+        status, _, body = request("POST", port, "/api/1/suggestions", {"title": "Song", "versionOf": "Orig"}, headers)
         assert status == 201
         sug_id = json.loads(body)["id"]
 
@@ -118,11 +118,14 @@ def test_suggestions_crud(tmp_path):
         assert status == 200
         suggestions = json.loads(body)
         assert len(suggestions) == 1
+        assert suggestions[0]["versionOf"] == "Orig"
 
-        status, _, _ = request("PUT", port, f"/api/1/suggestions/{sug_id}", {"title": "Song2"}, headers)
+        status, _, _ = request("PUT", port, f"/api/1/suggestions/{sug_id}", {"title": "Song2", "versionOf": "New"}, headers)
         assert status == 200
         status, _, body = request("GET", port, "/api/1/suggestions", headers=headers)
-        assert json.loads(body)[0]["title"] == "Song2"
+        data = json.loads(body)
+        assert data[0]["title"] == "Song2"
+        assert data[0]["versionOf"] == "New"
 
         status, _, _ = request("DELETE", port, f"/api/1/suggestions/{sug_id}", headers=headers)
         assert status == 200
@@ -140,16 +143,21 @@ def test_rehearsals_crud(tmp_path):
         cookie = extract_cookie(headers)
         headers = {"Cookie": cookie}
 
-        status, _, body = request("POST", port, "/api/1/rehearsals", {"title": "R1"}, headers)
+        status, _, body = request("POST", port, "/api/1/rehearsals", {"title": "R1", "versionOf": "Orig"}, headers)
         assert status == 201
         reh_id = json.loads(body)["id"]
 
         status, _, _ = request("PUT", port, f"/api/1/rehearsals/{reh_id}", {"level": 5, "note": "ok"}, headers)
         assert status == 200
 
+        status, _, _ = request("PUT", port, f"/api/1/rehearsals/{reh_id}", {"versionOf": "New"}, headers)
+        assert status == 200
+
         status, _, body = request("PUT", port, f"/api/1/rehearsals/{reh_id}/mastered", headers=headers)
         assert status == 200
         assert json.loads(body)["mastered"] is True
+        status, _, body = request("GET", port, "/api/1/rehearsals", headers=headers)
+        assert json.loads(body)[0]["versionOf"] == "New"
 
         status, _, _ = request("DELETE", port, f"/api/1/rehearsals/{reh_id}", headers=headers)
         assert status == 200
