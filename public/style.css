@@ -42,30 +42,30 @@ body.template-classic {
   /* Pas de redéfinition nécessaire pour l’instant */
 }
 
-/* Template groove (mode clair) */
+/* Template groove (mode clair) – pastel contrasté, légèrement plus foncé que le classique */
 body.template-groove {
-  --bg-color: #022b43;
-  --text-color: #e0f7fa;
-  --primary-color: #00b894;
-  --card-bg: #03324a;
-  --border-color: #01496c;
-  --nav-bg: #021f33;
-  --nav-border: #01496c;
-  --danger-color: #e74c3c;
-  --success-color: #2ecc71;
+  --bg-color: #e6eff5;
+  --text-color: #1f2d3d;
+  --primary-color: #4ea3a5;
+  --card-bg: #ffffff;
+  --border-color: #b0c4cc;
+  --nav-bg: #d2e4ee;
+  --nav-border: #a5c0cb;
+  --danger-color: #e57373;
+  --success-color: #81c784;
 }
 
-/* Template groove en mode sombre – renforce les contrastes */
+/* Template groove en mode sombre – palette pastel assombrie */
 body.template-groove.dark {
-  --bg-color: #011a2b;
-  --text-color: #cce7f0;
-  --primary-color: #00b894;
-  --card-bg: #02253b;
-  --border-color: #013a59;
-  --nav-bg: #011e31;
-  --nav-border: #013a59;
-  --danger-color: #e74c3c;
-  --success-color: #2ecc71;
+  --bg-color: #2d3e4d;
+  --text-color: #e8f0f5;
+  --primary-color: #4ea3a5;
+  --card-bg: #364d5a;
+  --border-color: #426174;
+  --nav-bg: #2a3c49;
+  --nav-border: #426174;
+  --danger-color: #ef9a9a;
+  --success-color: #a5d6a7;
 }
 
 /* Réinitialisation de base */
