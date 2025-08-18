@@ -188,6 +188,16 @@
     body.classList.add('template-' + templateName);
   }
 
+  async function handleLogout() {
+    try {
+      await api('/logout', 'POST');
+      currentUser = null;
+      renderApp();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   async function changeGroup(id) {
     await api('/context', 'PUT', { groupId: Number(id) });
     localStorage.setItem('activeGroupId', String(id));
@@ -584,6 +594,7 @@
     const profileMenu = document.getElementById('profile-menu');
     const perfBtn = document.getElementById('menu-performances');
     const settingsBtn = document.getElementById('menu-settings');
+    const logoutMenuBtn = document.getElementById('menu-logout');
     if (hamburgerBtn && profileMenu) {
       hamburgerBtn.onclick = (e) => {
         e.stopPropagation();
@@ -606,6 +617,12 @@
           renderMain(app);
         }
         if (!profileMenu?.classList.contains('hidden')) toggleMenu();
+      };
+    }
+    if (logoutMenuBtn) {
+      logoutMenuBtn.onclick = async () => {
+        if (!profileMenu?.classList.contains('hidden')) toggleMenu();
+        await handleLogout();
       };
     }
     const pageDiv = document.createElement('div');
@@ -2848,15 +2865,7 @@
     const logoutBtn = document.createElement('button');
     logoutBtn.className = 'logout-btn';
     logoutBtn.textContent = 'Se déconnecter';
-    logoutBtn.onclick = async () => {
-      try {
-        await api('/logout', 'POST');
-        currentUser = null;
-        renderApp();
-      } catch (err) {
-        alert(err.message);
-      }
-    };
+    logoutBtn.onclick = handleLogout;
     logoutSection.appendChild(logoutBtn);
     container.appendChild(logoutSection);
     if (isAdmin()) {
