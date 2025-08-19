@@ -106,7 +106,9 @@ def init_db():
                username TEXT NOT NULL UNIQUE,
                salt BLOB NOT NULL,
                password_hash BLOB NOT NULL,
-               role TEXT NOT NULL DEFAULT 'user'
+               role TEXT NOT NULL DEFAULT 'user',
+               last_group_id INTEGER,
+               FOREIGN KEY (last_group_id) REFERENCES groups(id)
            );'''
     )
     # WebAuthn credentials associated with users
@@ -273,7 +275,7 @@ def init_db():
 
     # Ensure additional columns are present in existing databases.  SQLite
     # will raise an OperationalError if a column already exists; we
-    # silently ignore such errors.  Users table: role
+    # silently ignore such errors.  Users table: role and last_group_id
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -281,7 +283,9 @@ def init_db():
         columns = [row['name'] for row in cur.fetchall()]
         if 'role' not in columns:
             cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
-            conn.commit()
+        if 'last_group_id' not in columns:
+            cur.execute('ALTER TABLE users ADD COLUMN last_group_id INTEGER')
+        conn.commit()
         conn.close()
     except Exception:
         pass
@@ -592,7 +596,7 @@ def get_user_by_webauthn_credential(credential_id: str) -> dict | None:
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        'SELECT u.id, u.username, u.role FROM users_webauthn w JOIN users u ON u.id = w.user_id WHERE w.credential_id = ?',
+        'SELECT u.id, u.username, u.role, u.last_group_id FROM users_webauthn w JOIN users u ON u.id = w.user_id WHERE w.credential_id = ?',
         (credential_id,),
     )
     row = cur.fetchone()
@@ -1282,8 +1286,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         role = 'admin' if count == 0 else 'user'
         salt, pwd_hash = hash_password(password)
         cur.execute(
-            'INSERT INTO users (username, salt, password_hash, role) VALUES (?, ?, ?, ?)',
-            (username, salt, pwd_hash, role)
+            'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
+            (username, salt, pwd_hash, role, 1)
         )
         user_id = cur.lastrowid
         # Add the new user to the default group (id 1)
@@ -1314,7 +1318,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         # Perform a case‑insensitive lookup for the username
-        cur.execute('SELECT id, username, salt, password_hash, role FROM users WHERE LOWER(username) = LOWER(?)', (username,))
+        cur.execute(
+            'SELECT id, username, salt, password_hash, role, last_group_id FROM users WHERE LOWER(username) = LOWER(?)',
+            (username,),
+        )
         row = cur.fetchone()
         conn.close()
         if not row:
@@ -1325,18 +1332,27 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not verify_password(password, salt, pwd_hash):
             send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
             return
-        # Generate session; row['id'] holds the user's ID.  The row also
-        # contains the canonical username from the database, which may
-        # differ in case from the input.  We return this canonical
-        # username in the response so the client uses a consistent
-        # representation.
-        # Determine the first group this user belongs to
+        # Determine the active group using the user's last choice if still valid
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1', (row['id'],))
-        g_row = cur.fetchone()
+        group_id = row['last_group_id']
+        if group_id is not None:
+            cur.execute(
+                'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
+                (row['id'], group_id),
+            )
+            if not cur.fetchone():
+                group_id = None
+        if group_id is None:
+            cur.execute(
+                'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
+                (row['id'],),
+            )
+            g_row = cur.fetchone()
+            group_id = g_row['group_id'] if g_row else None
+        cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, row['id']))
+        conn.commit()
         conn.close()
-        group_id = g_row['group_id'] if g_row else None
         if group_id is None:
             token = generate_session(row['id'], None)
             expires_ts = int(time.time()) + 7 * 24 * 3600
@@ -1440,10 +1456,24 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1', (user_row['id'],))
-        g_row = cur.fetchone()
+        group_id = user_row.get('last_group_id')
+        if group_id is not None:
+            cur.execute(
+                'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
+                (user_row['id'], group_id),
+            )
+            if not cur.fetchone():
+                group_id = None
+        if group_id is None:
+            cur.execute(
+                'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
+                (user_row['id'],),
+            )
+            g_row = cur.fetchone()
+            group_id = g_row['group_id'] if g_row else None
+        cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user_row['id']))
+        conn.commit()
         conn.close()
-        group_id = g_row['group_id'] if g_row else None
         token = generate_session(user_row['id'], group_id)
         expires_ts = int(time.time()) + 7 * 24 * 3600
         membership = get_membership(user_row['id'], group_id) if group_id else None
@@ -1495,6 +1525,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No membership'})
             return
         cur.execute('UPDATE sessions SET group_id = ? WHERE token = ?', (group_id, session_token))
+        cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user['id']))
         cur.execute('SELECT id, name FROM groups WHERE id = ?', (group_id,))
         row = cur.fetchone()
         conn.commit()
