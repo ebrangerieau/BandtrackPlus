@@ -671,3 +671,10 @@ textarea {
 .calendar-event.rehearsal {
   background: #6cf;
 }
+
+.user-info {
+  font-weight: bold;
+  text-align: center;
+  margin-top: 8px;
+  color: var(--primary-color);
+}

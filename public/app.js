@@ -2859,6 +2859,7 @@
     container.appendChild(header);
     if (currentUser) {
       const info = document.createElement('p');
+      info.className = 'user-info';
       info.textContent = `Utilisateur connecté: ${currentUser.username}`;
       container.appendChild(info);
     }
