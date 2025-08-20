@@ -167,6 +167,38 @@ def test_rehearsals_crud(tmp_path):
         stop_test_server(httpd, thread)
 
 
+def test_rehearsals_sorted_by_average(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        request("POST", port, "/api/register", {"username": "u1", "password": "pw"})
+        status, headers, _ = request(
+            "POST", port, "/api/login", {"username": "u1", "password": "pw"}
+        )
+        cookie = extract_cookie(headers)
+        headers = {"Cookie": cookie}
+
+        # Create three songs and assign different levels
+        ids = []
+        for title in ["A", "B", "C"]:
+            status, _, body = request(
+                "POST", port, "/api/1/rehearsals", {"title": title}, headers
+            )
+            assert status == 201
+            ids.append(json.loads(body)["id"])
+
+        for rid, level in zip(ids, [3, 7, 5]):
+            status, _, _ = request(
+                "PUT", port, f"/api/1/rehearsals/{rid}", {"level": level}, headers
+            )
+            assert status == 200
+
+        status, _, body = request("GET", port, "/api/1/rehearsals", headers=headers)
+        titles = [s["title"] for s in json.loads(body)]
+        assert titles == ["B", "C", "A"]
+    finally:
+        stop_test_server(httpd, thread)
+
+
 def test_roles_and_permissions(tmp_path):
     httpd, thread, port = start_test_server(tmp_path / "test.db")
     try:
