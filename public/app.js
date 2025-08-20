@@ -135,6 +135,15 @@
     return json;
   }
 
+  async function syncRehearsalsCache() {
+    rehearsalsCache = await api('/rehearsals');
+  }
+
+  setInterval(() => {
+    if (currentUser) {
+      syncRehearsalsCache().catch(() => {});
+    }
+  }, 5 * 60 * 1000);
 
   /**
    * Vérifie si un utilisateur est connecté en appelant `/api/me`.  Si c’est le
@@ -588,7 +597,7 @@
    * correspondant à la page sélectionnée.
    * @param {HTMLElement} app
    */
-  function renderMain(app) {
+  async function renderMain(app) {
     app.innerHTML = '';
     const hamburgerBtn = document.getElementById('hamburger');
     const profileMenu = document.getElementById('profile-menu');
@@ -656,10 +665,25 @@
     } else if (currentPage === 'suggestions') {
       renderSuggestions(pageDiv);
     } else if (currentPage === 'rehearsals') {
+      try {
+        await syncRehearsalsCache();
+      } catch (err) {
+        // ignore
+      }
       renderRehearsals(pageDiv);
     } else if (currentPage === 'performances') {
+      try {
+        await syncRehearsalsCache();
+      } catch (err) {
+        // ignore
+      }
       renderPerformances(pageDiv);
     } else if (currentPage === 'agenda') {
+      try {
+        await syncRehearsalsCache();
+      } catch (err) {
+        // ignore
+      }
       renderAgenda(pageDiv);
     } else if (currentPage === 'settings') {
       renderSettings(pageDiv);
@@ -794,8 +818,8 @@
         toRehBtn.onclick = async (e) => {
           e.stopPropagation();
           try {
-            await api(`/suggestions/${item.id}/to-rehearsal`, 'POST');
-            rehearsalsCache = await api('/rehearsals');
+            const newReh = await api(`/suggestions/${item.id}/to-rehearsal`, 'POST');
+            rehearsalsCache.push(newReh);
             renderSuggestions(container);
           } catch (err) {
             alert(err.message);
@@ -1021,17 +1045,18 @@
     header.textContent = 'Morceaux en cours de travail';
     header.className = 'section-title';
     container.appendChild(header);
-    let list = [];
-    try {
-      list = await api('/rehearsals');
-      // Mettez en cache pour d’autres pages (prestations)
-      rehearsalsCache = list;
-    } catch (err) {
-      const p = document.createElement('p');
-      p.style.color = 'var(--danger-color)';
-      p.textContent = 'Impossible de récupérer les répétitions';
-      container.appendChild(p);
-      return;
+    let list = rehearsalsCache;
+    if (list.length === 0) {
+      try {
+        await syncRehearsalsCache();
+        list = rehearsalsCache;
+      } catch (err) {
+        const p = document.createElement('p');
+        p.style.color = 'var(--danger-color)';
+        p.textContent = 'Impossible de récupérer les répétitions';
+        container.appendChild(p);
+        return;
+      }
     }
     if (list.length === 0) {
       const empty = document.createElement('p');
@@ -1273,10 +1298,8 @@
           if (!confirm('Supprimer ce morceau ?')) return;
           try {
             await api(`/rehearsals/${song.id}`, 'DELETE');
-            // Rafraîchir la liste des répétitions et des prestations
+            rehearsalsCache = rehearsalsCache.filter((r) => r.id !== song.id);
             renderRehearsals(container);
-            // Mettre à jour le cache des répétitions
-            rehearsalsCache = await api('/rehearsals');
           } catch (err) {
             alert(err.message);
           }
@@ -1374,15 +1397,17 @@
       const spotify = inputSp.value.trim();
       const versionOf = inputVersion.value.trim();
       try {
-        await api('/rehearsals', 'POST', { title, author, youtube, spotify, versionOf });
+        const newSong = await api('/rehearsals', 'POST', {
+          title,
+          author,
+          youtube,
+          spotify,
+          versionOf,
+        });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
-        try {
-          rehearsalsCache = await api('/rehearsals');
-        } catch (err) {
-          // ignore
-        }
+        rehearsalsCache.push(newSong);
         if (typeof afterSave === 'function') afterSave();
         else renderRehearsals(container);
       } catch (err) {
@@ -1487,12 +1512,27 @@
       const versionVal = inputVersion.value.trim();
       if (!titleVal) return;
       try {
-        await api(`/rehearsals/${song.id}`, 'PUT', { title: titleVal, author: authorVal, youtube: ytVal, spotify: spVal, versionOf: versionVal });
+        await api(`/rehearsals/${song.id}`, 'PUT', {
+          title: titleVal,
+          author: authorVal,
+          youtube: ytVal,
+          spotify: spVal,
+          versionOf: versionVal,
+        });
         if (modal.parentNode) {
           modal.parentNode.removeChild(modal); // or use modal.remove();
         }
-        // Mettre à jour le cache
-        rehearsalsCache = await api('/rehearsals');
+        const idx = rehearsalsCache.findIndex((r) => r.id === song.id);
+        if (idx !== -1) {
+          rehearsalsCache[idx] = {
+            ...rehearsalsCache[idx],
+            title: titleVal,
+            author: authorVal || null,
+            youtube: ytVal || null,
+            spotify: spVal || null,
+            versionOf: versionVal || null,
+          };
+        }
         if (typeof afterSave === 'function') afterSave();
         else {
           // Actualiser la page des répétitions
@@ -1535,7 +1575,7 @@
     // Assurer d’avoir les répétitions en cache pour afficher les titres
     if (rehearsalsCache.length === 0) {
       try {
-        rehearsalsCache = await api('/rehearsals');
+        await syncRehearsalsCache();
       } catch (err) {
         // ignore
       }
@@ -1743,7 +1783,7 @@
           if (ev.type === 'performance') {
             try {
               if (rehearsalsCache.length === 0) {
-                rehearsalsCache = await api('/rehearsals');
+                await syncRehearsalsCache();
               }
               const perfs = await api('/performances');
               const perf = perfs.find((p) => p.id === ev.id);
@@ -1767,7 +1807,7 @@
           if (isPerf) {
             try {
               if (rehearsalsCache.length === 0) {
-                rehearsalsCache = await api('/rehearsals');
+                await syncRehearsalsCache();
               }
             } catch (err) {
               // ignore cache errors
@@ -1864,7 +1904,7 @@
   async function showAddPerformanceModal(container, afterSave, initialDate) {
     // Refresh song list to ensure up-to-date averages
     try {
-      rehearsalsCache = await api('/rehearsals');
+      await syncRehearsalsCache();
     } catch (err) {
       alert(err.message);
       return;
@@ -2092,7 +2132,7 @@
   async function showEditPerformanceModal(perf, container, afterSave) {
     // Refresh song list to ensure up-to-date averages
     try {
-      rehearsalsCache = await api('/rehearsals');
+      await syncRehearsalsCache();
     } catch (err) {
       alert(err.message);
       return;
