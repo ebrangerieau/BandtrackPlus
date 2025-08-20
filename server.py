@@ -70,6 +70,7 @@ import hashlib
 import hmac
 import time
 import datetime
+import gzip
 import urllib.parse
 import mimetypes
 from http import HTTPStatus
@@ -631,8 +632,10 @@ def send_json(handler: BaseHTTPRequestHandler, status: int, data: dict, *, cooki
     ``(name, value, options)`` where options is a dict of cookie
     attributes (expires, path, samesite, httponly, etc.)."""
     payload = json.dumps(data).encode('utf-8')
+    payload = gzip.compress(payload)
     handler.send_response(status)
     handler.send_header('Content-Type', 'application/json; charset=utf-8')
+    handler.send_header('Content-Encoding', 'gzip')
     handler.send_header('Content-Length', str(len(payload)))
     if cookies:
         for (name, value, opts) in cookies:
