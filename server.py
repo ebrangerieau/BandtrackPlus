@@ -632,10 +632,14 @@ def send_json(handler: BaseHTTPRequestHandler, status: int, data: dict, *, cooki
     ``(name, value, options)`` where options is a dict of cookie
     attributes (expires, path, samesite, httponly, etc.)."""
     payload = json.dumps(data).encode('utf-8')
-    payload = gzip.compress(payload)
+    accepts = handler.headers.get('Accept-Encoding', '')
+    use_gzip = 'gzip' in accepts
+    if use_gzip:
+        payload = gzip.compress(payload)
     handler.send_response(status)
     handler.send_header('Content-Type', 'application/json; charset=utf-8')
-    handler.send_header('Content-Encoding', 'gzip')
+    if use_gzip:
+        handler.send_header('Content-Encoding', 'gzip')
     handler.send_header('Content-Length', str(len(payload)))
     if cookies:
         for (name, value, opts) in cookies:
@@ -1067,6 +1071,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if user is None:
                     raise PermissionError
                 return self.api_webauthn_register(body, user)
+            if path == '/api/password' and method == 'PUT':
+                if user is None:
+                    raise PermissionError
+                return self.api_update_password(body, user)
 
             # Remaining routes require authentication and an active group
             if user is None or user.get('group_id') is None:
@@ -1495,6 +1503,31 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             {'message': 'Logged in', 'user': payload},
             cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})],
         )
+
+    def api_update_password(self, body: dict, user: dict):
+        old_password = body.get('oldPassword') or ''
+        new_password = body.get('newPassword') or ''
+        if not old_password or not new_password:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'oldPassword and newPassword are required'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT salt, password_hash FROM users WHERE id = ?', (user['id'],))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'User not found'})
+            return
+        if not verify_password(old_password, row['salt'], row['password_hash']):
+            conn.close()
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid current password'})
+            return
+        new_salt, new_hash = hash_password(new_password)
+        cur.execute('UPDATE users SET salt = ?, password_hash = ? WHERE id = ?', (new_salt, new_hash, user['id']))
+        conn.commit()
+        conn.close()
+        log_event(user['id'], 'password_change', {})
+        send_json(self, HTTPStatus.OK, {'message': 'Password updated'})
 
     def api_get_context(self, user: dict):
         """Return the currently active group for the session."""
