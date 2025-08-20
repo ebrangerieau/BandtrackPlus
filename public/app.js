@@ -1519,6 +1519,7 @@
   async function renderPerformances(container) {
     container.innerHTML = '';
     const header = document.createElement('h2');
+    header.className = 'section-title';
     header.textContent = 'Prestations';
     container.appendChild(header);
     let list = [];
@@ -2853,6 +2854,7 @@
   async function renderSettings(container) {
     container.innerHTML = '';
     const header = document.createElement('h2');
+    header.className = 'section-title';
     header.textContent = 'Paramètres';
     container.appendChild(header);
     if (currentUser) {
