@@ -744,12 +744,16 @@
       likeBtn.textContent = '👍';
       likeBtn.onclick = async (e) => {
         e.stopPropagation();
+        likeBtn.disabled = true;
+        dislikeBtn.disabled = true;
         try {
           const updated = await api(`/suggestions/${item.id}/vote`, 'POST');
           likeCount.textContent = `❤️ ${updated.likes}`;
-          renderSuggestions(container);
+          await renderSuggestions(container);
         } catch (err) {
           alert(err.message);
+          likeBtn.disabled = false;
+          dislikeBtn.disabled = false;
         }
       };
 
@@ -758,12 +762,16 @@
       dislikeBtn.textContent = '👎';
       dislikeBtn.onclick = async (e) => {
         e.stopPropagation();
+        likeBtn.disabled = true;
+        dislikeBtn.disabled = true;
         try {
           const updated = await api(`/suggestions/${item.id}/vote`, 'DELETE');
           likeCount.textContent = `❤️ ${updated.likes}`;
-          renderSuggestions(container);
+          await renderSuggestions(container);
         } catch (err) {
           alert(err.message);
+          likeBtn.disabled = false;
+          dislikeBtn.disabled = false;
         }
       };
 
