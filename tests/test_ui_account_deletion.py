@@ -26,6 +26,12 @@ def test_ui_account_deletion(tmp_path):
             page.goto(f'http://127.0.0.1:{port}/')
             page.click('#hamburger')
             page.click('#menu-settings')
+            def handle_dialog(dialog):
+                assert dialog.type == 'confirm'
+                assert dialog.message == 'Êtes-vous sûr de vouloir supprimer votre compte ?'
+                dialog.accept()
+
+            page.once('dialog', handle_dialog)
             page.click('#delete-account-btn')
             page.wait_for_selector('text=Se connecter')
             context.close()
@@ -57,8 +63,14 @@ def test_ui_account_deletion_from_group_setup(tmp_path):
             ])
             page = context.new_page()
             page.goto(f'http://127.0.0.1:{port}/')
-            page.wait_for_selector('#delete-account-btn')
-            page.click('#delete-account-btn')
+            page.wait_for_selector('#delete-account-btn-group-setup')
+            def handle_dialog(dialog):
+                assert dialog.type == 'confirm'
+                assert dialog.message == 'Êtes-vous sûr de vouloir supprimer votre compte ?'
+                dialog.accept()
+
+            page.once('dialog', handle_dialog)
+            page.click('#delete-account-btn-group-setup')
             page.wait_for_selector('text=Se connecter')
             context.close()
             browser.close()

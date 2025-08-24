@@ -941,11 +941,14 @@ def update_membership(membership_id: int, role: str, nickname: str | None, activ
     return changes
 
 
-def delete_membership(membership_id: int) -> int:
-    """Delete a membership by its ID."""
+def delete_membership(membership_id: int, group_id: int) -> int:
+    """Delete a membership by its ID and group."""
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('DELETE FROM memberships WHERE id = ?', (membership_id,))
+    cur.execute(
+        'DELETE FROM memberships WHERE id = ? AND group_id = ?',
+        (membership_id, group_id),
+    )
     conn.commit()
     changes = cur.rowcount
     conn.close()
@@ -1771,19 +1774,57 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
             return
         if method == 'DELETE':
-            if role != 'admin':
+            membership_id = None
+            target_user_id = None
+            if body.get('id') is None and body.get('userId') is None:
+                log_event(user['id'], 'delete_member_failed', {'groupId': group_id, 'reason': 'missing member identifier'})
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Missing member identifier'})
+                return
+            if body.get('id') is None:
+                try:
+                    target_user_id = int(body.get('userId'))
+                except (TypeError, ValueError):
+                    send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid user id'})
+                    return
+                membership = get_membership(target_user_id, group_id)
+                if not membership:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+                    return
+                membership_id = membership['id']
+            else:
+                try:
+                    membership_id = int(body.get('id'))
+                except (TypeError, ValueError):
+                    send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
+                    return
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute('SELECT user_id FROM memberships WHERE id = ? AND group_id = ?', (membership_id, group_id))
+                row = cur.fetchone()
+                conn.close()
+                if not row:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+                    return
+                target_user_id = row['user_id']
+            if role != 'admin' and target_user_id != user['id']:
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
                 return
-            try:
-                membership_id = int(body.get('id'))
-            except (TypeError, ValueError):
-                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
-                return
-            deleted = delete_membership(membership_id)
-            if deleted:
-                send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
-            else:
+            deleted = delete_membership(membership_id, group_id)
+            if not deleted:
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+                return
+            if target_user_id == user['id']:
+                remaining = get_groups_for_user(user['id'])
+                new_group_id = remaining[0]['id'] if remaining else None
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (new_group_id, user['id']))
+                cur.execute('UPDATE sessions SET group_id = ? WHERE user_id = ?', (new_group_id, user['id']))
+                conn.commit()
+                conn.close()
+                send_json(self, HTTPStatus.OK, {'message': 'Left group'})
+            else:
+                send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
             return
         raise NotImplementedError
 
