@@ -2921,10 +2921,10 @@
         roleTd.appendChild(sel);
         const actionsTd = document.createElement('td');
         const removeBtn = document.createElement('button');
-        removeBtn.textContent = 'Retirer';
-        removeBtn.disabled = m.userId === currentUser.id;
+        removeBtn.textContent = m.userId === currentUser.id ? 'Quitter' : 'Retirer';
         removeBtn.onclick = async () => {
-          if (!confirm('Supprimer ce membre ?')) return;
+          const confirmMsg = m.userId === currentUser.id ? 'Quitter le groupe ?' : 'Supprimer ce membre ?';
+          if (!confirm(confirmMsg)) return;
           try {
             const res = await fetch(`/api/groups/${activeGroupId}/members`, {
               method: 'DELETE',
@@ -2956,6 +2956,11 @@
             if (!res.ok) {
               console.error('Remove member failed:', json);
               alert(json?.error || 'Erreur API');
+              return;
+            }
+            if (m.userId === currentUser.id) {
+              currentUser.needsGroup = true;
+              renderApp();
               return;
             }
             tr.remove();
