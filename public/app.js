@@ -744,12 +744,16 @@
       likeBtn.textContent = '👍';
       likeBtn.onclick = async (e) => {
         e.stopPropagation();
+        likeBtn.disabled = true;
+        dislikeBtn.disabled = true;
         try {
           const updated = await api(`/suggestions/${item.id}/vote`, 'POST');
           likeCount.textContent = `❤️ ${updated.likes}`;
-          renderSuggestions(container);
+          await renderSuggestions(container);
         } catch (err) {
           alert(err.message);
+          likeBtn.disabled = false;
+          dislikeBtn.disabled = false;
         }
       };
 
@@ -758,12 +762,16 @@
       dislikeBtn.textContent = '👎';
       dislikeBtn.onclick = async (e) => {
         e.stopPropagation();
+        likeBtn.disabled = true;
+        dislikeBtn.disabled = true;
         try {
           const updated = await api(`/suggestions/${item.id}/vote`, 'DELETE');
           likeCount.textContent = `❤️ ${updated.likes}`;
-          renderSuggestions(container);
+          await renderSuggestions(container);
         } catch (err) {
           alert(err.message);
+          likeBtn.disabled = false;
+          dislikeBtn.disabled = false;
         }
       };
 
@@ -2654,6 +2662,60 @@
     return section;
   }
 
+  function renderPasswordSection() {
+    const section = document.createElement('div');
+    section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Mot de passe';
+    section.appendChild(h3);
+    const form = document.createElement('form');
+    form.onsubmit = (e) => e.preventDefault();
+    const labelOld = document.createElement('label');
+    labelOld.textContent = 'Mot de passe actuel';
+    const inputOld = document.createElement('input');
+    inputOld.type = 'password';
+    inputOld.required = true;
+    inputOld.style.width = '100%';
+    const labelNew = document.createElement('label');
+    labelNew.textContent = 'Nouveau mot de passe';
+    const inputNew = document.createElement('input');
+    inputNew.type = 'password';
+    inputNew.required = true;
+    inputNew.style.width = '100%';
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'btn-primary';
+    submitBtn.type = 'submit';
+    submitBtn.textContent = 'Modifier';
+    submitBtn.style.marginTop = '8px';
+    const msg = document.createElement('p');
+    msg.style.marginTop = '8px';
+    form.appendChild(labelOld);
+    form.appendChild(inputOld);
+    form.appendChild(labelNew);
+    form.appendChild(inputNew);
+    form.appendChild(submitBtn);
+    form.appendChild(msg);
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      msg.textContent = '';
+      try {
+        await api('/password', 'PUT', {
+          oldPassword: inputOld.value,
+          newPassword: inputNew.value,
+        });
+        msg.style.color = 'green';
+        msg.textContent = 'Mot de passe mis à jour';
+        inputOld.value = '';
+        inputNew.value = '';
+      } catch (err) {
+        msg.style.color = 'var(--danger-color)';
+        msg.textContent = err.message;
+      }
+    };
+    section.appendChild(form);
+    return section;
+  }
+
   function renderThemeSection(currentSettings) {
     const section = document.createElement('div');
     section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
@@ -2919,6 +2981,8 @@
     await refreshGroups();
     const themeSection = renderThemeSection(currentSettings);
     container.appendChild(themeSection);
+    const passwordSection = renderPasswordSection();
+    container.appendChild(passwordSection);
     const logoutSection = document.createElement('div');
     logoutSection.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const logoutBtn = document.createElement('button');
