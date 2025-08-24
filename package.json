@@ -10,7 +10,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:css": "tailwindcss -i ./src/tailwind.css -o ./public/tailwind.css --minify",
     "dev": "vite",
-    "build": "vite build"
+    "build:frontend": "vite build",
+    "build": "npm run build:frontend"
   },
   "keywords": [],
   "author": "",

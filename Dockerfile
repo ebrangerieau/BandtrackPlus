@@ -6,10 +6,20 @@ FROM python:3.11-slim
 # Working directory in the container
 WORKDIR /app
 
-# Copy the Python server, migration scripts and front‑end assets. The
-# SQLite database will be created at runtime.
-COPY server.py ./
+# Install Node.js to build the front-end bundle
+RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
+
+# Copy front-end sources and build them
+COPY package.json package-lock.json* ./
+COPY node_modules ./node_modules
+COPY vite.config.js postcss.config.js tailwind.config.js frontend.jsx ./
+COPY src ./src
 COPY public ./public
+RUN npm run build:frontend
+
+# Copy the Python server and migration scripts. The SQLite database will
+# be created at runtime.
+COPY server.py ./
 COPY scripts ./scripts
 
 # Create a volume for persistent database storage
