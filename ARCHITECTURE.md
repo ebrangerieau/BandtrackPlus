@@ -1,129 +1,95 @@
-ARCHITECTURE
-BandTrack est une application de suivi musical fonctionnant comme une Progressive Web App (PWA).
-Elle combine un serveur Python minimaliste utilisant uniquement la bibliothèque standard et une interface
-web monopage développée en JavaScript.
 
-Vue d’ensemble
-/
-├── server.py               # Serveur HTTP + API REST en Python pur
-├── public/                 # Code client (PWA) et fichiers statiques
-├── scripts/                # Scripts de migration de schéma SQLite
-├── tests/                  # Tests d’intégration Python (pytest)
-├── Dockerfile, docker-compose.yml
-├── package.json            # Configuration Node.js pour Tailwind CSS
-└── src/                    # Sources CSS avant compilation
-Backend Python (server.py)
-Serveur basé sur http.server avec classe BandTrackHandler.
+---
 
-Routes API sous le préfixe /api ; les autres chemins servent les fichiers de public/.
+## 3. Découpage des composants
 
-Gestion de session via cookie session_id stocké en base (table sessions).
+### 3.1 Frontend
+- **Type :** Single Page Application (SPA)
+- **Technos :** JavaScript vanilla + HTML/CSS
+- **Fonctionnalités clés :**
+  - Interface responsive mobile/desktop
+  - Thème clair/sombre + templates personnalisés
+  - Manifest + service-worker (usage hors-ligne)
+- **Entrée principale :** `public/app.js`
 
-Authentification :
+### 3.2 Backend
+- **Serveur :** Python (`http.server`)
+- **Fichier principal :** `server.py`
+- **Rôle :**
+  - Gérer les endpoints REST
+  - Authentification & sessions via cookies
+  - Gestion des logs et des erreurs
+- **Sécurité :**
+  - Cookies HttpOnly + SameSite=Lax
+  - Hashage mots de passe (PBKDF2-SHA256)
 
-création de compte (/api/register) ;
+### 3.3 Base de données
+- **Type :** SQLite (`bandtrack.db`)
+- **Utilisation :**
+  - Persistance des groupes, utilisateurs, suggestions, répétitions, prestations, paramètres
+- **Scripts :**
+  - `scripts/` → migrations exécutées au démarrage
+  - `reset-db.sh` → réinitialisation
+  - `backup.sh` → sauvegarde/restauration
 
-connexion/déconnexion (/api/login, /api/logout);
+### 3.4 Conteneurisation
+- **Fichiers :** `Dockerfile`, `docker-compose.yml`
+- **Services :**
+  - Backend Python
+  - SQLite monté en volume persistant
+- **Objectif :**
+  - Déploiement reproductible sur NAS/serveur
+  - Sauvegardes automatisées
 
-changement de mot de passe et WebAuthn.
+---
 
-Fonctionnalités principales :
+## 4. Flux de données
 
-suggestions de morceaux (/suggestions);
+Exemple : un utilisateur vote pour une suggestion musicale.
+1. Le frontend envoie `POST /api/suggestions/{id}/vote`
+2. Le backend vérifie la session + droits utilisateur
+3. Mise à jour de la DB SQLite
+4. Réponse JSON envoyée au frontend (nouveau compteur de votes)
+5. UI se met à jour côté PWA
 
-répétitions (/rehearsals);
+---
 
-prestations (/performances);
+## 5. Choix techniques
 
-événements de répétition (/rehearsal-events);
+- **SQLite** : simplicité et portabilité (un seul fichier DB)
+- **Backend Python minimaliste** : moins de dépendances externes, facile à maintenir
+- **Docker** : homogénéité entre développement, test et production
+- **PWA** : utilisable sur smartphone comme une app native (installation via navigateur)
 
-gestion des groupes et des membres.
+---
 
-Réponses JSON ; prise en charge optionnelle de GZip.
+## 6. Points sensibles
 
-Toutes les requêtes modifiant les données exigent un utilisateur authentifié et un groupe actif.
+- **Sessions** : gestion correcte des cookies
+- **Sécurité API** : validation stricte des entrées
+- **Sauvegardes DB** : planifier une stratégie régulière
+- **Scalabilité** : SQLite limite les accès concurrents (migration possible vers PostgreSQL/MySQL)
 
-Base de données SQLite
-Création automatique du fichier bandtrack.db.
-Tables principales :
+---
 
-Table	Rôle principal
-users	Utilisateurs, rôle (admin/modérateur), hash de mot de passe, dernier groupe
-users_webauthn	Association identifiants WebAuthn / utilisateurs
-groups	Groupes musicaux ; propriétaire, code d’invitation, logo
-memberships	Lien utilisateur ↔ groupe, rôle, surnom, statut
-suggestions	Propositions de chansons (likes, auteur, URL, groupe)
-suggestion_votes	Votes individuels pour les suggestions
-rehearsals	Suivi des morceaux à répéter (niveaux, notes, audio-notes)
-performances	Prestations (nom, date, lieu, chansons)
-rehearsal_events	Occurrences de répétition (date, lieu)
-settings	Paramètres par groupe : nom, thème sombre, modèle d’UI
-sessions	Sessions actives (token, utilisateur, expiration)
-logs	Journalisation des actions importantes
-Des scripts de migration (scripts/) permettent d’adapter les anciennes bases de données
-sans dépendance à Node.js.
+## 7. Évolutivité prévue
 
-Frontend (public/)
-Application monopage (app.js) écrite en JavaScript :
+- Notifications push
+- Export PDF des répertoires
+- Lecteur audio intégré
+- WebSockets pour la synchro temps réel
+- Passage à une base plus robuste (PostgreSQL)
 
-appels à l’API avec fetch et credentials: "same-origin";
+---
 
-gestion du cache local pour limiter les requêtes réseau ;
+## 8. Outils et workflow de développement
 
-navigation interne et logique de vues (suggestions, répétitions, prestations, agenda).
+- **Tests unitaires** : `pytest` (dossier `tests/`)
+- **Sauvegardes** : répertoire `backups/`
+- **CI/CD** (à prévoir) : build Docker + tests auto
+- **Guide dev rapide :**
+  1. `docker-compose up --build`
+  2. Accéder au frontend : `http://localhost:8080`
+  3. Lancer les tests : `pytest`
 
-service-worker.js et manifest.json pour l’installation comme PWA et le mode hors ligne.
-
-Fichiers images et CSS compilés (tailwind.css, style.css).
-
-Construction CSS (src/, tailwind.config.js)
-Le CSS est écrit dans src/tailwind.css.
-
-La compilation vers public/tailwind.css se fait via tailwindcss (script npm run build:css).
-
-package.json ne contient que Tailwind comme dépendance, aucun runtime Node n’est requis pour le serveur.
-
-Tests (tests/)
-Utilisent pytest.
-
-Créent un serveur en mémoire et vérifient les endpoints :
-
-authentification et gestion de session ;
-
-CRUD suggestions/répétitions ;
-
-paramètres, groupes, permissions…
-
-Les tests n’ont pas besoin d’environnement Node.
-
-Déploiement & maintenance
-Docker : Dockerfile et docker-compose.yml permettent un déploiement simple.
-
-Variables d’environnement : HOST, PORT, SSL_KEY, SSL_CERT, ORIGIN…
-
-Lors du démarrage, server.py exécute automatiquement les scripts de migration.
-
-Sauvegarde : backup.sh copie bandtrack.db et les éventuels fichiers audio dans backups/DATE.
-
-Réinitialisation : reset-db.sh supprime la base puis recrée les tables.
-
-Le serveur s’exécute simplement via :
-
-python3 server.py --port 8080
-Flux global
-L’utilisateur accède à l’application via index.html (PWA).
-
-Les actions de l’interface déclenchent des requêtes AJAX (fetch) vers /api/....
-
-BandTrackHandler traite la requête :
-
-vérifie la session,
-
-exécute l’opération sur SQLite,
-
-renvoie une réponse JSON.
-
-Le client met à jour l’interface selon la réponse.
-
-Les ressources statiques (HTML, JS, images) sont servies par le même serveur.
-
+---
