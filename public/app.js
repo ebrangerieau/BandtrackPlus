@@ -399,7 +399,7 @@
     p.textContent = 'Vous devez sélectionner ou créer un groupe pour continuer.';
     container.appendChild(p);
     const p2 = document.createElement('p');
-    p2.textContent = 'Pour rejoindre un groupe existant, munissez-vous de son code d\'invitation.';
+    p2.textContent = "Pour rejoindre un groupe existant, munissez-vous de son code d'invitation ou demandez à un administrateur de vous ajouter directement.";
     container.appendChild(p2);
     const btnRow = document.createElement('div');
     const createBtn = document.createElement('button');
@@ -2841,7 +2841,10 @@
         section.appendChild(p);
         return section;
       }
-      const members = await api(`/groups/${activeGroupId}/members`);
+      const [members, users] = await Promise.all([
+        api(`/groups/${activeGroupId}/members`),
+        api('/users'),
+      ]);
       const groupHeader = document.createElement('h4');
       groupHeader.textContent = 'Tableau de bord du groupe';
       groupHeader.style.marginTop = '10px';
@@ -2919,14 +2922,56 @@
       });
       memberTable.appendChild(mtbody);
       section.appendChild(memberTable);
-    } catch (err) {
-      const p = document.createElement('p');
-      p.style.color = 'var(--danger-color)';
-      p.textContent = 'Impossible de récupérer les membres';
-      section.appendChild(p);
-    }
-    try {
-      const users = await api('/users');
+      const memberIds = new Set(members.map((m) => m.userId));
+      const nonMembers = users.filter((u) => !memberIds.has(u.id));
+      if (nonMembers.length > 0) {
+        const addDiv = document.createElement('div');
+        const sel = document.createElement('select');
+        nonMembers.forEach((u) => {
+          const opt = document.createElement('option');
+          opt.value = u.id;
+          opt.textContent = u.username;
+          sel.appendChild(opt);
+        });
+        addDiv.appendChild(sel);
+        const addBtn = document.createElement('button');
+        addBtn.textContent = 'Ajouter';
+        addBtn.style.marginLeft = '8px';
+        addBtn.onclick = async () => {
+          try {
+            const uid = Number(sel.value);
+            await api(`/groups/${activeGroupId}/members`, 'POST', { userId: uid, role: 'user' });
+            renderSettings(container);
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        addDiv.appendChild(addBtn);
+        section.appendChild(addDiv);
+      }
+      const inviteDiv = document.createElement('div');
+      const emailInput = document.createElement('input');
+      emailInput.type = 'email';
+      emailInput.placeholder = 'adresse e-mail';
+      inviteDiv.appendChild(emailInput);
+      const inviteBtn = document.createElement('button');
+      inviteBtn.textContent = 'Inviter';
+      inviteBtn.style.marginLeft = '8px';
+      inviteBtn.onclick = async () => {
+        const email = emailInput.value.trim();
+        if (!email) return;
+        try {
+          const res = await api(`/groups/${activeGroupId}/invite`, 'POST', { email });
+          if (res.temporaryPassword) {
+            alert(`Mot de passe temporaire : ${res.temporaryPassword}`);
+          }
+          renderSettings(container);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      inviteDiv.appendChild(inviteBtn);
+      section.appendChild(inviteDiv);
       const adminHeader = document.createElement('h4');
       adminHeader.textContent = 'Gestion des utilisateurs';
       adminHeader.style.marginTop = '30px';
@@ -2988,7 +3033,7 @@
     } catch (err) {
       const p = document.createElement('p');
       p.style.color = 'var(--danger-color)';
-      p.textContent = 'Impossible de récupérer les utilisateurs';
+      p.textContent = 'Impossible de récupérer les membres';
       section.appendChild(p);
     }
     return section;

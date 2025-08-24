@@ -1107,6 +1107,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
                     if method == 'PUT':
                         return self.api_update_group(gid, body, user)
+                if len(parts) >= 5 and parts[4] == 'invite' and method == 'POST':
+                    try:
+                        gid = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
+                    return self.api_group_invite(gid, body, user)
                 if len(parts) >= 5 and parts[4] == 'members':
                     try:
                         gid = int(parts[3])
@@ -1667,6 +1673,43 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 })
             send_json(self, HTTPStatus.OK, result)
             return
+        if method == 'POST':
+            if role != 'admin':
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
+            try:
+                target_user_id = int(body.get('userId'))
+            except (TypeError, ValueError):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid user id'})
+                return
+            new_role = body.get('role', 'user')
+            if new_role not in ('user', 'moderator', 'admin'):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid role'})
+                return
+            nickname = body.get('nickname')
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute('SELECT id, username FROM users WHERE id = ?', (target_user_id,))
+            row = cur.fetchone()
+            conn.close()
+            if not row:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})
+                return
+            if get_membership(target_user_id, group_id):
+                send_json(self, HTTPStatus.CONFLICT, {'error': 'Membership already exists'})
+                return
+            create_membership(target_user_id, group_id, new_role, nickname)
+            membership = get_membership(target_user_id, group_id)
+            send_json(self, HTTPStatus.CREATED, {
+                'id': membership['id'],
+                'userId': membership['user_id'],
+                'username': row['username'],
+                'role': membership['role'],
+                'nickname': membership['nickname'],
+                'joinedAt': membership['joined_at'],
+                'active': bool(membership['active']),
+            })
+            return
         if method == 'PUT':
             if role != 'admin':
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
@@ -1704,6 +1747,67 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
             return
         raise NotImplementedError
+
+    def api_group_invite(self, group_id: int, body: dict, user: dict):
+        """Invite a user to the group by email. If the email does not
+        correspond to an existing user, create a provisional account with a
+        temporary password."""
+        role = verify_group_access(user['id'], group_id, 'admin')
+        if role != 'admin':
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
+        email = (body.get('email') or '').strip().lower()
+        if not email or '@' not in email:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid email'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)', (email,))
+        row = cur.fetchone()
+        if row:
+            user_id = row['id']
+            username = row['username']
+            conn.close()
+            if get_membership(user_id, group_id):
+                send_json(self, HTTPStatus.CONFLICT, {'error': 'Membership already exists'})
+                return
+            create_membership(user_id, group_id, 'user', None)
+            membership = get_membership(user_id, group_id)
+            send_json(self, HTTPStatus.CREATED, {
+                'id': membership['id'],
+                'userId': membership['user_id'],
+                'username': username,
+                'role': membership['role'],
+                'nickname': membership['nickname'],
+                'joinedAt': membership['joined_at'],
+                'active': bool(membership['active']),
+            })
+            return
+        # Create provisional user
+        temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+        salt, pwd_hash = hash_password(temp_password)
+        cur.execute(
+            'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
+            (email, salt, pwd_hash, 'user', group_id),
+        )
+        user_id = cur.lastrowid
+        cur.execute(
+            'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, 1)',
+            (user_id, group_id, 'user', None),
+        )
+        conn.commit()
+        conn.close()
+        membership = get_membership(user_id, group_id)
+        send_json(self, HTTPStatus.CREATED, {
+            'id': membership['id'],
+            'userId': membership['user_id'],
+            'username': email,
+            'role': membership['role'],
+            'nickname': membership['nickname'],
+            'joinedAt': membership['joined_at'],
+            'active': bool(membership['active']),
+            'temporaryPassword': temp_password,
+        })
 
     def api_get_suggestions(self, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
