@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./src/tailwind.css";
 import {
   Music,
   Calendar,
