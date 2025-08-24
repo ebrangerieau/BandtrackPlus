@@ -2626,6 +2626,8 @@
         document.title = `${currentSettings.groupName} – BandTrack`;
         const groupNameEl = document.getElementById('group-name');
         if (groupNameEl) groupNameEl.textContent = currentSettings.groupName;
+        await refreshGroups(currentSettings.id || currentUser.groupId);
+        await renderSettings(document.getElementById('app'));
       } catch (err) {
         alert(err.message);
       }
