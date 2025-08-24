@@ -552,7 +552,8 @@ textarea {
 }
 
 /* Bouton de déconnexion */
-.logout-btn {
+.logout-btn,
+.delete-account-btn {
   margin-top: 20px;
   padding: 10px;
   background-color: var(--danger-color);
@@ -563,7 +564,8 @@ textarea {
   width: 100%;
 }
 
-.logout-btn:hover {
+.logout-btn:hover,
+.delete-account-btn:hover {
   opacity: 0.9;
 }
 
