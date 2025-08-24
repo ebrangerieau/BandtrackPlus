@@ -1774,17 +1774,22 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
             return
         if method == 'DELETE':
-            if role != 'admin':
-                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-                return
             membership_id = None
-            if body.get('id') is None and body.get('userId') is not None:
+            target_user_id = None
+            if body.get('id') is None and body.get('userId') is None:
+                target_user_id = user['id']
+                membership = get_membership(target_user_id, group_id)
+                if not membership:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+                    return
+                membership_id = membership['id']
+            elif body.get('id') is None and body.get('userId') is not None:
                 try:
-                    user_id = int(body.get('userId'))
+                    target_user_id = int(body.get('userId'))
                 except (TypeError, ValueError):
                     send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid user id'})
                     return
-                membership = get_membership(user_id, group_id)
+                membership = get_membership(target_user_id, group_id)
                 if not membership:
                     send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
                     return
@@ -1795,11 +1800,34 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
                     return
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute('SELECT user_id FROM memberships WHERE id = ? AND group_id = ?', (membership_id, group_id))
+                row = cur.fetchone()
+                conn.close()
+                if not row:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+                    return
+                target_user_id = row['user_id']
+            if role != 'admin' and target_user_id != user['id']:
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
             deleted = delete_membership(membership_id, group_id)
-            if deleted:
-                send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
-            else:
+            if not deleted:
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+                return
+            if target_user_id == user['id']:
+                remaining = get_groups_for_user(user['id'])
+                new_group_id = remaining[0]['id'] if remaining else None
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (new_group_id, user['id']))
+                cur.execute('UPDATE sessions SET group_id = ? WHERE user_id = ?', (new_group_id, user['id']))
+                conn.commit()
+                conn.close()
+                send_json(self, HTTPStatus.OK, {'message': 'Left group'})
+            else:
+                send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
             return
         raise NotImplementedError
 
