@@ -84,3 +84,41 @@ def test_group_members_add(tmp_path):
         assert any(m['username'] == 'bob' for m in members)
     finally:
         stop_test_server(httpd, thread)
+
+
+def test_group_members_cross_group_delete(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+    try:
+        # Register admin user and log in
+        request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
+        status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})
+        cookie_admin = extract_cookie(headers)
+        headers_admin = {'Cookie': cookie_admin}
+
+        # Register bob and get his user id
+        request('POST', port, '/api/register', {'username': 'bob', 'password': 'pw'})
+        status, _, body = request('GET', port, '/api/groups/1/members', headers=headers_admin)
+        members = json.loads(body)
+        bob_member = next(m for m in members if m['username'] == 'bob')
+        bob_user_id = bob_member['userId']
+
+        # Create second group and add bob to it
+        status, _, body = request('POST', port, '/api/groups', {'name': 'Band2'}, headers=headers_admin)
+        group2_id = json.loads(body)['id']
+        request('POST', port, f'/api/groups/{group2_id}/members', {'userId': bob_user_id}, headers=headers_admin)
+
+        # Get bob's membership id in group2
+        status, _, body = request('GET', port, f'/api/groups/{group2_id}/members', headers=headers_admin)
+        bob_member_group2 = next(m for m in json.loads(body) if m['username'] == 'bob')
+        member2_id = bob_member_group2['id']
+
+        # Attempt to delete group2 membership via group1 endpoint
+        status, _, _ = request('DELETE', port, '/api/groups/1/members', {'id': member2_id}, headers=headers_admin)
+        assert status == 404
+
+        # Ensure bob's membership in group2 still exists
+        status, _, body = request('GET', port, f'/api/groups/{group2_id}/members', headers=headers_admin)
+        members = json.loads(body)
+        assert any(m['id'] == member2_id for m in members)
+    finally:
+        stop_test_server(httpd, thread)
