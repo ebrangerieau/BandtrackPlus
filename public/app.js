@@ -2620,12 +2620,16 @@
     renameBtn.onclick = async () => {
       const newName = prompt('Nouveau nom du groupe', currentSettings.groupName);
       if (!newName || newName.trim() === '' || newName === currentSettings.groupName) return;
-      currentSettings.groupName = newName.trim();
+      const trimmed = newName.trim();
+      const gid = currentSettings.id || currentUser.groupId;
       try {
-        await api('/settings', 'PUT', currentSettings);
+        await api(`/groups/${gid}`, 'PUT', { name: trimmed });
+        currentSettings.groupName = trimmed;
         document.title = `${currentSettings.groupName} – BandTrack`;
         const groupNameEl = document.getElementById('group-name');
         if (groupNameEl) groupNameEl.textContent = currentSettings.groupName;
+        await refreshGroups(gid);
+        await renderSettings(document.getElementById('app'));
       } catch (err) {
         alert(err.message);
       }
@@ -2773,6 +2777,47 @@
     templateDiv.appendChild(templateLabel);
     templateDiv.appendChild(templateSelect);
     section.appendChild(templateDiv);
+    return section;
+  }
+
+  async function renderMembersSection() {
+    const section = document.createElement('div');
+    section.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Membres';
+    section.appendChild(h3);
+    if (activeGroupId == null || currentUser?.needsGroup) {
+      const p = document.createElement('p');
+      p.textContent = 'Aucun groupe actif';
+      section.appendChild(p);
+      return section;
+    }
+    try {
+      const members = await api(`/groups/${activeGroupId}/members`);
+      const table = document.createElement('table');
+      table.className = 'user-table';
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Membre</th><th>Rôle</th></tr>';
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      members.forEach((m) => {
+        const tr = document.createElement('tr');
+        const nameTd = document.createElement('td');
+        nameTd.textContent = m.username;
+        const roleTd = document.createElement('td');
+        roleTd.textContent = m.role;
+        tr.appendChild(nameTd);
+        tr.appendChild(roleTd);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      section.appendChild(table);
+    } catch (err) {
+      const p = document.createElement('p');
+      p.style.color = 'var(--danger-color)';
+      p.textContent = 'Impossible de récupérer les membres du groupe';
+      section.appendChild(p);
+    }
     return section;
   }
 
@@ -2979,6 +3024,8 @@
     const groupSection = renderGroupSection(currentSettings);
     container.appendChild(groupSection);
     await refreshGroups();
+    const membersSection = await renderMembersSection();
+    container.appendChild(membersSection);
     const themeSection = renderThemeSection(currentSettings);
     container.appendChild(themeSection);
     const passwordSection = renderPasswordSection();
