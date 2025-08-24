@@ -207,6 +207,16 @@
     }
   }
 
+  async function handleDeleteAccount() {
+    try {
+      await api('/me', 'DELETE');
+      currentUser = null;
+      renderApp();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   async function changeGroup(id) {
     await api('/context', 'PUT', { groupId: Number(id) });
     localStorage.setItem('activeGroupId', String(id));
@@ -2892,10 +2902,10 @@
           if (m.role === r) opt.selected = true;
           sel.appendChild(opt);
         });
-        if (m.id === currentUser.id) sel.disabled = true;
+        if (m.userId === currentUser.id) sel.disabled = true;
         sel.onchange = async () => {
           try {
-            await api(`/groups/${activeGroupId}/members`, 'PUT', { userId: m.id, role: sel.value });
+            await api(`/groups/${activeGroupId}/members`, 'PUT', { id: m.id, role: sel.value });
           } catch (err) {
             alert(err.message);
           }
@@ -2904,11 +2914,11 @@
         const actionsTd = document.createElement('td');
         const removeBtn = document.createElement('button');
         removeBtn.textContent = 'Retirer';
-        removeBtn.disabled = m.id === currentUser.id;
+        removeBtn.disabled = m.userId === currentUser.id;
         removeBtn.onclick = async () => {
           if (!confirm('Supprimer ce membre ?')) return;
           try {
-            await api(`/groups/${activeGroupId}/members`, 'DELETE', { userId: m.id });
+            await api(`/groups/${activeGroupId}/members`, 'DELETE', { id: m.id });
             tr.remove();
           } catch (err) {
             alert(err.message);
@@ -3082,6 +3092,12 @@
     logoutBtn.textContent = 'Se déconnecter';
     logoutBtn.onclick = handleLogout;
     logoutSection.appendChild(logoutBtn);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.id = 'delete-account-btn';
+    deleteBtn.className = 'delete-account-btn';
+    deleteBtn.textContent = 'Supprimer mon compte';
+    deleteBtn.onclick = handleDeleteAccount;
+    logoutSection.appendChild(deleteBtn);
     container.appendChild(logoutSection);
     if (isAdmin()) {
       const adminSection = await renderAdminSection(container);

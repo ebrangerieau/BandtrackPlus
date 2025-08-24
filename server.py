@@ -1063,8 +1063,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return self.api_login(body)
             if path == '/api/logout' and method == 'POST':
                 return self.api_logout(session_token)
-            if path == '/api/me' and method == 'GET':
-                return self.api_me(user)
+            if path == '/api/me':
+                if method == 'GET':
+                    return self.api_me(user)
+                if method == 'DELETE':
+                    return self.api_delete_me(user, session_token)
             if path == '/api/webauthn/authenticate' and method == 'POST':
                 return self.api_webauthn_authenticate(body)
             if path == '/api/webauthn/register' and method == 'POST':
@@ -1454,6 +1457,42 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             'membershipRole': membership_role,
             'isAdmin': user.get('role') == 'admin',
         })
+
+    def api_delete_me(self, user: dict | None, session_token: str):
+        """Delete the current user's account and associated data."""
+        if not user:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        uid = user['id']
+        cur.execute('SELECT COUNT(*) FROM groups WHERE owner_id = ?', (uid,))
+        if cur.fetchone()[0] > 0:
+            conn.close()
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Cannot delete account while owning a group'})
+            return
+        cur.execute('DELETE FROM suggestion_votes WHERE user_id = ?', (uid,))
+        cur.execute('DELETE FROM suggestions WHERE creator_id = ?', (uid,))
+        cur.execute('DELETE FROM rehearsals WHERE creator_id = ?', (uid,))
+        cur.execute('DELETE FROM performances WHERE creator_id = ?', (uid,))
+        cur.execute('DELETE FROM rehearsal_events WHERE creator_id = ?', (uid,))
+        cur.execute('DELETE FROM memberships WHERE user_id = ?', (uid,))
+        cur.execute('DELETE FROM sessions WHERE user_id = ?', (uid,))
+        cur.execute('DELETE FROM users_webauthn WHERE user_id = ?', (uid,))
+        cur.execute('UPDATE logs SET user_id = NULL WHERE user_id = ?', (uid,))
+        cur.execute('DELETE FROM users WHERE id = ?', (uid,))
+        conn.commit()
+        conn.close()
+        if session_token:
+            delete_session(session_token)
+        log_event(None, 'delete_account', {'user_id': uid})
+        past_ts = int(time.time()) - 3600
+        send_json(
+            self,
+            HTTPStatus.OK,
+            {'message': 'Account deleted'},
+            cookies=[('session_id', '', {'expires': past_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+        )
 
     def api_webauthn_register(self, body: dict, user: dict):
         """Store a new WebAuthn credential for the logged-in user."""
