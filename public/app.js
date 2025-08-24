@@ -208,6 +208,8 @@
   }
 
   async function handleDeleteAccount() {
+    const confirmed = confirm('Êtes-vous sûr de vouloir supprimer votre compte ?');
+    if (!confirmed) return;
     try {
       await api('/me', 'DELETE');
       currentUser = null;
