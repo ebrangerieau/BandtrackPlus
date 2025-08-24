@@ -941,11 +941,14 @@ def update_membership(membership_id: int, role: str, nickname: str | None, activ
     return changes
 
 
-def delete_membership(membership_id: int) -> int:
-    """Delete a membership by its ID."""
+def delete_membership(membership_id: int, group_id: int) -> int:
+    """Delete a membership by its ID and group."""
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('DELETE FROM memberships WHERE id = ?', (membership_id,))
+    cur.execute(
+        'DELETE FROM memberships WHERE id = ? AND group_id = ?',
+        (membership_id, group_id),
+    )
     conn.commit()
     changes = cur.rowcount
     conn.close()
@@ -1792,7 +1795,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
                     return
-            deleted = delete_membership(membership_id)
+            deleted = delete_membership(membership_id, group_id)
             if deleted:
                 send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
             else:
