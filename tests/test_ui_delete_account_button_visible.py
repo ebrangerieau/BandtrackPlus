@@ -10,6 +10,9 @@ def test_delete_account_button_visible(tmp_path):
         status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})
         assert status == 200
         cookie = extract_cookie(headers)
+        headers = {'Cookie': cookie}
+        status, _, _ = request('POST', port, '/api/groups', {'name': 'Band'}, headers)
+        assert status == 201
         session_value = cookie.split('=', 1)[1]
         with sync_playwright() as p:
             browser = p.chromium.launch()
@@ -26,6 +29,7 @@ def test_delete_account_button_visible(tmp_path):
             page.goto(f'http://127.0.0.1:{port}/')
             page.click('#hamburger')
             page.click('#menu-settings')
+            page.wait_for_load_state('networkidle')
             page.wait_for_selector('#delete-account-btn')
             assert page.is_visible('#delete-account-btn')
             context.close()
