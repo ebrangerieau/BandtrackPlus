@@ -122,3 +122,17 @@ def test_group_members_cross_group_delete(tmp_path):
         assert any(m['id'] == member2_id for m in members)
     finally:
         stop_test_server(httpd, thread)
+
+
+def test_group_members_delete_requires_identifier(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+    try:
+        request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
+        status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})
+        cookie_admin = extract_cookie(headers)
+        headers_admin = {'Cookie': cookie_admin}
+        status, _, body = request('DELETE', port, '/api/groups/1/members', {}, headers_admin)
+        assert status == 400
+        assert json.loads(body)['error'] == 'Missing member identifier'
+    finally:
+        stop_test_server(httpd, thread)
