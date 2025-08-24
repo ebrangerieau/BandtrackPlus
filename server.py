@@ -1098,9 +1098,16 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if path == '/api/groups/renew-code' and method == 'POST':
                 return self.api_renew_group_code(user)
 
-            if path.startswith('/api/groups/') and path.endswith('/members'):
+            if path.startswith('/api/groups/'):
                 parts = path.split('/')
-                if len(parts) >= 5:
+                if len(parts) == 4:
+                    try:
+                        gid = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
+                    if method == 'PUT':
+                        return self.api_update_group(gid, body, user)
+                if len(parts) >= 5 and parts[4] == 'members':
                     try:
                         gid = int(parts[3])
                     except ValueError:
@@ -1607,6 +1614,34 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         new_code = generate_unique_invitation_code()
         update_group_code(user['group_id'], new_code)
         send_json(self, HTTPStatus.OK, {'invitationCode': new_code})
+
+    def api_update_group(self, group_id: int, body: dict, user: dict):
+        """Rename a group. Admin role required."""
+        role = verify_group_access(user['id'], group_id, 'admin')
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
+        name = (body.get('name') or '').strip()
+        if not name:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'name is required'})
+            return
+        group = get_group_by_id(group_id)
+        if not group:
+            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
+            return
+        update_group(
+            group_id,
+            name,
+            group['invitation_code'],
+            group.get('description'),
+            group.get('logo_url'),
+        )
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('UPDATE settings SET group_name = ? WHERE group_id = ?', (name, group_id))
+        conn.commit()
+        conn.close()
+        send_json(self, HTTPStatus.OK, {'id': group_id, 'name': name})
 
     def api_get_groups(self, user: dict):
         groups = get_groups_for_user(user['id'])

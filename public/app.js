@@ -2620,13 +2620,15 @@
     renameBtn.onclick = async () => {
       const newName = prompt('Nouveau nom du groupe', currentSettings.groupName);
       if (!newName || newName.trim() === '' || newName === currentSettings.groupName) return;
-      currentSettings.groupName = newName.trim();
+      const trimmed = newName.trim();
+      const gid = currentSettings.id || currentUser.groupId;
       try {
-        await api('/settings', 'PUT', currentSettings);
+        await api(`/groups/${gid}`, 'PUT', { name: trimmed });
+        currentSettings.groupName = trimmed;
         document.title = `${currentSettings.groupName} – BandTrack`;
         const groupNameEl = document.getElementById('group-name');
         if (groupNameEl) groupNameEl.textContent = currentSettings.groupName;
-        await refreshGroups(currentSettings.id || currentUser.groupId);
+        await refreshGroups(gid);
         await renderSettings(document.getElementById('app'));
       } catch (err) {
         alert(err.message);
