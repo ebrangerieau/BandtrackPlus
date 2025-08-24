@@ -3116,15 +3116,6 @@
       return;
     }
     const currentSettings = { ...settings };
-    const groupSection = renderGroupSection(currentSettings);
-    container.appendChild(groupSection);
-    await refreshGroups();
-    const membersSection = await renderMembersSection();
-    container.appendChild(membersSection);
-    const themeSection = renderThemeSection(currentSettings);
-    container.appendChild(themeSection);
-    const passwordSection = renderPasswordSection();
-    container.appendChild(passwordSection);
     const logoutSection = document.createElement('div');
     logoutSection.className = 'settings-section bg-white rounded-lg shadow-md p-4 bg-purple-50';
     const logoutBtn = document.createElement('button');
@@ -3138,6 +3129,19 @@
     deleteBtn.textContent = 'Supprimer mon compte';
     deleteBtn.onclick = handleDeleteAccount;
     logoutSection.appendChild(deleteBtn);
+    const groupSection = renderGroupSection(currentSettings);
+    container.appendChild(groupSection);
+    try {
+      await refreshGroups();
+      const membersSection = await renderMembersSection();
+      container.appendChild(membersSection);
+    } catch (err) {
+      console.error('Failed to load groups or members', err);
+    }
+    const themeSection = renderThemeSection(currentSettings);
+    container.appendChild(themeSection);
+    const passwordSection = renderPasswordSection();
+    container.appendChild(passwordSection);
     container.appendChild(logoutSection);
     if (isAdmin()) {
       const adminSection = await renderAdminSection(container);
