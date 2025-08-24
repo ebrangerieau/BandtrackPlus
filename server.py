@@ -1777,13 +1777,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             membership_id = None
             target_user_id = None
             if body.get('id') is None and body.get('userId') is None:
-                target_user_id = user['id']
-                membership = get_membership(target_user_id, group_id)
-                if not membership:
-                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
-                    return
-                membership_id = membership['id']
-            elif body.get('id') is None and body.get('userId') is not None:
+                log_event(user['id'], 'delete_member_failed', {'groupId': group_id, 'reason': 'missing member identifier'})
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Missing member identifier'})
+                return
+            if body.get('id') is None:
                 try:
                     target_user_id = int(body.get('userId'))
                 except (TypeError, ValueError):
