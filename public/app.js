@@ -424,6 +424,12 @@
     joinBtn.onclick = () => showJoinGroupDialog();
     btnRow.appendChild(joinBtn);
     container.appendChild(btnRow);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.id = 'delete-account-btn';
+    deleteBtn.className = 'delete-account-btn';
+    deleteBtn.textContent = 'Supprimer mon compte';
+    deleteBtn.onclick = handleDeleteAccount;
+    container.appendChild(deleteBtn);
     app.appendChild(container);
   }
 
