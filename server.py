@@ -2795,6 +2795,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'UPDATE settings SET group_name = ?, dark_mode = ?, template = ? WHERE group_id = ?',
                 (group_name, 1 if bool(dark_mode) else 0, template, user['group_id'])
             )
+        cur.execute(
+            'UPDATE groups SET name = ? WHERE id = ?',
+            (group_name, user['group_id'])
+        )
         conn.commit()
         conn.close()
         send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
