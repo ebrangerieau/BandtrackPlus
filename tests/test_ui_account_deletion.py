@@ -34,3 +34,35 @@ def test_ui_account_deletion(tmp_path):
         assert status == 401
     finally:
         stop_test_server(httpd, thread)
+
+
+def test_ui_account_deletion_from_group_setup(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+    try:
+        request('POST', port, '/api/register', {'username': 'bob', 'password': 'pw'})
+        status, headers, _ = request('POST', port, '/api/login', {'username': 'bob', 'password': 'pw'})
+        assert status == 200
+        cookie = extract_cookie(headers)
+        session_value = cookie.split('=', 1)[1]
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            context = browser.new_context()
+            context.add_cookies([
+                {
+                    'name': 'session_id',
+                    'value': session_value,
+                    'domain': '127.0.0.1',
+                    'path': '/',
+                }
+            ])
+            page = context.new_page()
+            page.goto(f'http://127.0.0.1:{port}/')
+            page.wait_for_selector('#delete-account-btn')
+            page.click('#delete-account-btn')
+            page.wait_for_selector('text=Se connecter')
+            context.close()
+            browser.close()
+        status, _, _ = request('POST', port, '/api/login', {'username': 'bob', 'password': 'pw'})
+        assert status == 401
+    finally:
+        stop_test_server(httpd, thread)
