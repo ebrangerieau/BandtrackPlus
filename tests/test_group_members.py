@@ -21,6 +21,7 @@ def test_group_members_crud(tmp_path):
         assert any(m['username'] == 'alice' for m in members)
         bob_member = next(m for m in members if m['username'] == 'bob')
         member_id = bob_member['id']
+        user_id = bob_member['userId']
 
         # Update bob's membership
         status, _, _ = request('PUT', port, '/api/groups/1/members', {
@@ -37,8 +38,8 @@ def test_group_members_crud(tmp_path):
         assert bob_member['role'] == 'moderator'
         assert bob_member['nickname'] == 'Bobby'
 
-        # Delete bob's membership
-        status, _, _ = request('DELETE', port, '/api/groups/1/members', {'id': member_id}, headers_admin)
+        # Delete bob's membership via userId
+        status, _, _ = request('DELETE', port, '/api/groups/1/members', {'userId': user_id}, headers_admin)
         assert status == 200
         status, _, body = request('GET', port, '/api/groups/1/members', headers=headers_admin)
         members = json.loads(body)
