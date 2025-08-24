@@ -70,5 +70,36 @@ def test_settings_update(tmp_path):
         assert data['groupName'] == 'New Band'
         assert data['darkMode'] is True
         assert data['template'] == 'modern'
+
+        status, _, body = request('GET', port, '/api/groups', headers=headers)
+        assert status == 200
+        groups = json.loads(body)
+        assert any(g['id'] == group_id and g['name'] == 'New Band' for g in groups)
+    finally:
+        stop_test_server(httpd, thread)
+
+
+def test_group_rename(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+    try:
+        request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
+        status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})
+        cookie = extract_cookie(headers)
+        headers = {'Cookie': cookie}
+
+        status, _, body = request('POST', port, '/api/groups', {'name': 'Band2'}, headers)
+        assert status == 201
+        group_id = json.loads(body)['id']
+
+        status, _, _ = request('PUT', port, f'/api/{group_id}/settings', {
+            'groupName': 'Renamed Band',
+            'darkMode': False
+        }, headers)
+        assert status == 200
+
+        status, _, body = request('GET', port, '/api/groups', headers=headers)
+        assert status == 200
+        groups = json.loads(body)
+        assert any(g['id'] == group_id and g['name'] == 'Renamed Band' for g in groups)
     finally:
         stop_test_server(httpd, thread)
