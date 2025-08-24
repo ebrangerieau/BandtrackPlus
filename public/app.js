@@ -207,6 +207,16 @@
     }
   }
 
+  async function handleDeleteAccount() {
+    try {
+      await api('/me', 'DELETE');
+      currentUser = null;
+      renderApp();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   async function changeGroup(id) {
     await api('/context', 'PUT', { groupId: Number(id) });
     localStorage.setItem('activeGroupId', String(id));
@@ -3082,6 +3092,12 @@
     logoutBtn.textContent = 'Se déconnecter';
     logoutBtn.onclick = handleLogout;
     logoutSection.appendChild(logoutBtn);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.id = 'delete-account-btn';
+    deleteBtn.className = 'delete-account-btn';
+    deleteBtn.textContent = 'Supprimer mon compte';
+    deleteBtn.onclick = handleDeleteAccount;
+    logoutSection.appendChild(deleteBtn);
     container.appendChild(logoutSection);
     if (isAdmin()) {
       const adminSection = await renderAdminSection(container);
