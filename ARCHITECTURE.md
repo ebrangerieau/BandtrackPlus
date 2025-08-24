@@ -1,3 +1,29 @@
+# Architecture de BandTrack
+
+## 1. Vue d’ensemble
+BandTrack est une **Progressive Web App (PWA)** destinée aux groupes de musique.  
+Elle repose sur une architecture simple et portable, conçue pour tourner dans un conteneur Docker sur un NAS ou un serveur léger.
+
+**Composants principaux :**
+- Frontend SPA (JavaScript vanilla)
+- Backend HTTP (Python)
+- Base de données SQLite
+- Conteneurisation via Docker
+- API REST interne pour la communication frontend ↔ backend
+
+---
+
+## 2. Schéma simplifié
+
+```
+[ Client (PWA) ]
+        |
+   REST API (JSON)
+        |
+[ Backend Python ]
+        |
+[ SQLite Database ]
+```
 
 ---
 
