@@ -1667,6 +1667,43 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 })
             send_json(self, HTTPStatus.OK, result)
             return
+        if method == 'POST':
+            if role != 'admin':
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+                return
+            try:
+                target_user_id = int(body.get('userId'))
+            except (TypeError, ValueError):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid user id'})
+                return
+            new_role = body.get('role', 'user')
+            if new_role not in ('user', 'moderator', 'admin'):
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid role'})
+                return
+            nickname = body.get('nickname')
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute('SELECT id, username FROM users WHERE id = ?', (target_user_id,))
+            row = cur.fetchone()
+            conn.close()
+            if not row:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})
+                return
+            if get_membership(target_user_id, group_id):
+                send_json(self, HTTPStatus.CONFLICT, {'error': 'Membership already exists'})
+                return
+            create_membership(target_user_id, group_id, new_role, nickname)
+            membership = get_membership(target_user_id, group_id)
+            send_json(self, HTTPStatus.CREATED, {
+                'id': membership['id'],
+                'userId': membership['user_id'],
+                'username': row['username'],
+                'role': membership['role'],
+                'nickname': membership['nickname'],
+                'joinedAt': membership['joined_at'],
+                'active': bool(membership['active']),
+            })
+            return
         if method == 'PUT':
             if role != 'admin':
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})

@@ -10,6 +10,7 @@ minimaliste via une API REST.
 - Conversion suggestions ↔ répétitions
 - Gestion des prestations (avec date et heure)
 - Paramètres du groupe (nom, mode sombre activé par défaut)
+- Les administrateurs peuvent ajouter des utilisateurs directement via l'interface ou l'API (`POST /api/groups/<id>/members`)
 - Écran d'accueil indiquant la prochaine prestation et la date de la prochaine
   répétition
 
