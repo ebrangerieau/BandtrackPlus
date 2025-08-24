@@ -2902,10 +2902,10 @@
           if (m.role === r) opt.selected = true;
           sel.appendChild(opt);
         });
-        if (m.id === currentUser.id) sel.disabled = true;
+        if (m.userId === currentUser.id) sel.disabled = true;
         sel.onchange = async () => {
           try {
-            await api(`/groups/${activeGroupId}/members`, 'PUT', { userId: m.id, role: sel.value });
+            await api(`/groups/${activeGroupId}/members`, 'PUT', { id: m.id, role: sel.value });
           } catch (err) {
             alert(err.message);
           }
@@ -2914,11 +2914,11 @@
         const actionsTd = document.createElement('td');
         const removeBtn = document.createElement('button');
         removeBtn.textContent = 'Retirer';
-        removeBtn.disabled = m.id === currentUser.id;
+        removeBtn.disabled = m.userId === currentUser.id;
         removeBtn.onclick = async () => {
           if (!confirm('Supprimer ce membre ?')) return;
           try {
-            await api(`/groups/${activeGroupId}/members`, 'DELETE', { userId: m.id });
+            await api(`/groups/${activeGroupId}/members`, 'DELETE', { id: m.id });
             tr.remove();
           } catch (err) {
             alert(err.message);
