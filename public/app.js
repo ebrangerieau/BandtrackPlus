@@ -2924,10 +2924,42 @@
         removeBtn.onclick = async () => {
           if (!confirm('Supprimer ce membre ?')) return;
           try {
-            await api(`/groups/${activeGroupId}/members`, 'DELETE', { id: m.id });
+            const res = await fetch(`/api/groups/${activeGroupId}/members`, {
+              method: 'DELETE',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: m.id }),
+            });
+            let json = null;
+            try {
+              json = await res.json();
+            } catch (e) {
+              json = null;
+            }
+            if (res.status === 401) {
+              const wasLoggedIn = currentUser !== null;
+              currentUser = null;
+              if (wasLoggedIn) renderApp();
+              alert(json?.error || 'Non authentifié');
+              return;
+            }
+            if (res.status === 403 && json && json.error === 'No membership') {
+              if (currentUser) {
+                currentUser.needsGroup = true;
+                renderApp();
+              }
+              alert('No membership');
+              return;
+            }
+            if (!res.ok) {
+              console.error('Remove member failed:', json);
+              alert(json?.error || 'Erreur API');
+              return;
+            }
             tr.remove();
           } catch (err) {
-            alert(err.message);
+            console.error('Network error while removing member:', err);
+            alert('Erreur API');
           }
         };
         actionsTd.appendChild(removeBtn);
