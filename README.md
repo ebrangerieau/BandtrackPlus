@@ -13,6 +13,10 @@ minimaliste via une API REST.
 - Écran d'accueil indiquant la prochaine prestation et la date de la prochaine
   répétition
 
+## Documentation
+
+- [Guide utilisateur](docs/guide_utilisateur.md)
+
 ## Déploiement avec Docker
 
 ### Générer des certificats SSL
