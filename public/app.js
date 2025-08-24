@@ -2926,47 +2926,17 @@
           const confirmMsg = m.userId === currentUser.id ? 'Quitter le groupe ?' : 'Supprimer ce membre ?';
           if (!confirm(confirmMsg)) return;
           try {
-            const res = await fetch(`/api/groups/${activeGroupId}/members`, {
-              method: 'DELETE',
-              credentials: 'same-origin',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: m.id }),
-            });
-            let json = null;
-            try {
-              json = await res.json();
-            } catch (e) {
-              json = null;
-            }
-            if (res.status === 401) {
-              const wasLoggedIn = currentUser !== null;
-              currentUser = null;
-              if (wasLoggedIn) renderApp();
-              alert(json?.error || 'Non authentifié');
-              return;
-            }
-            if (res.status === 403 && json && json.error === 'No membership') {
-              if (currentUser) {
-                currentUser.needsGroup = true;
-                renderApp();
-              }
-              alert('No membership');
-              return;
-            }
-            if (!res.ok) {
-              console.error('Remove member failed:', json);
-              alert(json?.error || 'Erreur API');
-              return;
-            }
+            await api(`/groups/${activeGroupId}/members`, 'DELETE', { userId: m.userId });
             if (m.userId === currentUser.id) {
+              alert('Quitter le groupe');
               currentUser.needsGroup = true;
               renderApp();
-              return;
+            } else {
+              tr.remove();
+              alert('Membre supprimé');
             }
-            tr.remove();
           } catch (err) {
-            console.error('Network error while removing member:', err);
-            alert('Erreur API');
+            alert(err.message);
           }
         };
         actionsTd.appendChild(removeBtn);
