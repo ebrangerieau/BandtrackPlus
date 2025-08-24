@@ -1774,11 +1774,24 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if role != 'admin':
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
                 return
-            try:
-                membership_id = int(body.get('id'))
-            except (TypeError, ValueError):
-                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
-                return
+            membership_id = None
+            if body.get('id') is None and body.get('userId') is not None:
+                try:
+                    user_id = int(body.get('userId'))
+                except (TypeError, ValueError):
+                    send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid user id'})
+                    return
+                membership = get_membership(user_id, group_id)
+                if not membership:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+                    return
+                membership_id = membership['id']
+            else:
+                try:
+                    membership_id = int(body.get('id'))
+                except (TypeError, ValueError):
+                    send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
+                    return
             deleted = delete_membership(membership_id)
             if deleted:
                 send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
