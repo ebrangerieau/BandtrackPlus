@@ -6,3 +6,4 @@ bandtrack.db
 backups/
 audios/
 __pycache__/
+docker-compose.yml
