@@ -18,6 +18,18 @@ minimaliste via une API REST.
 
 - [Guide utilisateur](docs/guide_utilisateur.md)
 
+## Construction du frontend
+
+Le bundle JavaScript est généré avec Vite. Avant de démarrer le serveur
+Python, exécuter :
+
+```bash
+npm run build:frontend
+```
+
+Le Dockerfile et la CI lancent automatiquement cette commande lors du
+déploiement.
+
 ## Déploiement avec Docker
 
 ### Générer des certificats SSL
