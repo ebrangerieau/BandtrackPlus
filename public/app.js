@@ -2949,6 +2949,29 @@
         addDiv.appendChild(addBtn);
         section.appendChild(addDiv);
       }
+      const inviteDiv = document.createElement('div');
+      const emailInput = document.createElement('input');
+      emailInput.type = 'email';
+      emailInput.placeholder = 'adresse e-mail';
+      inviteDiv.appendChild(emailInput);
+      const inviteBtn = document.createElement('button');
+      inviteBtn.textContent = 'Inviter';
+      inviteBtn.style.marginLeft = '8px';
+      inviteBtn.onclick = async () => {
+        const email = emailInput.value.trim();
+        if (!email) return;
+        try {
+          const res = await api(`/groups/${activeGroupId}/invite`, 'POST', { email });
+          if (res.temporaryPassword) {
+            alert(`Mot de passe temporaire : ${res.temporaryPassword}`);
+          }
+          renderSettings(container);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      inviteDiv.appendChild(inviteBtn);
+      section.appendChild(inviteDiv);
       const adminHeader = document.createElement('h4');
       adminHeader.textContent = 'Gestion des utilisateurs';
       adminHeader.style.marginTop = '30px';
