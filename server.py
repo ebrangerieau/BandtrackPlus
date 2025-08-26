@@ -416,14 +416,13 @@ def generate_invitation_code(length: int = 6) -> str:
 
 
 def generate_unique_invitation_code() -> str:
-    conn = get_db_connection()
-    cur = conn.cursor()
-    while True:
-        code = generate_invitation_code()
-        cur.execute('SELECT 1 FROM groups WHERE invitation_code = ?', (code,))
-        if cur.fetchone() is None:
-            conn.close()
-            return code
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        while True:
+            code = generate_invitation_code()
+            cur.execute('SELECT 1 FROM groups WHERE invitation_code = ?', (code,))
+            if cur.fetchone() is None:
+                return code
 
 def generate_session(user_id: int, group_id: int | None, duration_seconds: int = 7 * 24 * 3600) -> str:
     """Create a new session token for a user and store it with the active
@@ -431,14 +430,13 @@ def generate_session(user_id: int, group_id: int | None, duration_seconds: int =
     lifetime; default is one week."""
     token = secrets.token_hex(32)
     expires_at = int(time.time()) + duration_seconds
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'INSERT INTO sessions (token, user_id, group_id, expires_at) VALUES (?, ?, ?, ?)',
-        (token, user_id, group_id, expires_at)
-    )
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO sessions (token, user_id, group_id, expires_at) VALUES (?, ?, ?, ?)',
+            (token, user_id, group_id, expires_at)
+        )
+        conn.commit()
     return token
 
 def get_user_by_session(token: str) -> dict | None:
@@ -447,36 +445,34 @@ def get_user_by_session(token: str) -> dict | None:
     expired.  Expired sessions are removed from the database."""
     if not token:
         return None
-    conn = get_db_connection()
-    cur = conn.cursor()
-    # Remove expired sessions
-    cur.execute('DELETE FROM sessions WHERE expires_at <= ?', (int(time.time()),))
-    # Fetch the session
-    cur.execute(
-        'SELECT user_id, group_id FROM sessions WHERE token = ?',
-        (token,)
-    )
-    row = cur.fetchone()
-    if not row:
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        # Remove expired sessions
+        cur.execute('DELETE FROM sessions WHERE expires_at <= ?', (int(time.time()),))
+        # Fetch the session
+        cur.execute(
+            'SELECT user_id, group_id FROM sessions WHERE token = ?',
+            (token,)
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.commit()
+            return None
+        user_id = row['user_id']
+        group_id = row['group_id']
+        # Extend session expiry on each use (sliding window)
+        new_expires = int(time.time()) + 7 * 24 * 3600
+        cur.execute(
+            'UPDATE sessions SET expires_at = ? WHERE token = ?',
+            (new_expires, token)
+        )
+        # Fetch the user along with their role
+        cur.execute(
+            'SELECT id, username, role FROM users WHERE id = ?',
+            (user_id,)
+        )
+        user_row = cur.fetchone()
         conn.commit()
-        conn.close()
-        return None
-    user_id = row['user_id']
-    group_id = row['group_id']
-    # Extend session expiry on each use (sliding window)
-    new_expires = int(time.time()) + 7 * 24 * 3600
-    cur.execute(
-        'UPDATE sessions SET expires_at = ? WHERE token = ?',
-        (new_expires, token)
-    )
-    # Fetch the user along with their role
-    cur.execute(
-        'SELECT id, username, role FROM users WHERE id = ?',
-        (user_id,)
-    )
-    user_row = cur.fetchone()
-    conn.commit()
-    conn.close()
     if user_row:
         return {
             'id': user_row['id'],
@@ -488,22 +484,20 @@ def get_user_by_session(token: str) -> dict | None:
 
 def delete_session(token: str) -> None:
     """Invalidate a session by removing it from the database."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM sessions WHERE token = ?', (token,))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute('DELETE FROM sessions WHERE token = ?', (token,))
+        conn.commit()
 
 def log_event(user_id: int | None, action: str, metadata: dict | None = None) -> None:
     """Insert an entry into the logs table."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'INSERT INTO logs (user_id, action, metadata) VALUES (?, ?, ?)',
-        (user_id, action, json.dumps(metadata or {}))
-    )
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO logs (user_id, action, metadata) VALUES (?, ?, ?)',
+            (user_id, action, json.dumps(metadata or {}))
+        )
+        conn.commit()
 
 
 def parse_audio_notes_json(data: str | None) -> dict:
@@ -535,48 +529,44 @@ def parse_audio_notes_json(data: str | None) -> dict:
 
 def add_webauthn_credential(user_id: int, credential_id: str) -> int:
     """Store a WebAuthn credential for a user."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'INSERT INTO users_webauthn (user_id, credential_id) VALUES (?, ?)',
-        (user_id, credential_id),
-    )
-    cred_id = cur.lastrowid
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO users_webauthn (user_id, credential_id) VALUES (?, ?)',
+            (user_id, credential_id),
+        )
+        cred_id = cur.lastrowid
+        conn.commit()
     return cred_id
 
 
 def get_webauthn_credentials(user_id: int) -> list[str]:
     """Return all credential IDs associated with a user."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
-    rows = [row['credential_id'] for row in cur.fetchall()]
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute('SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
+        rows = [row['credential_id'] for row in cur.fetchall()]
     return rows
 
 
 def get_user_by_webauthn_credential(credential_id: str) -> dict | None:
     """Lookup the user owning a given credential ID."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'SELECT u.id, u.username, u.role, u.last_group_id FROM users_webauthn w JOIN users u ON u.id = w.user_id WHERE w.credential_id = ?',
-        (credential_id,),
-    )
-    row = cur.fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT u.id, u.username, u.role, u.last_group_id FROM users_webauthn w JOIN users u ON u.id = w.user_id WHERE w.credential_id = ?',
+            (credential_id,),
+        )
+        row = cur.fetchone()
     return dict(row) if row else None
 
 
 def verify_webauthn_credential(user_id: int, credential_id: str) -> bool:
     """Check that ``credential_id`` belongs to ``user_id``."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
-    rows = cur.fetchall()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute('SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
+        rows = cur.fetchall()
     for r in rows:
         if hmac.compare_digest(r['credential_id'], credential_id):
             return True
@@ -652,35 +642,33 @@ def send_text_file(handler: BaseHTTPRequestHandler, filepath: str) -> None:
 
 def move_suggestion_to_rehearsal(sug_id: int):
     """Create a rehearsal from a suggestion and remove the suggestion."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'SELECT title, author, youtube, url, version_of, creator_id, group_id FROM suggestions WHERE id = ?',
-        (sug_id,)
-    )
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return None
-    yt = row['youtube'] or row['url']
-    cur.execute(
-        'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        (row['title'], row['author'], yt, None, row['version_of'], json.dumps({}), json.dumps({}), json.dumps({}), 0, row['creator_id'], row['group_id']),
-    )
-    new_id = cur.lastrowid
-    cur.execute(
-        '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
-                  r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
-                  u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
-           WHERE r.id = ?''',
-        (new_id,),
-    )
-    new_row = cur.fetchone()
-    cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
-    cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, row['group_id']))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT title, author, youtube, url, version_of, creator_id, group_id FROM suggestions WHERE id = ?',
+            (sug_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        yt = row['youtube'] or row['url']
+        cur.execute(
+            'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (row['title'], row['author'], yt, None, row['version_of'], json.dumps({}), json.dumps({}), json.dumps({}), 0, row['creator_id'], row['group_id']),
+        )
+        new_id = cur.lastrowid
+        cur.execute(
+            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
+                      r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
+                      u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
+               WHERE r.id = ?''',
+            (new_id,),
+        )
+        new_row = cur.fetchone()
+        cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+        cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, row['group_id']))
+        conn.commit()
     if not new_row:
         return None
     return {
@@ -701,31 +689,29 @@ def move_suggestion_to_rehearsal(sug_id: int):
 
 def move_rehearsal_to_suggestion(reh_id: int):
     """Create a suggestion from a rehearsal and remove the rehearsal."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'SELECT title, author, youtube, version_of, creator_id, group_id FROM rehearsals WHERE id = ?',
-        (reh_id,),
-    )
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return None
-    cur.execute(
-        'INSERT INTO suggestions (title, author, youtube, url, version_of, likes, creator_id, group_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
-        (row['title'], row['author'], row['youtube'], row['youtube'], row['version_of'], row['creator_id'], row['group_id']),
-    )
-    new_id = cur.lastrowid
-    cur.execute(
-        '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
-                  u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
-           WHERE s.id = ?''',
-        (new_id,),
-    )
-    new_row = cur.fetchone()
-    cur.execute('DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (reh_id, row['group_id']))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT title, author, youtube, version_of, creator_id, group_id FROM rehearsals WHERE id = ?',
+            (reh_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        cur.execute(
+            'INSERT INTO suggestions (title, author, youtube, url, version_of, likes, creator_id, group_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
+            (row['title'], row['author'], row['youtube'], row['youtube'], row['version_of'], row['creator_id'], row['group_id']),
+        )
+        new_id = cur.lastrowid
+        cur.execute(
+            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
+                      u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
+               WHERE s.id = ?''',
+            (new_id,),
+        )
+        new_row = cur.fetchone()
+        cur.execute('DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (reh_id, row['group_id']))
+        conn.commit()
     if not new_row:
         return None
     return {
@@ -743,120 +729,111 @@ def move_rehearsal_to_suggestion(reh_id: int):
 
 def create_group(name: str, invitation_code: str, description: str | None, logo_url: str | None, owner_id: int) -> int:
     """Insert a new group and return its ID."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'INSERT INTO groups (name, invitation_code, description, logo_url, owner_id) VALUES (?, ?, ?, ?, ?)',
-        (name, invitation_code, description, logo_url, owner_id),
-    )
-    group_id = cur.lastrowid
-    # Insert default settings for the new group
-    cur.execute(
-        "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
-        (group_id, name),
-    )
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO groups (name, invitation_code, description, logo_url, owner_id) VALUES (?, ?, ?, ?, ?)',
+            (name, invitation_code, description, logo_url, owner_id),
+        )
+        group_id = cur.lastrowid
+        # Insert default settings for the new group
+        cur.execute(
+            "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
+            (group_id, name),
+        )
+        conn.commit()
     return group_id
 
 
 def get_group_by_id(group_id: int) -> dict | None:
     """Fetch a group by its ID."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE id = ?',
-        (group_id,),
-    )
-    row = cur.fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE id = ?',
+            (group_id,),
+        )
+        row = cur.fetchone()
     return dict(row) if row else None
 
 
 def get_group_by_code(code: str) -> dict | None:
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE invitation_code = ?',
-        (code,),
-    )
-    row = cur.fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE invitation_code = ?',
+            (code,),
+        )
+        row = cur.fetchone()
     return dict(row) if row else None
 
 
 def get_groups_for_user(user_id: int) -> list[dict]:
     """Return all groups a user is a member of."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'SELECT g.id, g.name FROM groups g JOIN memberships m ON m.group_id = g.id WHERE m.user_id = ? AND m.active = 1',
-        (user_id,),
-    )
-    rows = [{'id': row['id'], 'name': row['name']} for row in cur.fetchall()]
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT g.id, g.name FROM groups g JOIN memberships m ON m.group_id = g.id WHERE m.user_id = ? AND m.active = 1',
+            (user_id,),
+        )
+        rows = [{'id': row['id'], 'name': row['name']} for row in cur.fetchall()]
     return rows
 
 
 def update_group(group_id: int, name: str, invitation_code: str, description: str | None, logo_url: str | None) -> int:
     """Update a group's details.  Returns number of affected rows."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'UPDATE groups SET name = ?, invitation_code = ?, description = ?, logo_url = ? WHERE id = ?',
-        (name, invitation_code, description, logo_url, group_id),
-    )
-    conn.commit()
-    changes = cur.rowcount
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'UPDATE groups SET name = ?, invitation_code = ?, description = ?, logo_url = ? WHERE id = ?',
+            (name, invitation_code, description, logo_url, group_id),
+        )
+        conn.commit()
+        changes = cur.rowcount
     return changes
 
 
 def update_group_code(group_id: int, invitation_code: str) -> int:
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('UPDATE groups SET invitation_code = ? WHERE id = ?', (invitation_code, group_id))
-    conn.commit()
-    changes = cur.rowcount
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute('UPDATE groups SET invitation_code = ? WHERE id = ?', (invitation_code, group_id))
+        conn.commit()
+        changes = cur.rowcount
     return changes
 
 
 def delete_group(group_id: int) -> int:
     """Delete a group by ID.  Returns the number of deleted rows."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM groups WHERE id = ?', (group_id,))
-    conn.commit()
-    changes = cur.rowcount
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute('DELETE FROM groups WHERE id = ?', (group_id,))
+        conn.commit()
+        changes = cur.rowcount
     return changes
 
 
 def create_membership(user_id: int, group_id: int, role: str, nickname: str | None, active: bool = True) -> int:
     """Create a membership entry linking a user to a group."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, ?)',
-        (user_id, group_id, role, nickname, 1 if active else 0),
-    )
-    membership_id = cur.lastrowid
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, ?)',
+            (user_id, group_id, role, nickname, 1 if active else 0),
+        )
+        membership_id = cur.lastrowid
+        conn.commit()
     return membership_id
 
 
 def get_membership(user_id: int, group_id: int) -> dict | None:
     """Retrieve a membership for a user/group pair."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'SELECT id, user_id, group_id, role, nickname, joined_at, active FROM memberships WHERE user_id = ? AND group_id = ?',
-        (user_id, group_id),
-    )
-    row = cur.fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT id, user_id, group_id, role, nickname, joined_at, active FROM memberships WHERE user_id = ? AND group_id = ?',
+            (user_id, group_id),
+        )
+        row = cur.fetchone()
     return dict(row) if row else None
 
 
@@ -878,45 +855,42 @@ def verify_group_access(user_id: int, group_id: int | None, required_role: str =
 
 def get_group_members(group_id: int) -> list[dict]:
     """Return all members for a given group."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        '''SELECT m.id, m.user_id, m.group_id, m.role, m.nickname, m.joined_at, m.active, u.username
-           FROM memberships m JOIN users u ON u.id = m.user_id
-           WHERE m.group_id = ?
-           ORDER BY m.joined_at ASC''',
-        (group_id,),
-    )
-    rows = [dict(row) for row in cur.fetchall()]
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            '''SELECT m.id, m.user_id, m.group_id, m.role, m.nickname, m.joined_at, m.active, u.username
+               FROM memberships m JOIN users u ON u.id = m.user_id
+               WHERE m.group_id = ?
+               ORDER BY m.joined_at ASC''',
+            (group_id,),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
     return rows
 
 
 def update_membership(membership_id: int, role: str, nickname: str | None, active: bool) -> int:
     """Update membership details.  Returns number of affected rows."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'UPDATE memberships SET role = ?, nickname = ?, active = ? WHERE id = ?',
-        (role, nickname, 1 if active else 0, membership_id),
-    )
-    conn.commit()
-    changes = cur.rowcount
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'UPDATE memberships SET role = ?, nickname = ?, active = ? WHERE id = ?',
+            (role, nickname, 1 if active else 0, membership_id),
+        )
+        conn.commit()
+        changes = cur.rowcount
     return changes
 
 
 def delete_membership(membership_id: int, group_id: int) -> int:
     """Delete a membership by its ID and group."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'DELETE FROM memberships WHERE id = ? AND group_id = ?',
-        (membership_id, group_id),
-    )
-    conn.commit()
-    changes = cur.rowcount
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            'DELETE FROM memberships WHERE id = ? AND group_id = ?',
+            (membership_id, group_id),
+        )
+        conn.commit()
+        changes = cur.rowcount
     return changes
 
 #############################
