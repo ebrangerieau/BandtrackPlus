@@ -92,6 +92,7 @@ def get_db_connection():
     obtains its own connection.  ``check_same_thread=False`` allows
     connections to be shared across threads safely."""
     conn = sqlite3.connect(DB_FILENAME, check_same_thread=False)
+    conn.execute('PRAGMA foreign_keys = ON')
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -243,14 +244,6 @@ def init_db():
                FOREIGN KEY (group_id) REFERENCES groups(id)
            );'''
     )
-    # Insert default settings row if missing
-    cur.execute('SELECT COUNT(*) FROM settings')
-    if cur.fetchone()[0] == 0:
-        cur.execute(
-            'INSERT INTO settings (group_id, group_name, dark_mode, template) '
-            'VALUES (1, ?, 1, ?)',
-            ('Groupe de musique', 'classic')
-        )
     # Sessions: store session token, associated user and expiry timestamp (epoch)
     cur.execute(
         '''CREATE TABLE IF NOT EXISTS sessions (
@@ -1317,14 +1310,27 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         salt, pwd_hash = hash_password(password)
         cur.execute(
             'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
-            (username, salt, pwd_hash, role, 1)
+            (username, salt, pwd_hash, role, None)
         )
         user_id = cur.lastrowid
+        # Ensure default group exists and is owned by the first user
+        cur.execute('SELECT id FROM groups WHERE id = 1')
+        if cur.fetchone() is None:
+            code = generate_unique_invitation_code()
+            cur.execute(
+                'INSERT INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, ?)',
+                ('Groupe de musique', code, user_id),
+            )
+            cur.execute(
+                "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (1, 'Groupe de musique', 1, 'classic')"
+            )
         # Add the new user to the default group (id 1)
         cur.execute(
             'INSERT OR IGNORE INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)',
             (user_id, role),
         )
+        # Record last group for the user
+        cur.execute('UPDATE users SET last_group_id = 1 WHERE id = ?', (user_id,))
         conn.commit()
         conn.close()
         group_id = 1

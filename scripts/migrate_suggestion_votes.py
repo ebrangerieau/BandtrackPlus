@@ -6,6 +6,7 @@ DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'bandtrack.db')
 
 def migrate() -> bool:
     conn = sqlite3.connect(DB_PATH)
+    conn.execute('PRAGMA foreign_keys = ON')
     cur = conn.cursor()
     # Ensure suggestion_votes table exists
     cur.execute(
