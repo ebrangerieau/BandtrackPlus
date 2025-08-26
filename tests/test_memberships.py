@@ -2,7 +2,7 @@ import json
 from test_api import start_test_server, stop_test_server, request, extract_cookie
 
 
-def test_group_members_crud(tmp_path):
+def test_memberships_crud(tmp_path):
     httpd, thread, port = start_test_server(tmp_path / 'test.db')
     try:
         # Register admin user
@@ -48,7 +48,7 @@ def test_group_members_crud(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_group_members_add(tmp_path):
+def test_memberships_add(tmp_path):
     httpd, thread, port = start_test_server(tmp_path / 'test.db')
     try:
         # Register admin user
@@ -86,7 +86,7 @@ def test_group_members_add(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_group_members_cross_group_delete(tmp_path):
+def test_memberships_cross_group_delete(tmp_path):
     httpd, thread, port = start_test_server(tmp_path / 'test.db')
     try:
         # Register admin user and log in
@@ -124,7 +124,7 @@ def test_group_members_cross_group_delete(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_group_members_delete_requires_identifier(tmp_path):
+def test_memberships_delete_requires_identifier(tmp_path):
     httpd, thread, port = start_test_server(tmp_path / 'test.db')
     try:
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
