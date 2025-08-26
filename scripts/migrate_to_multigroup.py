@@ -11,6 +11,7 @@ def generate_code() -> str:
 
 def migrate() -> bool:
     conn = sqlite3.connect(DB_PATH)
+    conn.execute('PRAGMA foreign_keys = ON')
     cur = conn.cursor()
     # If the core "users" table does not exist yet we are dealing with a
     # fresh database created by ``init_db`` and there is nothing to migrate.

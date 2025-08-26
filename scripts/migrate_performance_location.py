@@ -8,6 +8,7 @@ def migrate() -> bool:
     """Ensure the performances table has a location column.
     Returns True if a migration was performed."""
     conn = sqlite3.connect(DB_PATH)
+    conn.execute('PRAGMA foreign_keys = ON')
     cur = conn.cursor()
     cur.execute("PRAGMA table_info(performances)")
     columns = [row[1] for row in cur.fetchall()]
