@@ -376,34 +376,6 @@ def init_db():
     except Exception:
         pass
 
-    # Groups and memberships.  Multiple groups are supported so users can
-    # belong to several ensembles.  We create a default group with id 1 for
-    # backward compatibility and for fresh installations.
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''CREATE TABLE IF NOT EXISTS groups (
-                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   name TEXT NOT NULL UNIQUE
-               );'''
-        )
-        cur.execute(
-            '''CREATE TABLE IF NOT EXISTS group_members (
-                   user_id INTEGER NOT NULL,
-                   group_id INTEGER NOT NULL,
-                   PRIMARY KEY (user_id, group_id),
-                   FOREIGN KEY (user_id) REFERENCES users(id),
-                   FOREIGN KEY (group_id) REFERENCES groups(id)
-               );'''
-        )
-        # Ensure a default group exists
-        cur.execute('INSERT OR IGNORE INTO groups (id, name) VALUES (1, ?)', ('Groupe de musique',))
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
-
     # Sessions table: ensure a group_id column exists to store the active
     # group for a session.
     try:
