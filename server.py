@@ -405,7 +405,7 @@ def hash_password(password: str, salt: bytes | None = None) -> tuple[bytes, byte
 
 def verify_password(password: str, salt: bytes, expected_hash: bytes) -> bool:
     """Verify a password against a stored salt and hash."""
-    salt, hashed = hash_password(password, salt)
+    _, hashed = hash_password(password, salt)
     # Constant‑time comparison to avoid timing attacks
     return hmac.compare_digest(hashed, expected_hash)
 
