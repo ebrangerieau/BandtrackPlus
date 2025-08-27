@@ -25,7 +25,7 @@ Key features
 * A single settings row stores the group name and dark mode flag, which
   are applied at load time for all users.
 * The API endpoints mirror those used by the frontend so that the
-  existing JavaScript code (in ``public/app.js``) can remain largely
+  existing JavaScript code (in ``public/js/ui/index.js``) can remain largely
   unchanged.  The only notable difference is that cookie names and
   expiration behaviour are handled here.
 * Static files are served from the ``public`` directory for any path

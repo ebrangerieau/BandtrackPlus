@@ -14,9 +14,11 @@
   fonctionnalités principales.  Si la session expire, ils sont ramenés à
   l’écran de connexion.
 */
+import { state, resetCaches } from "../state.js";
+import { api, syncRehearsalsCache } from "../api.js";
+import { checkSession, handleLogout, applyTheme, applyTemplate } from "../auth.js";
 
-(() => {
-  // Utilisateur et page courants
+
   let currentUser = null;
   let currentPage = 'home';
 
@@ -29,10 +31,15 @@
 
   // Mois actuellement affiché dans l'agenda
   let agendaDate = new Date();
+Object.defineProperties(state, {
+  currentUser: { get: () => currentUser, set: v => currentUser = v },
+  currentPage: { get: () => currentPage, set: v => currentPage = v },
+  rehearsalsCache: { get: () => rehearsalsCache, set: v => rehearsalsCache = v },
+  groupsCache: { get: () => groupsCache, set: v => groupsCache = v },
+  activeGroupId: { get: () => activeGroupId, set: v => activeGroupId = v },
+  agendaDate: { get: () => agendaDate, set: v => agendaDate = v },
+});
 
-  function resetCaches() {
-    rehearsalsCache = [];
-  }
 
   // Ferme le menu lorsqu'on clique à l'extérieur
   document.addEventListener('click', (e) => {
@@ -86,125 +93,6 @@
       timeStyle: 'short',
       hour12: false,
     });
-  }
-
-  /**
-   * Effectue une requête vers l’API.  Ajoute systématiquement le préfixe
-   * `/api` et passe l’option `credentials: 'same-origin'` pour que les
-   * cookies de session soient envoyés.  Lève une erreur si la requête
-   * retourne un statut d’erreur.
-   * @param {string} path Chemin relatif à l’API, par exemple '/suggestions'
-   * @param {string} method Méthode HTTP (GET, POST, PUT, DELETE)
-   * @param {Object?} data Corps JSON à envoyer pour les méthodes POST/PUT
-  */
-  async function api(path, method = 'GET', data) {
-    const options = {
-      method,
-      credentials: 'same-origin',
-    };
-    if (data !== undefined) {
-      options.headers = { 'Content-Type': 'application/json' };
-      options.body = JSON.stringify(data);
-    }
-    const res = await fetch('/api' + path, options);
-    let json;
-    try {
-      json = await res.json();
-    } catch (e) {
-      json = null;
-    }
-    if (res.status === 401) {
-      const wasLoggedIn = currentUser !== null;
-      currentUser = null;
-      if (wasLoggedIn) renderApp();
-      throw new Error(json?.error || 'Non authentifié');
-    }
-    if (res.status === 403 && json && json.error === 'No membership') {
-      if (currentUser) {
-        currentUser.needsGroup = true;
-        renderApp();
-      }
-      throw new Error('No membership');
-    }
-    if (res.status === 404 && path === '/context' && method === 'GET') {
-      return null;
-    }
-    if (!res.ok) {
-      throw new Error((json && json.error) || 'Erreur API');
-    }
-    return json;
-  }
-
-  async function syncRehearsalsCache() {
-    rehearsalsCache = await api('/rehearsals');
-  }
-
-  setInterval(() => {
-    if (currentUser) {
-      syncRehearsalsCache().catch(() => {});
-    }
-  }, 5 * 60 * 1000);
-
-  /**
-   * Vérifie si un utilisateur est connecté en appelant `/api/me`.  Si c’est le
-   * cas, met à jour `currentUser` et applique le thème sombre ou clair selon
-   * les paramètres du serveur.  Sinon, `currentUser` reste nul.
-   */
-  async function checkSession() {
-    try {
-      const user = await api('/me');
-      currentUser = user;
-      if (!user.needsGroup) {
-        // Récupère les paramètres (notamment le mode sombre) pour appliquer le thème
-        const settings = await api('/settings');
-        applyTheme(settings.darkMode);
-        applyTemplate(settings.template || 'classic');
-        document.title = `${settings.groupName} – BandTrack`;
-        const groupNameEl = document.getElementById('group-name');
-        if (groupNameEl) groupNameEl.textContent = settings.groupName;
-      }
-    } catch (err) {
-      currentUser = null;
-    }
-  }
-
-  /**
-   * Applique ou retire la classe `dark` sur le <body> en fonction de la valeur
-   * de `dark`.  Cela permet de basculer entre le mode sombre et clair.
-   * @param {boolean} dark
-   */
-  function applyTheme(dark) {
-    const body = document.body;
-    if (dark) body.classList.add('dark');
-    else body.classList.remove('dark');
-  }
-
-  /**
-   * Applique le modèle visuel (template) choisi.  Le nom du template
-   * correspond à une classe CSS ajoutée sur le <body>, par exemple
-   * ``template-classic``, ``template-groove``, ``template-violet`` ou
-   * ``template-imgbg``.  Cette classe
-   * permet de définir des variables CSS spécifiques dans ``style.css``.
-   * @param {string} templateName
-   */
-  function applyTemplate(templateName) {
-    const body = document.body;
-    // Retirer toute classe de template existante
-    body.classList.forEach((cls) => {
-      if (cls.startsWith('template-')) body.classList.remove(cls);
-    });
-    // Appliquer la nouvelle classe
-    body.classList.add('template-' + templateName);
-  }
-
-  async function handleLogout() {
-    try {
-      await api('/logout', 'POST');
-      currentUser = null;
-      renderApp();
-    } catch (err) {
-      alert(err.message);
-    }
   }
 
   async function handleDeleteAccount() {
@@ -2995,11 +2883,11 @@
         addDiv.appendChild(addBtn);
         section.appendChild(addDiv);
       }
-      const inviteDiv = document.createElement('div');
+      const inviteEmailDiv = document.createElement('div');
       const emailInput = document.createElement('input');
       emailInput.type = 'email';
       emailInput.placeholder = 'adresse e-mail';
-      inviteDiv.appendChild(emailInput);
+      inviteEmailDiv.appendChild(emailInput);
       const inviteBtn = document.createElement('button');
       inviteBtn.textContent = 'Inviter';
       inviteBtn.style.marginLeft = '8px';
@@ -3016,8 +2904,8 @@
           alert(err.message);
         }
       };
-      inviteDiv.appendChild(inviteBtn);
-      section.appendChild(inviteDiv);
+      inviteEmailDiv.appendChild(inviteBtn);
+      section.appendChild(inviteEmailDiv);
       const adminHeader = document.createElement('h4');
       adminHeader.textContent = 'Gestion des utilisateurs';
       adminHeader.style.marginTop = '30px';
@@ -3148,5 +3036,3 @@
 
   // Lancement de l’application lorsque le DOM est prêt
   window.addEventListener('DOMContentLoaded', initApp);
-})();
-

@@ -36,7 +36,7 @@ Elle repose sur une architecture simple et portable, conçue pour tourner dans u
   - Interface responsive mobile/desktop
   - Thème clair/sombre + templates personnalisés
   - Manifest + service-worker (usage hors-ligne)
-- **Entrée principale :** `public/app.js`
+- **Entrée principale :** `public/js/ui/index.js`
 
 ### 3.2 Backend
 - **Serveur :** Python (`http.server`)
