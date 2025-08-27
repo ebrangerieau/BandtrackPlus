@@ -39,6 +39,14 @@ export async function syncRehearsalsCache() {
   state.rehearsalsCache = await api('/rehearsals');
 }
 
+export function uploadSheetMusic(id, instrument, dataUrl) {
+  return api(`/rehearsals/${id}`, 'PUT', { instrument, sheet: dataUrl });
+}
+
+export function deleteSheetMusic(id, instrument) {
+  return api(`/rehearsals/${id}/sheet?instrument=${encodeURIComponent(instrument)}`, 'DELETE');
+}
+
 setInterval(() => {
   if (state.currentUser) {
     syncRehearsalsCache().catch(() => {});
