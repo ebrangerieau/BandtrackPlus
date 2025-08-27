@@ -586,7 +586,10 @@
       nextPerfInfo = 'Impossible de récupérer les prestations';
     }
     const perfP = document.createElement('p');
-    perfP.innerHTML = `<strong>Prochaine prestation :</strong> ${nextPerfInfo}`;
+    const perfStrong = document.createElement('strong');
+    perfStrong.textContent = 'Prochaine prestation :';
+    perfP.appendChild(perfStrong);
+    perfP.appendChild(document.createTextNode(' ' + nextPerfInfo));
     container.appendChild(perfP);
 
     let nextRehearsalInfo = '—';
@@ -604,7 +607,10 @@
       // ignore errors
     }
     const rehP = document.createElement('p');
-    rehP.innerHTML = `<strong>Prochaine répétition :</strong> ${nextRehearsalInfo}`;
+    const rehStrong = document.createElement('strong');
+    rehStrong.textContent = 'Prochaine répétition :';
+    rehP.appendChild(rehStrong);
+    rehP.appendChild(document.createTextNode(' ' + nextRehearsalInfo));
     container.appendChild(rehP);
 
   }
@@ -1268,7 +1274,10 @@
           const note = song.notes && song.notes[u] ? song.notes[u] : '';
           const pUser = document.createElement('p');
           pUser.style.margin = '0';
-          pUser.innerHTML = `<strong>${u}</strong> – Niveau ${lev}/10${note ? ' – ' + note : ''}`;
+          const userStrong = document.createElement('strong');
+          userStrong.textContent = u;
+          pUser.appendChild(userStrong);
+          pUser.appendChild(document.createTextNode(` – Niveau ${lev}/10${note ? ' – ' + note : ''}`));
           wrapper.appendChild(pUser);
           const otherAudios = (song.audioNotes && song.audioNotes[u]) || [];
           otherAudios.forEach((note) => {
@@ -2382,20 +2391,29 @@
     content.className = 'modal-content';
     const h3 = document.createElement('h3');
     h3.style.fontWeight = 'normal';
-    h3.innerHTML = '<strong>Titre :</strong> ' + song.title;
+    const titleStrong = document.createElement('strong');
+    titleStrong.textContent = 'Titre :';
+    h3.appendChild(titleStrong);
+    h3.appendChild(document.createTextNode(' ' + song.title));
     content.appendChild(h3);
     // Afficher les métadonnées (auteur et liens)
     const metaDiv = document.createElement('div');
     if (song.author) {
       const pAuth = document.createElement('p');
       pAuth.style.fontStyle = 'italic';
-      pAuth.innerHTML = '<strong>Auteur :</strong> ' + song.author;
+      const authStrong = document.createElement('strong');
+      authStrong.textContent = 'Auteur :';
+      pAuth.appendChild(authStrong);
+      pAuth.appendChild(document.createTextNode(' ' + song.author));
       metaDiv.appendChild(pAuth);
     }
     if (song.versionOf) {
       const pVer = document.createElement('p');
       pVer.style.fontStyle = 'italic';
-      pVer.innerHTML = '<strong>Version de :</strong> ' + song.versionOf;
+      const verStrong = document.createElement('strong');
+      verStrong.textContent = 'Version de :';
+      pVer.appendChild(verStrong);
+      pVer.appendChild(document.createTextNode(' ' + song.versionOf));
       metaDiv.appendChild(pVer);
     }
     if (song.youtube) {
@@ -2570,7 +2588,10 @@
         const note = song.notes && song.notes[u] ? song.notes[u] : '';
         const p = document.createElement('p');
         p.style.margin = '0';
-        p.innerHTML = `<strong>${u}</strong> – Niveau ${lev}/10${note ? ' – ' + note : ''}`;
+        const uStrong = document.createElement('strong');
+        uStrong.textContent = u;
+        p.appendChild(uStrong);
+        p.appendChild(document.createTextNode(` – Niveau ${lev}/10${note ? ' – ' + note : ''}`));
         wrapper.appendChild(p);
         // Afficher les notes audio pour cet utilisateur s'il en existe
         const audioList = (song.audioNotes && song.audioNotes[u]) || [];
