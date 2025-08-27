@@ -8,13 +8,15 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:css": "tailwindcss -i ./src/tailwind.css -o ./public/tailwind.css --minify"
+    "build:css": "tailwindcss -i ./src/tailwind.css -o ./public/tailwind.css --minify",
+    "build:js": "esbuild public/js/ui/index.js --bundle --minify --outfile=public/app.bundle.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "tailwindcss": "^3.4.1"
+    "tailwindcss": "^3.4.1",
+    "esbuild": "^0.19.5"
   }
 }
