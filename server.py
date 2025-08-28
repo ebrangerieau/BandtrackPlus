@@ -96,9 +96,40 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+class PartitionDAO:
+    """Data access helper for the partitions table."""
+
+    def __init__(self, conn: sqlite3.Connection | None = None):
+        self.conn = conn or get_db_connection()
+
+    def create(self, rehearsal_id: int, path: str, display_name: str, uploader_id: int) -> int:
+        cur = self.conn.cursor()
+        cur.execute(
+            'INSERT INTO partitions (rehearsal_id, path, display_name, uploader_id) VALUES (?, ?, ?, ?)',
+            (rehearsal_id, path, display_name, uploader_id),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_by_rehearsal(self, rehearsal_id: int) -> list[sqlite3.Row]:
+        cur = self.conn.cursor()
+        cur.execute('SELECT * FROM partitions WHERE rehearsal_id = ?', (rehearsal_id,))
+        return cur.fetchall()
+
+    def delete(self, partition_id: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute('DELETE FROM partitions WHERE id = ?', (partition_id,))
+        self.conn.commit()
+
+
+def get_partition_dao(conn: sqlite3.Connection | None = None) -> PartitionDAO:
+    return PartitionDAO(conn)
+
 def init_db():
     """Create tables if they do not already exist and insert the
     default settings row.  This function is idempotent."""
+    new_db = not os.path.exists(DB_FILENAME)
     conn = get_db_connection()
     cur = conn.cursor()
     # Users table: store username, salt and password hash
@@ -170,6 +201,19 @@ def init_db():
                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                FOREIGN KEY (creator_id) REFERENCES users(id),
                FOREIGN KEY (group_id) REFERENCES groups(id)
+           );'''
+    )
+    # Partitions associated with rehearsals
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS partitions (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               rehearsal_id INTEGER NOT NULL,
+               path TEXT NOT NULL,
+               display_name TEXT NOT NULL,
+               uploader_id INTEGER NOT NULL,
+               uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+               FOREIGN KEY (rehearsal_id) REFERENCES rehearsals(id) ON DELETE CASCADE,
+               FOREIGN KEY (uploader_id) REFERENCES users(id)
            );'''
     )
     # Performances: contains name, date and a JSON array of rehearsal IDs
@@ -322,8 +366,11 @@ def init_db():
             cur.execute('ALTER TABLE rehearsals ADD COLUMN author TEXT')
         if 'audio_notes_json' not in r_columns:
             cur.execute("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
-        if 'sheet_music_json' not in r_columns:
-            cur.execute("ALTER TABLE rehearsals ADD COLUMN sheet_music_json TEXT DEFAULT '{}'")
+        if 'sheet_music_json' in r_columns and not new_db:
+            try:
+                cur.execute('ALTER TABLE rehearsals DROP COLUMN sheet_music_json')
+            except sqlite3.OperationalError:
+                pass
         if 'mastered' not in r_columns:
             cur.execute('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0')
         if 'version_of' not in r_columns:
