@@ -72,12 +72,21 @@ export function deletePartition(songId, partitionId) {
 
 export async function syncRehearsalsCache() {
   const songs = await api('/rehearsals');
-  const withPartitions = await Promise.all(
-    songs.map(async (song) => ({
-      ...song,
-      partitions: await listPartitions(song.id),
-    })),
+  const results = await Promise.allSettled(
+    songs.map((song) => listPartitions(song.id)),
   );
+  const withPartitions = [];
+  results.forEach((result, idx) => {
+    const song = songs[idx];
+    if (result.status === 'fulfilled') {
+      withPartitions.push({ ...song, partitions: result.value });
+    } else {
+      console.error(
+        `Erreur lors de la récupération des partitions pour le morceau ${song.id}`,
+        result.reason,
+      );
+    }
+  });
   state.rehearsalsCache = withPartitions;
 }
 
