@@ -75,6 +75,8 @@ import urllib.parse
 import mimetypes
 import io
 import cgi
+import subprocess
+import shlex
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
@@ -557,6 +559,30 @@ def log_event(user_id: int | None, action: str, metadata: dict | None = None) ->
         conn.commit()
 
 
+def sanitize_name(name: str) -> str | None:
+    """Return a sanitized file/display name or ``None`` if invalid."""
+    name = (name or '').strip()
+    if '..' in name or '/' in name or '\\' in name:
+        return None
+    return name
+
+
+def scan_for_viruses(file_bytes: bytes) -> bool:
+    """Scan ``file_bytes`` using an external command if configured.
+
+    The command is provided via the ``AV_SCAN_CMD`` environment variable and
+    should return a zero exit status when the file is clean.  If the variable
+    is unset, the file is assumed to be safe."""
+    cmd = os.environ.get('AV_SCAN_CMD')
+    if not cmd:
+        return True
+    try:
+        result = subprocess.run(shlex.split(cmd), input=file_bytes, capture_output=True)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def parse_audio_notes_json(data: str | None) -> dict:
     """Return audio notes as a mapping of user to list of notes.
 
@@ -996,6 +1022,34 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 normalized = os.path.normpath(os.path.join(os.path.dirname(__file__), local_path))
                 if not normalized.startswith(upload_root) or not os.path.isfile(normalized):
                     self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                # Require an authenticated session for uploaded files
+                cookie_header = self.headers.get('Cookie', '')
+                cookies = {}
+                for part in cookie_header.split(';'):
+                    if '=' in part:
+                        name, value = part.strip().split('=', 1)
+                        cookies[name] = value
+                user = get_user_by_session(cookies.get('session_id'))
+                if path.startswith('/uploads/partitions/'):
+                    parts = local_path.split('/')
+                    try:
+                        reh_id = int(parts[2])
+                    except (IndexError, ValueError):
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    group_id = None
+                    with get_db_connection() as conn:
+                        cur = conn.cursor()
+                        cur.execute('SELECT group_id FROM rehearsals WHERE id = ?', (reh_id,))
+                        row = cur.fetchone()
+                        if row:
+                            group_id = row['group_id']
+                    if not user or verify_group_access(user['id'], group_id) is None:
+                        self.send_error(HTTPStatus.FORBIDDEN)
+                        return
+                elif not user:
+                    self.send_error(HTTPStatus.FORBIDDEN)
                     return
                 send_text_file(self, normalized)
                 return
@@ -2761,7 +2815,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file type'})
         if not file_bytes.startswith(b'%PDF'):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file type'})
-        display_name = form.getvalue('displayName') or file_field.filename or 'partition.pdf'
+        if not scan_for_viruses(file_bytes):
+            return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File failed antivirus scan'})
+        raw_display = form.getvalue('displayName') or file_field.filename or 'partition.pdf'
+        display_name = sanitize_name(raw_display)
+        if display_name is None or (file_field.filename and sanitize_name(file_field.filename) is None):
+            return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file name'})
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute('SELECT id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
@@ -2781,6 +2840,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         os.makedirs(dest_dir, exist_ok=True)
         with open(os.path.join(dest_dir, f'{part_id}.pdf'), 'wb') as f:
             f.write(file_bytes)
+        log_event(
+            user['id'],
+            'partition_upload',
+            {'rehearsal_id': rehearsal_id, 'partition_id': part_id, 'display_name': display_name},
+        )
         return send_json(
             self,
             HTTPStatus.CREATED,
@@ -2818,6 +2882,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             os.remove(file_path)
         except OSError:
             pass
+        log_event(
+            user['id'],
+            'partition_delete',
+            {'rehearsal_id': rehearsal_id, 'partition_id': partition_id},
+        )
         return send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
 
     def api_move_suggestion_to_rehearsal_id(self, sug_id: int, user: dict):
