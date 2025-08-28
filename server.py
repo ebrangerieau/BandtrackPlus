@@ -73,6 +73,8 @@ import datetime
 import gzip
 import urllib.parse
 import mimetypes
+import io
+import cgi
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
@@ -84,6 +86,11 @@ from scripts.migrate_performance_location import migrate as migrate_performance_
 #############################
 
 DB_FILENAME = os.path.join(os.path.dirname(__file__), 'bandtrack.db')
+
+UPLOADS_ROOT = os.path.join(os.path.dirname(__file__), 'uploads', 'partitions')
+
+# Maximum allowed size for uploaded partition files (default 5 MB)
+MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE', 5 * 1024 * 1024))
 
 def get_db_connection():
     """Return a new database connection.  SQLite connections are not
@@ -982,17 +989,25 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if path.startswith('/api/'):
             self.handle_api_request('GET', path, urllib.parse.parse_qs(parsed.query))
         else:
-            # Serve static file.  Remove leading '/' and normalise path
+            # Serve static or uploaded files
+            if path.startswith('/uploads/'):
+                local_path = path.lstrip('/')
+                upload_root = os.path.join(os.path.dirname(__file__), 'uploads')
+                normalized = os.path.normpath(os.path.join(os.path.dirname(__file__), local_path))
+                if not normalized.startswith(upload_root) or not os.path.isfile(normalized):
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                send_text_file(self, normalized)
+                return
+            # Static public files.  Remove leading '/' and normalise path
             local_path = path.lstrip('/') or 'index.html'
             static_root = os.path.join(os.path.dirname(__file__), 'public')
-            # Prevent directory traversal
             normalized = os.path.normpath(os.path.join(static_root, local_path))
             if not normalized.startswith(static_root):
                 self.send_error(HTTPStatus.FORBIDDEN)
                 return
             if os.path.isdir(normalized):
                 normalized = os.path.join(normalized, 'index.html')
-            # Fall back to index.html for client routing (e.g. /performances)
             if not os.path.isfile(normalized):
                 normalized = os.path.join(static_root, 'index.html')
             send_text_file(self, normalized)
@@ -1028,11 +1043,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # the body.
         if method in ('POST', 'PUT', 'DELETE'):
             body_bytes = read_request_body(self)
-            try:
-                body = json.loads(body_bytes.decode('utf-8')) if body_bytes else {}
-            except json.JSONDecodeError:
-                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid JSON'})
-                return
+            content_type = self.headers.get('Content-Type', '')
+            if content_type.startswith('multipart/form-data'):
+                body = body_bytes
+            else:
+                try:
+                    body = json.loads(body_bytes.decode('utf-8')) if body_bytes else {}
+                except json.JSONDecodeError:
+                    send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid JSON'})
+                    return
         else:
             body = {}
 
@@ -1173,6 +1192,27 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     if method == 'POST':
                         return self.api_create_rehearsal(body, user)
                     raise NotImplementedError
+                if len(parts) == 5 and parts[4] == 'partitions':
+                    try:
+                        reh_id = int(parts[3])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    if method == 'GET':
+                        return self.api_get_rehearsal_partitions(reh_id, user)
+                    if method == 'POST':
+                        return self.api_post_rehearsal_partition(reh_id, body, self.headers, user)
+                    else:
+                        raise NotImplementedError
+                if len(parts) == 6 and parts[4] == 'partitions':
+                    try:
+                        reh_id = int(parts[3])
+                        part_id = int(parts[5])
+                    except ValueError:
+                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                    if method == 'DELETE':
+                        return self.api_delete_rehearsal_partition(reh_id, part_id, user)
+                    else:
+                        raise NotImplementedError
                 if len(parts) == 4:
                     try:
                         reh_id = int(parts[3])
@@ -2675,6 +2715,110 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
         conn.close()
         return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Sheet not found'})
+
+    def api_get_rehearsal_partitions(self, rehearsal_id: int, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            '''SELECT p.id, p.display_name, p.uploaded_at, p.path, u.username
+               FROM partitions p
+               JOIN rehearsals r ON r.id = p.rehearsal_id
+               JOIN users u ON u.id = p.uploader_id
+               WHERE p.rehearsal_id = ? AND r.group_id = ?''',
+            (rehearsal_id, user['group_id']),
+        )
+        rows = [
+            {
+                'id': row['id'],
+                'displayName': row['display_name'],
+                'uploader': row['username'],
+                'date': row['uploaded_at'],
+                'downloadUrl': '/' + row['path'].lstrip('/'),
+            }
+            for row in cur.fetchall()
+        ]
+        conn.close()
+        return send_json(self, HTTPStatus.OK, rows)
+
+    def api_post_rehearsal_partition(self, rehearsal_id: int, data: bytes, headers, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+        if not data:
+            return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File required'})
+        form = cgi.FieldStorage(fp=io.BytesIO(data), headers=headers, environ={'REQUEST_METHOD': 'POST'})
+        file_field = form['file'] if 'file' in form else None
+        if not file_field or not getattr(file_field, 'file', None):
+            return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File required'})
+        file_bytes = file_field.file.read()
+        if len(file_bytes) > MAX_PARTITION_SIZE:
+            return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File too large'})
+        file_type = file_field.type or mimetypes.guess_type(file_field.filename)[0]
+        if file_type != 'application/pdf' and not file_field.filename.lower().endswith('.pdf'):
+            return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file type'})
+        if not file_bytes.startswith(b'%PDF'):
+            return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file type'})
+        display_name = form.getvalue('displayName') or file_field.filename or 'partition.pdf'
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+        if not cur.fetchone():
+            conn.close()
+            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+        cur.execute(
+            'INSERT INTO partitions (rehearsal_id, path, display_name, uploader_id) VALUES (?, ?, ?, ?)',
+            (rehearsal_id, '', display_name, user['id']),
+        )
+        part_id = cur.lastrowid
+        rel_path = f'uploads/partitions/{rehearsal_id}/{part_id}.pdf'
+        cur.execute('UPDATE partitions SET path = ? WHERE id = ?', (rel_path, part_id))
+        conn.commit()
+        conn.close()
+        dest_dir = os.path.join(UPLOADS_ROOT, str(rehearsal_id))
+        os.makedirs(dest_dir, exist_ok=True)
+        with open(os.path.join(dest_dir, f'{part_id}.pdf'), 'wb') as f:
+            f.write(file_bytes)
+        return send_json(
+            self,
+            HTTPStatus.CREATED,
+            {
+                'id': part_id,
+                'displayName': display_name,
+                'downloadUrl': '/' + rel_path,
+            },
+        )
+
+    def api_delete_rehearsal_partition(self, rehearsal_id: int, partition_id: int, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            '''SELECT p.path, p.uploader_id FROM partitions p
+               JOIN rehearsals r ON r.id = p.rehearsal_id
+               WHERE p.id = ? AND p.rehearsal_id = ? AND r.group_id = ?''',
+            (partition_id, rehearsal_id, user['group_id']),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Partition not found'})
+        if row['uploader_id'] != user['id'] and role != 'admin':
+            conn.close()
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+        cur.execute('DELETE FROM partitions WHERE id = ?', (partition_id,))
+        conn.commit()
+        conn.close()
+        file_path = os.path.join(os.path.dirname(__file__), row['path'])
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+        return send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
 
     def api_move_suggestion_to_rehearsal_id(self, sug_id: int, user: dict):
         """Move a suggestion to rehearsals."""
