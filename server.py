@@ -150,6 +150,7 @@ def init_db():
                password_hash BLOB NOT NULL,
                role TEXT NOT NULL DEFAULT 'user',
                last_group_id INTEGER,
+               notify_uploads INTEGER NOT NULL DEFAULT 1,
                FOREIGN KEY (last_group_id) REFERENCES groups(id)
            );'''
     )
@@ -318,12 +319,23 @@ def init_db():
                FOREIGN KEY (user_id) REFERENCES users(id)
            );'''
     )
+    # Notifications: store messages for users
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS notifications (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               user_id INTEGER NOT NULL,
+               message TEXT NOT NULL,
+               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+               FOREIGN KEY (user_id) REFERENCES users(id)
+           );'''
+    )
     conn.commit()
     conn.close()
 
     # Ensure additional columns are present in existing databases.  SQLite
     # will raise an OperationalError if a column already exists; we
-    # silently ignore such errors.  Users table: role and last_group_id
+    # silently ignore such errors.  Users table: role, last_group_id and
+    # notify_uploads preference
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -333,6 +345,8 @@ def init_db():
             cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
         if 'last_group_id' not in columns:
             cur.execute('ALTER TABLE users ADD COLUMN last_group_id INTEGER')
+        if 'notify_uploads' not in columns:
+            cur.execute('ALTER TABLE users ADD COLUMN notify_uploads INTEGER NOT NULL DEFAULT 1')
         conn.commit()
         conn.close()
     except Exception:
@@ -1354,6 +1368,20 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     return self.api_get_settings(user)
                 if method == 'PUT':
                     return self.api_update_settings(body, user)
+                raise NotImplementedError
+
+            # User settings
+            if path == '/api/user-settings':
+                if method == 'GET':
+                    return self.api_get_user_settings(user)
+                if method == 'PUT':
+                    return self.api_update_user_settings(body, user)
+                raise NotImplementedError
+
+            # Notifications
+            if path == '/api/notifications':
+                if method == 'GET':
+                    return self.api_get_notifications(user)
                 raise NotImplementedError
 
             # Logs
@@ -2845,6 +2873,21 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             'partition_upload',
             {'rehearsal_id': rehearsal_id, 'partition_id': part_id, 'display_name': display_name},
         )
+        # Send notifications to group members except the uploader
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            '''SELECT u.id FROM users u
+               JOIN memberships m ON m.user_id = u.id
+               WHERE m.group_id = ? AND m.active = 1 AND u.id != ? AND u.notify_uploads = 1''',
+            (user['group_id'], user['id']),
+        )
+        recipients = [row['id'] for row in cur.fetchall()]
+        message = f"{user['username']} uploaded {display_name}"
+        for uid in recipients:
+            cur.execute('INSERT INTO notifications (user_id, message) VALUES (?, ?)', (uid, message))
+        conn.commit()
+        conn.close()
         return send_json(
             self,
             HTTPStatus.CREATED,
@@ -3362,6 +3405,46 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
+
+    def api_get_user_settings(self, user: dict):
+        if not user:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT notify_uploads FROM users WHERE id = ?', (user['id'],))
+        row = cur.fetchone()
+        conn.close()
+        send_json(self, HTTPStatus.OK, {'notifyUploads': bool(row['notify_uploads'])})
+
+    def api_update_user_settings(self, body: dict, user: dict):
+        if not user:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
+            return
+        notify = body.get('notifyUploads')
+        if notify is None:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'notifyUploads is required'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('UPDATE users SET notify_uploads = ? WHERE id = ?', (1 if bool(notify) else 0, user['id']))
+        conn.commit()
+        conn.close()
+        send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
+
+    def api_get_notifications(self, user: dict):
+        if not user:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT id, message, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC', (user['id'],))
+        rows = [
+            {'id': row['id'], 'message': row['message'], 'date': row['created_at']}
+            for row in cur.fetchall()
+        ]
+        conn.close()
+        send_json(self, HTTPStatus.OK, rows)
 
     # ------------------------------------------------------------------
     # Users management (admin only)
