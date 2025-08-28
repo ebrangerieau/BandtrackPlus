@@ -35,8 +35,50 @@ export async function api(path, method = 'GET', data) {
   return json;
 }
 
+export function listPartitions(songId) {
+  return api(`/rehearsals/${songId}/partitions`);
+}
+
+export async function uploadPartition(songId, file, displayName) {
+  const form = new FormData();
+  form.append('file', file);
+  if (displayName) {
+    form.append('displayName', displayName);
+  }
+  const res = await fetch(`/api/rehearsals/${songId}/partitions`, {
+    method: 'POST',
+    body: form,
+    credentials: 'same-origin',
+  });
+  let json;
+  try {
+    json = await res.json();
+  } catch (e) {
+    json = null;
+  }
+  if (res.status === 401) {
+    state.currentUser = null;
+    throw new Error(json?.error || 'Non authentifié');
+  }
+  if (!res.ok) {
+    throw new Error((json && json.error) || 'Erreur API');
+  }
+  return json;
+}
+
+export function deletePartition(songId, partitionId) {
+  return api(`/rehearsals/${songId}/partitions/${partitionId}`, 'DELETE');
+}
+
 export async function syncRehearsalsCache() {
-  state.rehearsalsCache = await api('/rehearsals');
+  const songs = await api('/rehearsals');
+  const withPartitions = await Promise.all(
+    songs.map(async (song) => ({
+      ...song,
+      partitions: await listPartitions(song.id),
+    })),
+  );
+  state.rehearsalsCache = withPartitions;
 }
 
 export function uploadSheetMusic(id, instrument, dataUrl) {
