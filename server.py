@@ -204,7 +204,6 @@ def init_db():
                levels_json TEXT DEFAULT '{}',
                notes_json TEXT DEFAULT '{}',
                audio_notes_json TEXT DEFAULT '{}',
-               sheet_music_json TEXT DEFAULT '{}',
                mastered INTEGER NOT NULL DEFAULT 0,
                creator_id INTEGER NOT NULL,
                group_id INTEGER NOT NULL,
@@ -622,22 +621,6 @@ def parse_audio_notes_json(data: str | None) -> dict:
         elif isinstance(notes, str):
             result[user] = [{'title': '', 'audio': notes}]
     return result
-
-
-def parse_sheet_music_json(data: str | None) -> dict:
-    """Parse sheet music mapping of instrument to data URL."""
-    try:
-        raw = json.loads(data or '{}')
-    except Exception:
-        raw = {}
-    result: dict[str, str] = {}
-    if isinstance(raw, dict):
-        for inst, sheet in raw.items():
-            if isinstance(sheet, str):
-                result[str(inst)] = sheet
-    return result
-
-
 def add_webauthn_credential(user_id: int, credential_id: str) -> int:
     """Store a WebAuthn credential for a user."""
     with get_db_connection() as conn:
@@ -770,7 +753,7 @@ def move_suggestion_to_rehearsal(sug_id: int):
         )
         new_id = cur.lastrowid
         cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.sheet_music_json,
+            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                       r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
                       u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
                WHERE r.id = ?''',
@@ -790,7 +773,6 @@ def move_suggestion_to_rehearsal(sug_id: int):
         'spotify': new_row['spotify'],
         'versionOf': new_row['version_of'],
         'audioNotes': parse_audio_notes_json(new_row['audio_notes_json']),
-        'sheetMusic': parse_sheet_music_json(new_row['sheet_music_json']),
         'levels': json.loads(new_row['levels_json'] or '{}'),
         'notes': json.loads(new_row['notes_json'] or '{}'),
         'mastered': bool(new_row['mastered']),
@@ -1300,16 +1282,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     except ValueError:
                         return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
                     return self.api_toggle_rehearsal_mastered(reh_id, user)
-                if len(parts) == 5 and parts[4] == 'sheet':
-                    try:
-                        reh_id = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    if method == 'DELETE':
-                        instrument = (query.get('instrument') or [''])[0]
-                        return self.api_delete_rehearsal_sheet(reh_id, instrument, user)
-                    else:
-                        raise NotImplementedError
                 if len(parts) == 5 and parts[4] == 'to-suggestion' and method == 'POST':
                     try:
                         reh_id = int(parts[3])
@@ -2167,7 +2139,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.sheet_music_json, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
+            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
                FROM rehearsals r JOIN users u ON u.id = r.creator_id
                WHERE r.group_id = ?''',
             (user['group_id'],)
@@ -2177,7 +2149,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             levels = json.loads(row['levels_json'] or '{}')
             notes = json.loads(row['notes_json'] or '{}')
             audio_notes = parse_audio_notes_json(row['audio_notes_json'])
-            sheet_music = parse_sheet_music_json(row['sheet_music_json'])
             avg = (
                 sum(float(v) for v in levels.values()) / len(levels)
                 if levels
@@ -2191,7 +2162,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'spotify': row['spotify'],
                 'versionOf': row['version_of'],
                 'audioNotes': audio_notes,
-                'sheetMusic': sheet_music,
                 'levels': levels,
                 'notes': notes,
                 'mastered': bool(row['mastered']),
@@ -2211,7 +2181,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.sheet_music_json,
+            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                       r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
                FROM rehearsals r JOIN users u ON u.id = r.creator_id
                WHERE r.id = ? AND r.group_id = ?''',
@@ -2224,7 +2194,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         levels = json.loads(row['levels_json'] or '{}')
         notes = json.loads(row['notes_json'] or '{}')
         audio_notes = parse_audio_notes_json(row['audio_notes_json'])
-        sheet_music = parse_sheet_music_json(row['sheet_music_json'])
         avg = (
             sum(float(v) for v in levels.values()) / len(levels)
             if levels
@@ -2241,7 +2210,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'spotify': row['spotify'],
                 'versionOf': row['version_of'],
                 'audioNotes': audio_notes,
-                'sheetMusic': sheet_music,
                 'levels': levels,
                 'notes': notes,
                 'mastered': bool(row['mastered']),
@@ -2586,8 +2554,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         audio_b64 = body.get('audio')
         audio_title = body.get('audioTitle')
         audio_index = body.get('audioIndex')
-        sheet_instrument = body.get('instrument')
-        sheet_data = body.get('sheet')
         # If nothing to update, return error
         if all(
             v is None
@@ -2601,8 +2567,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 note,
                 audio_b64,
                 audio_index,
-                sheet_instrument,
-                sheet_data,
             )
         ):
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing to update'})
@@ -2611,7 +2575,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         cur = conn.cursor()
         # Fetch current rehearsal record including author and audio notes JSON
         cur.execute(
-            'SELECT title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, sheet_music_json, mastered, creator_id '
+            'SELECT title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id '
             'FROM rehearsals WHERE id = ? AND group_id = ?',
             (rehearsal_id, user['group_id'])
         )
@@ -2652,14 +2616,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             or note is not None
             or audio_b64 is not None
             or audio_index is not None
-            or sheet_instrument is not None
-            or sheet_data is not None
         ):
             # Parse JSON fields
             levels = json.loads(row['levels_json'] or '{}')
             notes = json.loads(row['notes_json'] or '{}')
             audio_notes = parse_audio_notes_json(row['audio_notes_json'])
-            sheet_music = json.loads(row['sheet_music_json'] or '{}')
             if level is not None:
                 try:
                     level_val = float(level)
@@ -2689,18 +2650,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         audio_notes.pop(user['username'], None)
                 except (TypeError, ValueError):
                     pass
-            if sheet_instrument is not None and sheet_data is not None:
-                if sheet_data == '':
-                    sheet_music.pop(str(sheet_instrument), None)
-                else:
-                    sheet_music[str(sheet_instrument)] = str(sheet_data)
             cur.execute(
-                'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ?, sheet_music_json = ? WHERE id = ? AND group_id = ?',
+                'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ? AND group_id = ?',
                 (
                     json.dumps(levels),
                     json.dumps(notes),
                     json.dumps(audio_notes),
-                    json.dumps(sheet_music),
                     rehearsal_id,
                     user['group_id'],
                 ),
@@ -2733,7 +2688,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         cur.execute('UPDATE rehearsals SET mastered = ? WHERE id = ? AND group_id = ?', (new_val, rehearsal_id, user['group_id']))
         conn.commit()
         cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.sheet_music_json,
+            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                       r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
                       u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
                WHERE r.id = ? AND r.group_id = ?''',
@@ -2745,7 +2700,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             levels = json.loads(updated['levels_json'] or '{}')
             notes = json.loads(updated['notes_json'] or '{}')
             audio_notes = parse_audio_notes_json(updated['audio_notes_json'])
-            sheet_music = parse_sheet_music_json(updated['sheet_music_json'])
             send_json(
                 self,
                 HTTPStatus.OK,
@@ -2757,7 +2711,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     'spotify': updated['spotify'],
                     'versionOf': updated['version_of'],
                     'audioNotes': audio_notes,
-                    'sheetMusic': sheet_music,
                     'levels': levels,
                     'notes': notes,
                     'mastered': bool(updated['mastered']),
@@ -2768,35 +2721,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             )
         else:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-
-    def api_delete_rehearsal_sheet(self, rehearsal_id: int, instrument: str, user: dict):
-        role = verify_group_access(user['id'], user['group_id'])
-        if not role:
-            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-        if not instrument:
-            return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Instrument required'})
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            'SELECT sheet_music_json FROM rehearsals WHERE id = ? AND group_id = ?',
-            (rehearsal_id, user['group_id']),
-        )
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-        sheets = json.loads(row['sheet_music_json'] or '{}')
-        if instrument in sheets:
-            sheets.pop(instrument, None)
-            cur.execute(
-                'UPDATE rehearsals SET sheet_music_json = ? WHERE id = ? AND group_id = ?',
-                (json.dumps(sheets), rehearsal_id, user['group_id']),
-            )
-            conn.commit()
-            conn.close()
-            return send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
-        conn.close()
-        return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Sheet not found'})
 
     def api_get_rehearsal_partitions(self, rehearsal_id: int, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
