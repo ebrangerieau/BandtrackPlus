@@ -2805,7 +2805,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File required'})
         form = cgi.FieldStorage(fp=io.BytesIO(data), headers=headers, environ={'REQUEST_METHOD': 'POST'})
         file_field = form['file'] if 'file' in form else None
-        if not file_field or not getattr(file_field, 'file', None):
+        if file_field is None or not getattr(file_field, 'file', None):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File required'})
         file_bytes = file_field.file.read()
         if len(file_bytes) > MAX_PARTITION_SIZE:
