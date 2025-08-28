@@ -15,7 +15,7 @@
   l’écran de connexion.
 */
 import { state, resetCaches } from "../state.js";
-import { api, syncRehearsalsCache, uploadSheetMusic, deleteSheetMusic } from "../api.js";
+import { api, syncRehearsalsCache, uploadPartition, deletePartition } from "../api.js";
 import { checkSession, handleLogout, applyTheme, applyTemplate } from "../auth.js";
 
 
@@ -1144,70 +1144,74 @@ Object.defineProperties(state, {
       audioSection.appendChild(uploadBtn);
       audioSection.appendChild(fileInput);
       details.appendChild(audioSection);
-      // Partitions
-      const sheetSection = document.createElement('div');
-      sheetSection.style.marginTop = '8px';
-      const sheets = song.sheetMusic || {};
-      Object.keys(sheets).forEach((inst) => {
-        const wrap = document.createElement('div');
-        const link = document.createElement('a');
-        link.href = sheets[inst];
-        link.textContent = inst;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        wrap.appendChild(link);
-        const del = document.createElement('button');
-        del.className = 'btn-danger';
-        del.textContent = 'Supprimer';
-        del.style.marginLeft = '8px';
-        del.onclick = async (e) => {
+      if (currentUser) {
+        // Partitions
+        const partSection = document.createElement('div');
+        partSection.style.marginTop = '8px';
+        const partLabel = document.createElement('label');
+        partLabel.textContent = 'Partition(s)';
+        partSection.appendChild(partLabel);
+        const partList = document.createElement('div');
+        (song.partitions || []).forEach((p) => {
+          const row = document.createElement('div');
+          const info = document.createElement('span');
+          info.textContent = `${p.displayName} – ${p.uploader} – ${formatDateTime(p.date)}`;
+          row.appendChild(info);
+          const dl = document.createElement('a');
+          dl.href = p.downloadUrl;
+          dl.textContent = 'Télécharger';
+          dl.target = '_blank';
+          dl.rel = 'noopener noreferrer';
+          dl.className = 'btn-secondary';
+          dl.style.marginLeft = '8px';
+          row.appendChild(dl);
+          if (p.uploader === currentUser.username || isAdmin()) {
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn-danger';
+            delBtn.textContent = 'Supprimer';
+            delBtn.style.marginLeft = '8px';
+            delBtn.onclick = async (e) => {
+              e.preventDefault();
+              if (!confirm('Supprimer cette partition ?')) return;
+              try {
+                await deletePartition(song.id, p.id);
+                await syncRehearsalsCache();
+                renderRehearsals(container);
+              } catch (err) {
+                alert(err.message);
+              }
+            };
+            row.appendChild(delBtn);
+          }
+          partList.appendChild(row);
+        });
+        partSection.appendChild(partList);
+        const partInput = document.createElement('input');
+        partInput.type = 'file';
+        partInput.accept = 'application/pdf';
+        partInput.style.display = 'none';
+        const partBtn = document.createElement('button');
+        partBtn.className = 'btn-secondary';
+        partBtn.textContent = 'Déposer une partition';
+        partBtn.onclick = (e) => {
           e.preventDefault();
-          if (!confirm('Supprimer cette partition ?')) return;
+          partInput.click();
+        };
+        partInput.onchange = async () => {
+          const file = partInput.files[0];
+          if (!file) return;
           try {
-            await deleteSheetMusic(song.id, inst);
+            await uploadPartition(song.id, file, file.name);
+            await syncRehearsalsCache();
             renderRehearsals(container);
           } catch (err) {
             alert(err.message);
           }
         };
-        wrap.appendChild(del);
-        sheetSection.appendChild(wrap);
-      });
-      const instInput = document.createElement('input');
-      instInput.type = 'text';
-      instInput.placeholder = 'Instrument';
-      instInput.style.display = 'block';
-      instInput.style.marginTop = '8px';
-      const sheetInput = document.createElement('input');
-      sheetInput.type = 'file';
-      sheetInput.accept = '.pdf,image/*';
-      sheetInput.style.display = 'none';
-      const sheetBtn = document.createElement('button');
-      sheetBtn.className = 'btn-secondary';
-      sheetBtn.textContent = 'Ajouter une partition';
-      sheetBtn.onclick = (e) => {
-        e.preventDefault();
-        sheetInput.click();
-      };
-      sheetInput.onchange = async () => {
-        const file = sheetInput.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          const dataUrl = (ev.target?.result || '').toString();
-          try {
-            await uploadSheetMusic(song.id, instInput.value, dataUrl);
-            renderRehearsals(container);
-          } catch (err) {
-            alert(err.message);
-          }
-        };
-        reader.readAsDataURL(file);
-      };
-      sheetSection.appendChild(instInput);
-      sheetSection.appendChild(sheetBtn);
-      sheetSection.appendChild(sheetInput);
-      details.appendChild(sheetSection);
+        partSection.appendChild(partBtn);
+        partSection.appendChild(partInput);
+        details.appendChild(partSection);
+      }
       // Afficher les notes et niveaux des autres membres
       // Filtrer les autres membres en ignorant la casse afin d’éviter de voir
       // apparaître plusieurs fois le même utilisateur (ex : « eric » et « Eric »).
@@ -2522,6 +2526,80 @@ Object.defineProperties(state, {
     audioSection.appendChild(addBtn);
     audioSection.appendChild(fileInp);
     content.appendChild(audioSection);
+    if (currentUser) {
+      // Partitions
+      const partSection = document.createElement('div');
+      partSection.style.marginTop = '8px';
+      const partLabel = document.createElement('label');
+      partLabel.textContent = 'Partition(s)';
+      partSection.appendChild(partLabel);
+      const partList = document.createElement('div');
+      (song.partitions || []).forEach((p) => {
+        const row = document.createElement('div');
+        const info = document.createElement('span');
+        info.textContent = `${p.displayName} – ${p.uploader} – ${formatDateTime(p.date)}`;
+        row.appendChild(info);
+        const dl = document.createElement('a');
+        dl.href = p.downloadUrl;
+        dl.textContent = 'Télécharger';
+        dl.target = '_blank';
+        dl.rel = 'noopener noreferrer';
+        dl.className = 'btn-secondary';
+        dl.style.marginLeft = '8px';
+        row.appendChild(dl);
+        if (p.uploader === currentUser.username || isAdmin()) {
+          const delBtn = document.createElement('button');
+          delBtn.className = 'btn-danger';
+          delBtn.textContent = 'Supprimer';
+          delBtn.style.marginLeft = '8px';
+          delBtn.onclick = async (e) => {
+            e.preventDefault();
+            if (!confirm('Supprimer cette partition ?')) return;
+            try {
+              await deletePartition(song.id, p.id);
+              await syncRehearsalsCache();
+              renderRehearsals(document.getElementById('app'));
+              const updated = state.rehearsalsCache.find((s) => s.id === song.id);
+              modal.remove();
+              showSongDetail(updated);
+            } catch (err) {
+              alert(err.message);
+            }
+          };
+          row.appendChild(delBtn);
+        }
+        partList.appendChild(row);
+      });
+      partSection.appendChild(partList);
+      const partInput = document.createElement('input');
+      partInput.type = 'file';
+      partInput.accept = 'application/pdf';
+      partInput.style.display = 'none';
+      const partBtn = document.createElement('button');
+      partBtn.className = 'btn-secondary';
+      partBtn.textContent = 'Déposer une partition';
+      partBtn.onclick = (e) => {
+        e.preventDefault();
+        partInput.click();
+      };
+      partInput.onchange = async () => {
+        const file = partInput.files[0];
+        if (!file) return;
+        try {
+          await uploadPartition(song.id, file, file.name);
+          await syncRehearsalsCache();
+          renderRehearsals(document.getElementById('app'));
+          const updated = state.rehearsalsCache.find((s) => s.id === song.id);
+          modal.remove();
+          showSongDetail(updated);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      partSection.appendChild(partBtn);
+      partSection.appendChild(partInput);
+      content.appendChild(partSection);
+    }
     // Autres membres
     // Filtrer en ignorant la casse pour éviter la duplication de l’utilisateur courant
     const others = Object.keys(song.levels || {}).filter((u) => u.toLowerCase() !== currentUser.username.toLowerCase());
