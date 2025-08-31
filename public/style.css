@@ -540,8 +540,9 @@ textarea {
   font-size: 20px;
   font-weight: bold;
   text-align: center;
-  background-color: rgba(255, 255, 255, 0.7);
-  color: #000;
+  background-color: var(--card-bg);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
   padding: 10px 15px;
   border-radius: 8px;
   width: fit-content;
@@ -644,10 +645,11 @@ textarea {
   gap: 8px;
   margin-bottom: 8px;
   justify-content: center;
-  /* Trame de fond pour mieux distinguer la navigation */
-  background-color: rgba(255, 255, 255, 0.7);
-  color: #000;
+  /* Trame de fond adaptée au thème */
+  background-color: var(--card-bg);
+  color: var(--text-color);
   padding: 4px 8px;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
 }
 
@@ -668,9 +670,10 @@ textarea {
 /* Libellé mois/année */
 .calendar-nav span {
   font-weight: bold;
-  background-color: rgba(255, 255, 255, 0.7);
-  color: #000;
+  background-color: var(--card-bg);
+  color: var(--text-color);
   padding: 2px 6px;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
 }
 
@@ -684,10 +687,11 @@ textarea {
 .calendar-day-name {
   font-weight: bold;
   text-align: center;
-  /* Fond léger pour les jours de la semaine */
-  background-color: rgba(255, 255, 255, 0.7);
-  color: #000;
+  /* Fond adapté au thème pour les jours de la semaine */
+  background-color: var(--card-bg);
+  color: var(--text-color);
   padding: 4px 0;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
 }
 
@@ -705,11 +709,12 @@ textarea {
 
 .calendar-date {
   font-weight: bold;
-  /* Fond léger derrière le numéro pour une meilleure lisibilité */
+  /* Fond adapté au thème derrière le numéro pour une meilleure lisibilité */
   display: inline-block;
-  background-color: rgba(255, 255, 255, 0.7);
-  color: #000;
+  background-color: var(--card-bg);
+  color: var(--text-color);
   padding: 2px 4px;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
 }
 
