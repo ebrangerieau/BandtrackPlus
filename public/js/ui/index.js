@@ -452,16 +452,28 @@ Object.defineProperties(state, {
     container.className = 'home-container';
     app.appendChild(container);
 
-    const welcome = document.createElement('p');
     const userName = currentUser ? currentUser.username : '';
-    welcome.appendChild(document.createTextNode('Salut '));
-    const nameStrong = document.createElement('strong');
-    nameStrong.textContent = userName;
-    welcome.appendChild(nameStrong);
-    welcome.appendChild(
-      document.createTextNode(", voici où en est votre groupe aujourd'hui...")
+
+    const welcomeSection = document.createElement('div');
+    welcomeSection.className = 'welcome-section';
+    const welcomeP = document.createElement('p');
+    const salutStrong = document.createElement('strong');
+    salutStrong.className = 'text-xl';
+    salutStrong.textContent = 'Salut';
+    welcomeP.appendChild(salutStrong);
+    welcomeP.appendChild(
+      document.createTextNode(
+        ` ${userName}, voici où en est votre groupe aujourd'hui...`
+      )
     );
-    container.appendChild(welcome);
+    welcomeSection.appendChild(welcomeP);
+    container.appendChild(welcomeSection);
+
+    const upcomingSection = document.createElement('div');
+    upcomingSection.className = 'upcoming-section';
+    const upcomingTitle = document.createElement('h3');
+    upcomingTitle.textContent = 'À venir';
+    upcomingSection.appendChild(upcomingTitle);
 
     let nextPerfInfo = 'Aucune prestation prévue';
     try {
@@ -481,7 +493,7 @@ Object.defineProperties(state, {
     perfStrong.textContent = 'Prochaine prestation :';
     perfP.appendChild(perfStrong);
     perfP.appendChild(document.createTextNode(' ' + nextPerfInfo));
-    container.appendChild(perfP);
+    upcomingSection.appendChild(perfP);
 
     let nextRehearsalInfo = '—';
     try {
@@ -492,7 +504,9 @@ Object.defineProperties(state, {
       upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
       if (upcoming.length > 0) {
         const r = upcoming[0];
-        nextRehearsalInfo = `${formatDateTime(r.date)}${r.location ? ' – ' + r.location : ''}`;
+        nextRehearsalInfo = `${formatDateTime(r.date)}${
+          r.location ? ' – ' + r.location : ''
+        }`;
       }
     } catch (err) {
       // ignore errors
@@ -502,7 +516,9 @@ Object.defineProperties(state, {
     rehStrong.textContent = 'Prochaine répétition :';
     rehP.appendChild(rehStrong);
     rehP.appendChild(document.createTextNode(' ' + nextRehearsalInfo));
-    container.appendChild(rehP);
+    upcomingSection.appendChild(rehP);
+
+    container.appendChild(upcomingSection);
 
   }
 
