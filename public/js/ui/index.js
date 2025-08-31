@@ -674,7 +674,7 @@ Object.defineProperties(state, {
     // Afficher la liste
     list.forEach((item) => {
       const card = document.createElement('div');
-      card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-pink-50';
+      card.className = 'card collapsed bg-white rounded-lg shadow-md p-4 bg-pink-50 text-gray-900';
 
       const headerRow = document.createElement('div');
       headerRow.className = 'card-header';
