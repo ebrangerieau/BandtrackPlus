@@ -44,35 +44,27 @@ Object.defineProperties(state, {
   // Ferme le menu lorsqu'on clique à l'extérieur
   document.addEventListener('click', (e) => {
     const menu = document.getElementById('profile-menu');
-    const hamburger = document.getElementById('hamburger');
+    const profileBtn = document.getElementById('profile-btn');
     if (!menu) return;
     if (
       !menu.classList.contains('hidden') &&
       !menu.contains(e.target) &&
-      e.target !== hamburger && !hamburger?.contains(e.target)
+      e.target !== profileBtn && !profileBtn?.contains(e.target)
     ) {
       menu.classList.add('hidden');
       menu.classList.remove('block', 'open');
-      hamburger?.classList.remove('open');
+      profileBtn?.classList.remove('open');
     }
   });
 
   function toggleMenu() {
     const menu = document.getElementById('profile-menu');
-    const btn = document.getElementById('hamburger');
+    const btn = document.getElementById('profile-btn');
     if (!menu || !btn) return;
     menu.classList.toggle('hidden');
     menu.classList.toggle('block');
     menu.classList.toggle('open');
     btn.classList.toggle('open');
-    const bars = btn.querySelectorAll('span');
-    if (bars.length === 3) {
-      bars[0].classList.toggle('translate-y-1.5');
-      bars[0].classList.toggle('rotate-45');
-      bars[1].classList.toggle('opacity-0');
-      bars[2].classList.toggle('-translate-y-1.5');
-      bars[2].classList.toggle('-rotate-45');
-    }
   }
 
   function hasModRights() {
@@ -511,15 +503,32 @@ Object.defineProperties(state, {
    */
   async function renderMain(app) {
     app.innerHTML = '';
-    const hamburgerBtn = document.getElementById('hamburger');
+    const profileBtn = document.getElementById('profile-btn');
     const profileMenu = document.getElementById('profile-menu');
     const perfBtn = document.getElementById('menu-performances');
     const settingsBtn = document.getElementById('menu-settings');
     const logoutMenuBtn = document.getElementById('menu-logout');
-    if (hamburgerBtn && profileMenu) {
-      hamburgerBtn.onclick = (e) => {
+    const themeToggle = document.getElementById('theme-toggle');
+    if (profileBtn && profileMenu) {
+      profileBtn.onclick = (e) => {
         e.stopPropagation();
         toggleMenu();
+      };
+    }
+    if (themeToggle) {
+      themeToggle.textContent = document.body.classList.contains('dark') ? '☀️' : '🌙';
+      themeToggle.onclick = async () => {
+        document.body.classList.toggle('dark');
+        const dark = document.body.classList.contains('dark');
+        themeToggle.textContent = dark ? '☀️' : '🌙';
+        try {
+          const settings = await api('/settings');
+          const currentSettings = { ...settings, darkMode: dark };
+          await api('/settings', 'PUT', currentSettings);
+          applyTheme(currentSettings.darkMode);
+        } catch (err) {
+          console.error(err);
+        }
       };
     }
     if (perfBtn) {
