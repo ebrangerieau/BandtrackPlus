@@ -95,13 +95,28 @@ UPLOADS_ROOT = os.path.join(os.path.dirname(__file__), 'uploads', 'partitions')
 # Maximum allowed size for uploaded partition files (default 5 MB)
 MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE', 5 * 1024 * 1024))
 
+
+def execute_write(target, sql, params=()):
+    """Execute a SQL statement with retry on database locks."""
+    delay = 0.05
+    for attempt in range(5):
+        try:
+            return target.execute(sql, params)
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower() and attempt < 4:
+                time.sleep(delay)
+                delay *= 2
+                continue
+            raise
+
+
 @contextmanager
 def get_db_connection():
     """Yield a database connection with foreign keys enabled."""
     conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
-    conn.execute('PRAGMA foreign_keys = ON')
-    conn.execute('PRAGMA journal_mode=WAL')
-    conn.execute('PRAGMA busy_timeout=30000')
+    execute_write(conn, 'PRAGMA foreign_keys = ON')
+    execute_write(conn, 'PRAGMA journal_mode=WAL')
+    execute_write(conn, 'PRAGMA busy_timeout=30000')
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -113,9 +128,9 @@ def get_db_connection():
 def open_db_connection() -> sqlite3.Connection:
     """Return a new database connection with the standard settings applied."""
     conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
-    conn.execute('PRAGMA foreign_keys = ON')
-    conn.execute('PRAGMA journal_mode=WAL')
-    conn.execute('PRAGMA busy_timeout=30000')
+    execute_write(conn, 'PRAGMA foreign_keys = ON')
+    execute_write(conn, 'PRAGMA journal_mode=WAL')
+    execute_write(conn, 'PRAGMA busy_timeout=30000')
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -128,7 +143,7 @@ class PartitionDAO:
 
     def create(self, rehearsal_id: int, path: str, display_name: str, uploader_id: int) -> int:
         cur = self.conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'INSERT INTO partitions (rehearsal_id, path, display_name, uploader_id) VALUES (?, ?, ?, ?)',
             (rehearsal_id, path, display_name, uploader_id),
         )
@@ -137,12 +152,12 @@ class PartitionDAO:
 
     def list_by_rehearsal(self, rehearsal_id: int) -> list[sqlite3.Row]:
         cur = self.conn.cursor()
-        cur.execute('SELECT * FROM partitions WHERE rehearsal_id = ?', (rehearsal_id,))
+        execute_write(cur, 'SELECT * FROM partitions WHERE rehearsal_id = ?', (rehearsal_id,))
         return cur.fetchall()
 
     def delete(self, partition_id: int) -> None:
         cur = self.conn.cursor()
-        cur.execute('DELETE FROM partitions WHERE id = ?', (partition_id,))
+        execute_write(cur, 'DELETE FROM partitions WHERE id = ?', (partition_id,))
         self.conn.commit()
 
 
@@ -156,7 +171,7 @@ def init_db():
     with get_db_connection() as conn:
         cur = conn.cursor()
         # Users table: store username, salt and password hash
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS users (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    username TEXT NOT NULL UNIQUE,
@@ -169,7 +184,7 @@ def init_db():
                );'''
         )
         # WebAuthn credentials associated with users
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS users_webauthn (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
@@ -178,7 +193,7 @@ def init_db():
                );'''
         )
         # Suggestions: simple list of suggestions with optional URL and creator
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS suggestions (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    title TEXT NOT NULL,
@@ -195,7 +210,7 @@ def init_db():
                );'''
         )
         # Individual suggestion votes per user
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS suggestion_votes (
                    suggestion_id INTEGER NOT NULL,
                    user_id INTEGER NOT NULL,
@@ -207,7 +222,7 @@ def init_db():
         # Rehearsals: store levels and notes per user as JSON strings.  Include
         # optional author, YouTube/Spotify links and audio notes JSON.  The
         # ``audio_notes_json`` field stores base64‑encoded audio notes per user.
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS rehearsals (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    title TEXT NOT NULL,
@@ -227,7 +242,7 @@ def init_db():
                );'''
         )
         # Partitions associated with rehearsals
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS partitions (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    rehearsal_id INTEGER NOT NULL,
@@ -240,7 +255,7 @@ def init_db():
                );'''
         )
         # Performances: contains name, date and a JSON array of rehearsal IDs
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS performances (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    name TEXT NOT NULL,
@@ -257,7 +272,7 @@ def init_db():
         # Rehearsal events: standalone rehearsal occurrences with date and
         # location information.  These are distinct from the "rehearsals"
         # table above, which stores songs to rehearse.
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS rehearsal_events (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    date TEXT NOT NULL,
@@ -270,7 +285,7 @@ def init_db():
                );'''
         )
         # Groups allow multiple band configurations and are owned by a user
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS groups (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    name TEXT NOT NULL,
@@ -283,7 +298,7 @@ def init_db():
                );'''
         )
         # Memberships link users to groups with a role and optional nickname
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS memberships (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
@@ -297,12 +312,12 @@ def init_db():
                );'''
         )
         # Index for quick lookup of a membership by user and group
-        cur.execute(
+        execute_write(cur, 
             'CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships(user_id, group_id)'
         )
         # Settings: single row with group name, dark mode flag and optional
         # next rehearsal info.  "template" selects the UI theme.
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS settings (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    group_id INTEGER NOT NULL UNIQUE,
@@ -313,7 +328,7 @@ def init_db():
                );'''
         )
         # Sessions: store session token, associated user and expiry timestamp (epoch)
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS sessions (
                    token TEXT PRIMARY KEY,
                    user_id INTEGER NOT NULL,
@@ -322,7 +337,7 @@ def init_db():
                );'''
         )
         # Logs: record key user actions
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS logs (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -333,7 +348,7 @@ def init_db():
                );'''
         )
         # Notifications: store messages for users
-        cur.execute(
+        execute_write(cur, 
             '''CREATE TABLE IF NOT EXISTS notifications (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
@@ -352,14 +367,14 @@ def init_db():
     try:
         conn = open_db_connection()
         cur = conn.cursor()
-        cur.execute('PRAGMA table_info(users)')
+        execute_write(cur, 'PRAGMA table_info(users)')
         columns = [row['name'] for row in cur.fetchall()]
         if 'role' not in columns:
-            cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            execute_write(cur, "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
         if 'last_group_id' not in columns:
-            cur.execute('ALTER TABLE users ADD COLUMN last_group_id INTEGER')
+            execute_write(cur, 'ALTER TABLE users ADD COLUMN last_group_id INTEGER')
         if 'notify_uploads' not in columns:
-            cur.execute('ALTER TABLE users ADD COLUMN notify_uploads INTEGER NOT NULL DEFAULT 1')
+            execute_write(cur, 'ALTER TABLE users ADD COLUMN notify_uploads INTEGER NOT NULL DEFAULT 1')
         conn.commit()
     except Exception:
         pass
@@ -371,20 +386,20 @@ def init_db():
     try:
         conn = open_db_connection()
         cur = conn.cursor()
-        cur.execute('PRAGMA table_info(suggestions)')
+        execute_write(cur, 'PRAGMA table_info(suggestions)')
         s_columns = [row['name'] for row in cur.fetchall()]
         if 'author' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN author TEXT')
+            execute_write(cur, 'ALTER TABLE suggestions ADD COLUMN author TEXT')
         if 'youtube' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN youtube TEXT')
+            execute_write(cur, 'ALTER TABLE suggestions ADD COLUMN youtube TEXT')
         if 'version_of' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN version_of TEXT')
+            execute_write(cur, 'ALTER TABLE suggestions ADD COLUMN version_of TEXT')
         if 'likes' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0')
+            execute_write(cur, 'ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0')
         if 'group_id' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN group_id INTEGER')
+            execute_write(cur, 'ALTER TABLE suggestions ADD COLUMN group_id INTEGER')
             # Populate group_id using creator's active group
-            cur.execute(
+            execute_write(cur, 
                 '''UPDATE suggestions SET group_id = (
                         SELECT group_id FROM memberships m
                         WHERE m.user_id = suggestions.creator_id AND m.active = 1
@@ -402,24 +417,24 @@ def init_db():
     try:
         conn = open_db_connection()
         cur = conn.cursor()
-        cur.execute('PRAGMA table_info(rehearsals)')
+        execute_write(cur, 'PRAGMA table_info(rehearsals)')
         r_columns = [row['name'] for row in cur.fetchall()]
         if 'author' not in r_columns:
-            cur.execute('ALTER TABLE rehearsals ADD COLUMN author TEXT')
+            execute_write(cur, 'ALTER TABLE rehearsals ADD COLUMN author TEXT')
         if 'audio_notes_json' not in r_columns:
-            cur.execute("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
+            execute_write(cur, "ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
         if 'sheet_music_json' in r_columns and not new_db:
             try:
-                cur.execute('ALTER TABLE rehearsals DROP COLUMN sheet_music_json')
+                execute_write(cur, 'ALTER TABLE rehearsals DROP COLUMN sheet_music_json')
             except sqlite3.OperationalError:
                 pass
         if 'mastered' not in r_columns:
-            cur.execute('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0')
+            execute_write(cur, 'ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0')
         if 'version_of' not in r_columns:
-            cur.execute('ALTER TABLE rehearsals ADD COLUMN version_of TEXT')
+            execute_write(cur, 'ALTER TABLE rehearsals ADD COLUMN version_of TEXT')
         if 'group_id' not in r_columns:
-            cur.execute('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER')
-            cur.execute(
+            execute_write(cur, 'ALTER TABLE rehearsals ADD COLUMN group_id INTEGER')
+            execute_write(cur, 
                 '''UPDATE rehearsals SET group_id = (
                         SELECT group_id FROM memberships m
                         WHERE m.user_id = rehearsals.creator_id AND m.active = 1
@@ -438,11 +453,11 @@ def init_db():
     try:
         conn = open_db_connection()
         cur = conn.cursor()
-        cur.execute('PRAGMA table_info(performances)')
+        execute_write(cur, 'PRAGMA table_info(performances)')
         p_columns = [row['name'] for row in cur.fetchall()]
         if 'group_id' not in p_columns:
-            cur.execute('ALTER TABLE performances ADD COLUMN group_id INTEGER')
-            cur.execute(
+            execute_write(cur, 'ALTER TABLE performances ADD COLUMN group_id INTEGER')
+            execute_write(cur, 
                 '''UPDATE performances SET group_id = (
                         SELECT group_id FROM memberships m
                         WHERE m.user_id = performances.creator_id AND m.active = 1
@@ -462,13 +477,13 @@ def init_db():
     try:
         conn = open_db_connection()
         cur = conn.cursor()
-        cur.execute('PRAGMA table_info(settings)')
+        execute_write(cur, 'PRAGMA table_info(settings)')
         settings_columns = [row['name'] for row in cur.fetchall()]
         if 'template' not in settings_columns:
-            cur.execute("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
+            execute_write(cur, "ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
         if 'group_id' not in settings_columns:
-            cur.execute('ALTER TABLE settings ADD COLUMN group_id INTEGER')
-            cur.execute('UPDATE settings SET group_id = 1 WHERE group_id IS NULL')
+            execute_write(cur, 'ALTER TABLE settings ADD COLUMN group_id INTEGER')
+            execute_write(cur, 'UPDATE settings SET group_id = 1 WHERE group_id IS NULL')
         conn.commit()
     except Exception:
         pass
@@ -482,10 +497,10 @@ def init_db():
     try:
         conn = open_db_connection()
         cur = conn.cursor()
-        cur.execute('PRAGMA table_info(sessions)')
+        execute_write(cur, 'PRAGMA table_info(sessions)')
         sess_columns = [row['name'] for row in cur.fetchall()]
         if 'group_id' not in sess_columns:
-            cur.execute('ALTER TABLE sessions ADD COLUMN group_id INTEGER')
+            execute_write(cur, 'ALTER TABLE sessions ADD COLUMN group_id INTEGER')
         conn.commit()
     except Exception:
         pass
@@ -523,7 +538,7 @@ def generate_unique_invitation_code() -> str:
         cur = conn.cursor()
         while True:
             code = generate_invitation_code()
-            cur.execute('SELECT 1 FROM groups WHERE invitation_code = ?', (code,))
+            execute_write(cur, 'SELECT 1 FROM groups WHERE invitation_code = ?', (code,))
             if cur.fetchone() is None:
                 return code
 
@@ -535,7 +550,7 @@ def generate_session(user_id: int, group_id: int | None, duration_seconds: int =
     expires_at = int(time.time()) + duration_seconds
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'INSERT INTO sessions (token, user_id, group_id, expires_at) VALUES (?, ?, ?, ?)',
             (token, user_id, group_id, expires_at)
         )
@@ -551,9 +566,9 @@ def get_user_by_session(token: str) -> dict | None:
     with get_db_connection() as conn:
         cur = conn.cursor()
         # Remove expired sessions
-        cur.execute('DELETE FROM sessions WHERE expires_at <= ?', (int(time.time()),))
+        execute_write(cur, 'DELETE FROM sessions WHERE expires_at <= ?', (int(time.time()),))
         # Fetch the session
-        cur.execute(
+        execute_write(cur, 
             'SELECT user_id, group_id FROM sessions WHERE token = ?',
             (token,)
         )
@@ -565,12 +580,12 @@ def get_user_by_session(token: str) -> dict | None:
         group_id = row['group_id']
         # Extend session expiry on each use (sliding window)
         new_expires = int(time.time()) + 7 * 24 * 3600
-        cur.execute(
+        execute_write(cur, 
             'UPDATE sessions SET expires_at = ? WHERE token = ?',
             (new_expires, token)
         )
         # Fetch the user along with their role
-        cur.execute(
+        execute_write(cur, 
             'SELECT id, username, role FROM users WHERE id = ?',
             (user_id,)
         )
@@ -589,14 +604,14 @@ def delete_session(token: str) -> None:
     """Invalidate a session by removing it from the database."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute('DELETE FROM sessions WHERE token = ?', (token,))
+        execute_write(cur, 'DELETE FROM sessions WHERE token = ?', (token,))
         conn.commit()
 
 def log_event(user_id: int | None, action: str, metadata: dict | None = None) -> None:
     """Insert an entry into the logs table."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'INSERT INTO logs (user_id, action, metadata) VALUES (?, ?, ?)',
             (user_id, action, json.dumps(metadata or {}))
         )
@@ -656,7 +671,7 @@ def add_webauthn_credential(user_id: int, credential_id: str) -> int:
     """Store a WebAuthn credential for a user."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'INSERT INTO users_webauthn (user_id, credential_id) VALUES (?, ?)',
             (user_id, credential_id),
         )
@@ -669,7 +684,7 @@ def get_webauthn_credentials(user_id: int) -> list[str]:
     """Return all credential IDs associated with a user."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute('SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
+        execute_write(cur, 'SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
         rows = [row['credential_id'] for row in cur.fetchall()]
     return rows
 
@@ -678,7 +693,7 @@ def get_user_by_webauthn_credential(credential_id: str) -> dict | None:
     """Lookup the user owning a given credential ID."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'SELECT u.id, u.username, u.role, u.last_group_id FROM users_webauthn w JOIN users u ON u.id = w.user_id WHERE w.credential_id = ?',
             (credential_id,),
         )
@@ -690,7 +705,7 @@ def verify_webauthn_credential(user_id: int, credential_id: str) -> bool:
     """Check that ``credential_id`` belongs to ``user_id``."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute('SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
+        execute_write(cur, 'SELECT credential_id FROM users_webauthn WHERE user_id = ?', (user_id,))
         rows = cur.fetchall()
     for r in rows:
         if hmac.compare_digest(r['credential_id'], credential_id):
@@ -769,7 +784,7 @@ def move_suggestion_to_rehearsal(sug_id: int):
     """Create a rehearsal from a suggestion and remove the suggestion."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'SELECT title, author, youtube, url, version_of, creator_id, group_id FROM suggestions WHERE id = ?',
             (sug_id,)
         )
@@ -777,13 +792,13 @@ def move_suggestion_to_rehearsal(sug_id: int):
         if not row:
             return None
         yt = row['youtube'] or row['url']
-        cur.execute(
+        execute_write(cur, 
             'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (row['title'], row['author'], yt, None, row['version_of'], json.dumps({}), json.dumps({}), json.dumps({}), 0, row['creator_id'], row['group_id']),
         )
         new_id = cur.lastrowid
-        cur.execute(
+        execute_write(cur, 
             '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                       r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
                       u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
@@ -791,8 +806,8 @@ def move_suggestion_to_rehearsal(sug_id: int):
             (new_id,),
         )
         new_row = cur.fetchone()
-        cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
-        cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, row['group_id']))
+        execute_write(cur, 'DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+        execute_write(cur, 'DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, row['group_id']))
         conn.commit()
     if not new_row:
         return None
@@ -816,26 +831,26 @@ def move_rehearsal_to_suggestion(reh_id: int):
     """Create a suggestion from a rehearsal and remove the rehearsal."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'SELECT title, author, youtube, version_of, creator_id, group_id FROM rehearsals WHERE id = ?',
             (reh_id,),
         )
         row = cur.fetchone()
         if not row:
             return None
-        cur.execute(
+        execute_write(cur, 
             'INSERT INTO suggestions (title, author, youtube, url, version_of, likes, creator_id, group_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
             (row['title'], row['author'], row['youtube'], row['youtube'], row['version_of'], row['creator_id'], row['group_id']),
         )
         new_id = cur.lastrowid
-        cur.execute(
+        execute_write(cur, 
             '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
                       u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
                WHERE s.id = ?''',
             (new_id,),
         )
         new_row = cur.fetchone()
-        cur.execute('DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (reh_id, row['group_id']))
+        execute_write(cur, 'DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (reh_id, row['group_id']))
         conn.commit()
     if not new_row:
         return None
@@ -856,13 +871,13 @@ def create_group(name: str, invitation_code: str, description: str | None, logo_
     """Insert a new group and return its ID."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'INSERT INTO groups (name, invitation_code, description, logo_url, owner_id) VALUES (?, ?, ?, ?, ?)',
             (name, invitation_code, description, logo_url, owner_id),
         )
         group_id = cur.lastrowid
         # Insert default settings for the new group
-        cur.execute(
+        execute_write(cur, 
             "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
             (group_id, name),
         )
@@ -874,7 +889,7 @@ def get_group_by_id(group_id: int) -> dict | None:
     """Fetch a group by its ID."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE id = ?',
             (group_id,),
         )
@@ -885,7 +900,7 @@ def get_group_by_id(group_id: int) -> dict | None:
 def get_group_by_code(code: str) -> dict | None:
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'SELECT id, name, invitation_code, description, logo_url, created_at, owner_id FROM groups WHERE invitation_code = ?',
             (code,),
         )
@@ -897,7 +912,7 @@ def get_groups_for_user(user_id: int) -> list[dict]:
     """Return all groups a user is a member of."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'SELECT g.id, g.name FROM groups g JOIN memberships m ON m.group_id = g.id WHERE m.user_id = ? AND m.active = 1',
             (user_id,),
         )
@@ -909,7 +924,7 @@ def update_group(group_id: int, name: str, invitation_code: str, description: st
     """Update a group's details.  Returns number of affected rows."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'UPDATE groups SET name = ?, invitation_code = ?, description = ?, logo_url = ? WHERE id = ?',
             (name, invitation_code, description, logo_url, group_id),
         )
@@ -921,7 +936,7 @@ def update_group(group_id: int, name: str, invitation_code: str, description: st
 def update_group_code(group_id: int, invitation_code: str) -> int:
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute('UPDATE groups SET invitation_code = ? WHERE id = ?', (invitation_code, group_id))
+        execute_write(cur, 'UPDATE groups SET invitation_code = ? WHERE id = ?', (invitation_code, group_id))
         conn.commit()
         changes = cur.rowcount
     return changes
@@ -931,7 +946,7 @@ def delete_group(group_id: int) -> int:
     """Delete a group by ID.  Returns the number of deleted rows."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute('DELETE FROM groups WHERE id = ?', (group_id,))
+        execute_write(cur, 'DELETE FROM groups WHERE id = ?', (group_id,))
         conn.commit()
         changes = cur.rowcount
     return changes
@@ -941,7 +956,7 @@ def create_membership(user_id: int, group_id: int, role: str, nickname: str | No
     """Create a membership entry linking a user to a group."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, ?)',
             (user_id, group_id, role, nickname, 1 if active else 0),
         )
@@ -954,7 +969,7 @@ def get_membership(user_id: int, group_id: int) -> dict | None:
     """Retrieve a membership for a user/group pair."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'SELECT id, user_id, group_id, role, nickname, joined_at, active FROM memberships WHERE user_id = ? AND group_id = ?',
             (user_id, group_id),
         )
@@ -982,7 +997,7 @@ def get_group_members(group_id: int) -> list[dict]:
     """Return all members for a given group."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             '''SELECT m.id, m.user_id, m.group_id, m.role, m.nickname, m.joined_at, m.active, u.username
                FROM memberships m JOIN users u ON u.id = m.user_id
                WHERE m.group_id = ?
@@ -997,7 +1012,7 @@ def update_membership(membership_id: int, role: str, nickname: str | None, activ
     """Update membership details.  Returns number of affected rows."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'UPDATE memberships SET role = ?, nickname = ?, active = ? WHERE id = ?',
             (role, nickname, 1 if active else 0, membership_id),
         )
@@ -1010,7 +1025,7 @@ def delete_membership(membership_id: int, group_id: int) -> int:
     """Delete a membership by its ID and group."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
+        execute_write(cur, 
             'DELETE FROM memberships WHERE id = ? AND group_id = ?',
             (membership_id, group_id),
         )
@@ -1068,7 +1083,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     group_id = None
                     with get_db_connection() as conn:
                         cur = conn.cursor()
-                        cur.execute('SELECT group_id FROM rehearsals WHERE id = ?', (reh_id,))
+                        execute_write(cur, 'SELECT group_id FROM rehearsals WHERE id = ?', (reh_id,))
                         row = cur.fetchone()
                         if row:
                             group_id = row['group_id']
@@ -1446,38 +1461,38 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             # Check if a user already exists (case‑insensitive)
-            cur.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', (username,))
+            execute_write(cur, 'SELECT id FROM users WHERE LOWER(username) = LOWER(?)', (username,))
             if cur.fetchone():
                 send_json(self, HTTPStatus.CONFLICT, {'error': 'User already exists'})
                 return
             # Determine if this is the first user; if so, assign admin role
-            cur.execute('SELECT COUNT(*) FROM users')
+            execute_write(cur, 'SELECT COUNT(*) FROM users')
             count = cur.fetchone()[0]
             role = 'admin' if count == 0 else 'user'
             salt, pwd_hash = hash_password(password)
-            cur.execute(
+            execute_write(cur, 
                 'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
                 (username, salt, pwd_hash, role, None)
             )
             user_id = cur.lastrowid
             # Ensure default group exists and is owned by the first user
-            cur.execute('SELECT id FROM groups WHERE id = 1')
+            execute_write(cur, 'SELECT id FROM groups WHERE id = 1')
             if cur.fetchone() is None:
                 code = generate_unique_invitation_code()
-                cur.execute(
+                execute_write(cur, 
                     'INSERT INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, ?)',
                     ('Groupe de musique', code, user_id),
                 )
-                cur.execute(
+                execute_write(cur, 
                     "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (1, 'Groupe de musique', 1, 'classic')"
                 )
             # Add the new user to the default group (id 1)
-            cur.execute(
+            execute_write(cur, 
                 'INSERT OR IGNORE INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)',
                 (user_id, role),
             )
             # Record last group for the user
-            cur.execute('UPDATE users SET last_group_id = 1 WHERE id = ?', (user_id,))
+            execute_write(cur, 'UPDATE users SET last_group_id = 1 WHERE id = ?', (user_id,))
             conn.commit()
             group_id = 1
             # Automatically log in the new user and return a session cookie so the
@@ -1500,7 +1515,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             # Perform a case‑insensitive lookup for the username
-            cur.execute(
+            execute_write(cur, 
                 'SELECT id, username, salt, password_hash, role, last_group_id FROM users WHERE LOWER(username) = LOWER(?)',
                 (username,),
             )
@@ -1514,24 +1529,22 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
                 return
             # Determine the active group using the user's last choice if still valid
-            conn = get_db_connection()
-            cur = conn.cursor()
             group_id = row['last_group_id']
             if group_id is not None:
-                cur.execute(
+                execute_write(cur,
                     'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
                     (row['id'], group_id),
                 )
                 if not cur.fetchone():
                     group_id = None
             if group_id is None:
-                cur.execute(
+                execute_write(cur,
                     'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
                     (row['id'],),
                 )
                 g_row = cur.fetchone()
                 group_id = g_row['group_id'] if g_row else None
-            cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, row['id']))
+            execute_write(cur, 'UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, row['id']))
             conn.commit()
             if group_id is None:
                 token = generate_session(row['id'], None)
@@ -1619,20 +1632,20 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             uid = user['id']
-            cur.execute('SELECT COUNT(*) FROM groups WHERE owner_id = ?', (uid,))
+            execute_write(cur, 'SELECT COUNT(*) FROM groups WHERE owner_id = ?', (uid,))
             if cur.fetchone()[0] > 0:
                 send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Cannot delete account while owning a group'})
                 return
-            cur.execute('DELETE FROM suggestion_votes WHERE user_id = ?', (uid,))
-            cur.execute('DELETE FROM suggestions WHERE creator_id = ?', (uid,))
-            cur.execute('DELETE FROM rehearsals WHERE creator_id = ?', (uid,))
-            cur.execute('DELETE FROM performances WHERE creator_id = ?', (uid,))
-            cur.execute('DELETE FROM rehearsal_events WHERE creator_id = ?', (uid,))
-            cur.execute('DELETE FROM memberships WHERE user_id = ?', (uid,))
-            cur.execute('DELETE FROM sessions WHERE user_id = ?', (uid,))
-            cur.execute('DELETE FROM users_webauthn WHERE user_id = ?', (uid,))
-            cur.execute('UPDATE logs SET user_id = NULL WHERE user_id = ?', (uid,))
-            cur.execute('DELETE FROM users WHERE id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM suggestion_votes WHERE user_id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM suggestions WHERE creator_id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM rehearsals WHERE creator_id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM performances WHERE creator_id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM rehearsal_events WHERE creator_id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM memberships WHERE user_id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM sessions WHERE user_id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM users_webauthn WHERE user_id = ?', (uid,))
+            execute_write(cur, 'UPDATE logs SET user_id = NULL WHERE user_id = ?', (uid,))
+            execute_write(cur, 'DELETE FROM users WHERE id = ?', (uid,))
             conn.commit()
             if session_token:
                 delete_session(session_token)
@@ -1672,20 +1685,20 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             cur = conn.cursor()
             group_id = user_row.get('last_group_id')
             if group_id is not None:
-                cur.execute(
+                execute_write(cur, 
                     'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
                     (user_row['id'], group_id),
                 )
                 if not cur.fetchone():
                     group_id = None
             if group_id is None:
-                cur.execute(
+                execute_write(cur, 
                     'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
                     (user_row['id'],),
                 )
                 g_row = cur.fetchone()
                 group_id = g_row['group_id'] if g_row else None
-            cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user_row['id']))
+            execute_write(cur, 'UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user_row['id']))
             conn.commit()
             token = generate_session(user_row['id'], group_id)
             expires_ts = int(time.time()) + 7 * 24 * 3600
@@ -1714,7 +1727,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT salt, password_hash FROM users WHERE id = ?', (user['id'],))
+            execute_write(cur, 'SELECT salt, password_hash FROM users WHERE id = ?', (user['id'],))
             row = cur.fetchone()
             if not row:
                 send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'User not found'})
@@ -1723,7 +1736,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid current password'})
                 return
             new_salt, new_hash = hash_password(new_password)
-            cur.execute('UPDATE users SET salt = ?, password_hash = ? WHERE id = ?', (new_salt, new_hash, user['id']))
+            execute_write(cur, 'UPDATE users SET salt = ?, password_hash = ? WHERE id = ?', (new_salt, new_hash, user['id']))
             conn.commit()
             log_event(user['id'], 'password_change', {})
             send_json(self, HTTPStatus.OK, {'message': 'Password updated'})
@@ -1735,7 +1748,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id, name FROM groups WHERE id = ?', (user['group_id'],))
+            execute_write(cur, 'SELECT id, name FROM groups WHERE id = ?', (user['group_id'],))
             row = cur.fetchone()
             if not row:
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
@@ -1750,16 +1763,16 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
                 (user['id'], group_id)
             )
             if not cur.fetchone():
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No membership'})
                 return
-            cur.execute('UPDATE sessions SET group_id = ? WHERE token = ?', (group_id, session_token))
-            cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user['id']))
-            cur.execute('SELECT id, name FROM groups WHERE id = ?', (group_id,))
+            execute_write(cur, 'UPDATE sessions SET group_id = ? WHERE token = ?', (group_id, session_token))
+            execute_write(cur, 'UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user['id']))
+            execute_write(cur, 'SELECT id, name FROM groups WHERE id = ?', (group_id,))
             row = cur.fetchone()
             conn.commit()
             if not row:
@@ -1827,7 +1840,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         )
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('UPDATE settings SET group_name = ? WHERE group_id = ?', (name, group_id))
+            execute_write(cur, 'UPDATE settings SET group_name = ? WHERE group_id = ?', (name, group_id))
             conn.commit()
             send_json(self, HTTPStatus.OK, {'id': group_id, 'name': name})
 
@@ -1871,7 +1884,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             nickname = body.get('nickname')
             with get_db_connection() as conn:
                 cur = conn.cursor()
-                cur.execute('SELECT id, username FROM users WHERE id = ?', (target_user_id,))
+                execute_write(cur, 'SELECT id, username FROM users WHERE id = ?', (target_user_id,))
                 row = cur.fetchone()
                 if not row:
                     send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})
@@ -1938,7 +1951,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     return
                 with get_db_connection() as conn:
                     cur = conn.cursor()
-                    cur.execute('SELECT user_id FROM memberships WHERE id = ? AND group_id = ?', (membership_id, group_id))
+                    execute_write(cur, 'SELECT user_id FROM memberships WHERE id = ? AND group_id = ?', (membership_id, group_id))
                     row = cur.fetchone()
                     if not row:
                         send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
@@ -1956,8 +1969,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 new_group_id = remaining[0]['id'] if remaining else None
                 with get_db_connection() as conn:
                     cur = conn.cursor()
-                    cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (new_group_id, user['id']))
-                    cur.execute('UPDATE sessions SET group_id = ? WHERE user_id = ?', (new_group_id, user['id']))
+                    execute_write(cur, 'UPDATE users SET last_group_id = ? WHERE id = ?', (new_group_id, user['id']))
+                    execute_write(cur, 'UPDATE sessions SET group_id = ? WHERE user_id = ?', (new_group_id, user['id']))
                     conn.commit()
                     send_json(self, HTTPStatus.OK, {'message': 'Left group'})
             else:
@@ -1979,7 +1992,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)', (email,))
+            execute_write(cur, 'SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)', (email,))
             row = cur.fetchone()
             if row:
                 user_id = row['id']
@@ -2002,12 +2015,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             # Create provisional user
             temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
             salt, pwd_hash = hash_password(temp_password)
-            cur.execute(
+            execute_write(cur, 
                 'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
                 (email, salt, pwd_hash, 'user', group_id),
             )
             user_id = cur.lastrowid
-            cur.execute(
+            execute_write(cur, 
                 'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, 1)',
                 (user_id, group_id, 'user', None),
             )
@@ -2031,7 +2044,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at, u.username AS creator
                    FROM suggestions s
                    JOIN users u ON u.id = s.creator_id
@@ -2071,13 +2084,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 'INSERT INTO suggestions (title, author, youtube, url, version_of, group_id, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
                 (title, author, youtube, youtube, version_of, user['group_id'], user['id'])
             )
             suggestion_id = cur.lastrowid
             # Retrieve the created row with creator username and timestamp
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes,
                          s.creator_id, s.created_at, u.username AS creator
                    FROM suggestions s JOIN users u ON u.id = s.creator_id
@@ -2114,15 +2127,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             if user.get('role') in ('admin', 'moderator'):
-                cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+                execute_write(cur, 'DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
             else:
-                cur.execute(
+                execute_write(cur, 
                     'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?',
                     (sug_id, user['id'], user['group_id'])
                 )
             deleted = cur.rowcount
             if deleted:
-                cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+                execute_write(cur, 'DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
             conn.commit()
             if deleted:
                 log_event(user['id'], 'delete', {'entity': 'suggestion', 'id': sug_id})
@@ -2147,7 +2160,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
                    FROM rehearsals r JOIN users u ON u.id = r.creator_id
                    WHERE r.group_id = ?''',
@@ -2188,7 +2201,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                           r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
                    FROM rehearsals r JOIN users u ON u.id = r.creator_id
@@ -2242,7 +2255,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (title, author, youtube, spotify, version_of, json.dumps({}), json.dumps({}), json.dumps({}), 0, user['id'], user['group_id'])
             )
@@ -2269,7 +2282,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT p.id, p.name, p.date, p.location, p.songs_json, p.creator_id, u.username AS creator
                    FROM performances p JOIN users u ON u.id = p.creator_id
                    WHERE p.group_id = ?
@@ -2314,7 +2327,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 'INSERT INTO performances (name, date, location, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
                  (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
             )
@@ -2348,12 +2361,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             cur = conn.cursor()
             # Allow update if current user is creator or has moderator/administrator role
             if role in ('admin', 'moderator'):
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
                     (name, date, location, json.dumps(songs_list), perf_id, user['group_id'])
                 )
             else:
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
                     (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
                 )
@@ -2383,15 +2396,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             if role in ('admin', 'moderator'):
-                cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+                execute_write(cur, 'DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
             else:
-                cur.execute(
+                execute_write(cur, 
                     'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?',
                     (sug_id, user['id'], user['group_id'])
                 )
             deleted = cur.rowcount
             if deleted:
-                cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+                execute_write(cur, 'DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
             conn.commit()
             if deleted:
                 send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
@@ -2405,17 +2418,17 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+            execute_write(cur, 'SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
             if not cur.fetchone():
                 return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
-            cur.execute(
+            execute_write(cur, 
                 'INSERT OR IGNORE INTO suggestion_votes (suggestion_id, user_id) VALUES (?, ?)',
                 (sug_id, user['id'])
             )
-            cur.execute('SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+            execute_write(cur, 'SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
             likes = cur.fetchone()[0]
-            cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
-            cur.execute(
+            execute_write(cur, 'UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
+            execute_write(cur, 
                 '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
                           u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
                    WHERE s.id = ? AND s.group_id = ?''',
@@ -2447,17 +2460,17 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+            execute_write(cur, 'SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
             if not cur.fetchone():
                 return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
-            cur.execute(
+            execute_write(cur, 
                 'DELETE FROM suggestion_votes WHERE suggestion_id = ? AND user_id = ?',
                 (sug_id, user['id'])
             )
-            cur.execute('SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+            execute_write(cur, 'SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
             likes = cur.fetchone()[0]
-            cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
-            cur.execute(
+            execute_write(cur, 'UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
+            execute_write(cur, 
                 '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
                           u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
                    WHERE s.id = ? AND s.group_id = ?''',
@@ -2498,12 +2511,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             if role in ('admin', 'moderator'):
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ?, version_of = ? WHERE id = ? AND group_id = ?',
                     (title, author, youtube, youtube, version_of, sug_id, user['group_id']),
                 )
             else:
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ?, version_of = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
                     (title, author, youtube, youtube, version_of, sug_id, user['id'], user['group_id']),
                 )
@@ -2514,7 +2527,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.OK, {'message': 'Updated'})
             else:
                 # Determine if the suggestion exists
-                cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+                execute_write(cur, 'SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
                 exists = cur.fetchone()
                 conn.commit()
                 if exists:
@@ -2570,7 +2583,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             # Fetch current rehearsal record including author and audio notes JSON
-            cur.execute(
+            execute_write(cur, 
                 'SELECT title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id '
                 'FROM rehearsals WHERE id = ? AND group_id = ?',
                 (rehearsal_id, user['group_id'])
@@ -2598,7 +2611,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 new_version = (version_of or '').strip() if version_of is not None else row['version_of']
                 new_version = new_version or None
                 # Update the row
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE rehearsals SET title = ?, author = ?, youtube = ?, spotify = ?, version_of = ? WHERE id = ? AND group_id = ?',
                     (new_title, new_author, new_youtube, new_spotify, new_version, rehearsal_id, user['group_id'])
                 )
@@ -2643,7 +2656,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                             audio_notes.pop(user['username'], None)
                     except (TypeError, ValueError):
                         pass
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ? AND group_id = ?',
                     (
                         json.dumps(levels),
@@ -2668,16 +2681,16 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT mastered, creator_id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+            execute_write(cur, 'SELECT mastered, creator_id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
             row = cur.fetchone()
             if not row:
                 return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
             if not (role in ('admin', 'moderator') or user['id'] == row['creator_id']):
                 return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal'})
             new_val = 0 if row['mastered'] else 1
-            cur.execute('UPDATE rehearsals SET mastered = ? WHERE id = ? AND group_id = ?', (new_val, rehearsal_id, user['group_id']))
+            execute_write(cur, 'UPDATE rehearsals SET mastered = ? WHERE id = ? AND group_id = ?', (new_val, rehearsal_id, user['group_id']))
             conn.commit()
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                           r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
                           u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
@@ -2717,7 +2730,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT p.id, p.display_name, p.uploaded_at, p.path, u.username
                    FROM partitions p
                    JOIN rehearsals r ON r.id = p.rehearsal_id
@@ -2763,16 +2776,16 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file name'})
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+            execute_write(cur, 'SELECT id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
             if not cur.fetchone():
                 return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-            cur.execute(
+            execute_write(cur, 
                 'INSERT INTO partitions (rehearsal_id, path, display_name, uploader_id) VALUES (?, ?, ?, ?)',
                 (rehearsal_id, '', display_name, user['id']),
             )
             part_id = cur.lastrowid
             rel_path = f'uploads/partitions/{rehearsal_id}/{part_id}.pdf'
-            cur.execute('UPDATE partitions SET path = ? WHERE id = ?', (rel_path, part_id))
+            execute_write(cur, 'UPDATE partitions SET path = ? WHERE id = ?', (rel_path, part_id))
             conn.commit()
             dest_dir = os.path.join(UPLOADS_ROOT, str(rehearsal_id))
             os.makedirs(dest_dir, exist_ok=True)
@@ -2784,9 +2797,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 {'rehearsal_id': rehearsal_id, 'partition_id': part_id, 'display_name': display_name},
             )
             # Send notifications to group members except the uploader
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute(
+            execute_write(cur,
                 '''SELECT u.id FROM users u
                    JOIN memberships m ON m.user_id = u.id
                    WHERE m.group_id = ? AND m.active = 1 AND u.id != ? AND u.notify_uploads = 1''',
@@ -2795,7 +2806,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             recipients = [row['id'] for row in cur.fetchall()]
             message = f"{user['username']} uploaded {display_name}"
             for uid in recipients:
-                cur.execute('INSERT INTO notifications (user_id, message) VALUES (?, ?)', (uid, message))
+                execute_write(cur, 'INSERT INTO notifications (user_id, message) VALUES (?, ?)', (uid, message))
             conn.commit()
             return send_json(
                 self,
@@ -2813,7 +2824,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT p.path, p.uploader_id FROM partitions p
                    JOIN rehearsals r ON r.id = p.rehearsal_id
                    WHERE p.id = ? AND p.rehearsal_id = ? AND r.group_id = ?''',
@@ -2824,7 +2835,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Partition not found'})
             if row['uploader_id'] != user['id'] and role != 'admin':
                 return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-            cur.execute('DELETE FROM partitions WHERE id = ?', (partition_id,))
+            execute_write(cur, 'DELETE FROM partitions WHERE id = ?', (partition_id,))
             conn.commit()
             file_path = os.path.join(os.path.dirname(__file__), row['path'])
             try:
@@ -2878,12 +2889,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             cur = conn.cursor()
             # Allow update if user is creator or has moderator/administrator role
             if user.get('role') in ('admin', 'moderator'):
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
                     (name, date, location, json.dumps(songs_list), perf_id, user['group_id'])
                 )
             else:
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
                     (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
                 )
@@ -2904,9 +2915,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             if role in ('admin', 'moderator'):
-                cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (perf_id, user['group_id']))
+                execute_write(cur, 'DELETE FROM performances WHERE id = ? AND group_id = ?', (perf_id, user['group_id']))
             else:
-                cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
+                execute_write(cur, 'DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
             deleted = cur.rowcount
             conn.commit()
             if deleted:
@@ -2929,7 +2940,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return
             with get_db_connection() as conn:
                 cur = conn.cursor()
-                cur.execute(
+                execute_write(cur, 
                     'INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)',
                     (date, location, user['group_id'], user['id'])
                 )
@@ -2962,7 +2973,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return
             with get_db_connection() as conn:
                 cur = conn.cursor()
-                cur.execute(
+                execute_write(cur, 
                     'INSERT INTO performances (name, date, location, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
                     (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
                 )
@@ -2992,7 +3003,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return
             with get_db_connection() as conn:
                 cur = conn.cursor()
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE rehearsal_events SET date = ?, location = ? WHERE id = ? AND group_id = ?',
                     (date, location, item_id, user['group_id'])
                 )
@@ -3000,7 +3011,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
                     return
                 conn.commit()
-                cur.execute('SELECT id, date, location FROM rehearsal_events WHERE id = ?', (item_id,))
+                execute_write(cur, 'SELECT id, date, location FROM rehearsal_events WHERE id = ?', (item_id,))
                 row = cur.fetchone()
                 if not row:
                     send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Not found'})
@@ -3032,7 +3043,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return
             with get_db_connection() as conn:
                 cur = conn.cursor()
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
                     (name, date, location, json.dumps(songs_list), item_id, user['group_id'])
                 )
@@ -3040,7 +3051,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
                     return
                 conn.commit()
-                cur.execute('SELECT id, name, date, location FROM performances WHERE id = ?', (item_id,))
+                execute_write(cur, 'SELECT id, name, date, location FROM performances WHERE id = ?', (item_id,))
                 row = cur.fetchone()
                 if not row:
                     send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Not found'})
@@ -3064,7 +3075,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             if item_type == 'rehearsal':
-                cur.execute('DELETE FROM rehearsal_events WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
+                execute_write(cur, 'DELETE FROM rehearsal_events WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
                 if cur.rowcount == 0:
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
                     return
@@ -3072,7 +3083,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.OK, {'success': True})
                 return
             if item_type == 'performance':
-                cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
+                execute_write(cur, 'DELETE FROM performances WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
                 if cur.rowcount == 0:
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
                     return
@@ -3098,13 +3109,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             # Fetch rehearsal events
-            cur.execute(
+            execute_write(cur, 
                 'SELECT id, date, location FROM rehearsal_events WHERE group_id = ? ORDER BY date ASC',
                 (user['group_id'],),
             )
             rehearsal_rows = [dict(row) for row in cur.fetchall()]
             # Fetch performances
-            cur.execute(
+            execute_write(cur, 
                 'SELECT id, name, date, location FROM performances WHERE group_id = ? ORDER BY date ASC',
                 (user['group_id'],),
             )
@@ -3149,7 +3160,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             # Fetch creator_id to check permissions
-            cur.execute('SELECT creator_id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+            execute_write(cur, 'SELECT creator_id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
             row = cur.fetchone()
             if not row:
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
@@ -3159,7 +3170,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to delete rehearsal'})
                 return
             # Remove the rehearsal ID from all performances
-            cur.execute('SELECT id, songs_json FROM performances WHERE group_id = ?', (user['group_id'],))
+            execute_write(cur, 'SELECT id, songs_json FROM performances WHERE group_id = ?', (user['group_id'],))
             performances_to_update = []
             for perf in cur.fetchall():
                 songs = json.loads(perf['songs_json'] or '[]')
@@ -3167,9 +3178,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     songs = [sid for sid in songs if sid != rehearsal_id]
                     performances_to_update.append((json.dumps(songs), perf['id']))
             for songs_json, perf_id in performances_to_update:
-                cur.execute('UPDATE performances SET songs_json = ? WHERE id = ?', (songs_json, perf_id))
+                execute_write(cur, 'UPDATE performances SET songs_json = ? WHERE id = ?', (songs_json, perf_id))
             # Now delete the rehearsal itself
-            cur.execute('DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+            execute_write(cur, 'DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
             deleted = cur.rowcount
             conn.commit()
             if deleted:
@@ -3191,9 +3202,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             if role in ('admin', 'moderator'):
-                cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (perf_id, user['group_id']))
+                execute_write(cur, 'DELETE FROM performances WHERE id = ? AND group_id = ?', (perf_id, user['group_id']))
             else:
-                cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
+                execute_write(cur, 'DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
             deleted = cur.rowcount
             conn.commit()
             if deleted:
@@ -3206,7 +3217,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         """Return recent log entries."""
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 '''SELECT l.id, l.timestamp, l.user_id, u.username, l.action, l.metadata
                    FROM logs l LEFT JOIN users u ON u.id = l.user_id
                    ORDER BY l.timestamp DESC LIMIT 100'''
@@ -3230,17 +3241,17 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            execute_write(cur, 
                 'SELECT group_name, dark_mode, template FROM settings WHERE group_id = ?',
                 (user['group_id'],),
             )
             row = cur.fetchone()
             if not row:
                 # Create default settings row if missing
-                cur.execute('SELECT name FROM groups WHERE id = ?', (user['group_id'],))
+                execute_write(cur, 'SELECT name FROM groups WHERE id = ?', (user['group_id'],))
                 g = cur.fetchone()
                 group_name = g['name'] if g else ''
-                cur.execute(
+                execute_write(cur, 
                     "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
                     (user['group_id'], group_name),
                 )
@@ -3275,16 +3286,16 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             if template is None:
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE settings SET group_name = ?, dark_mode = ? WHERE group_id = ?',
                     (group_name, 1 if bool(dark_mode) else 0, user['group_id'])
                 )
             else:
-                cur.execute(
+                execute_write(cur, 
                     'UPDATE settings SET group_name = ?, dark_mode = ?, template = ? WHERE group_id = ?',
                     (group_name, 1 if bool(dark_mode) else 0, template, user['group_id'])
                 )
-            cur.execute(
+            execute_write(cur, 
                 'UPDATE groups SET name = ? WHERE id = ?',
                 (group_name, user['group_id'])
             )
@@ -3297,7 +3308,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT notify_uploads FROM users WHERE id = ?', (user['id'],))
+            execute_write(cur, 'SELECT notify_uploads FROM users WHERE id = ?', (user['id'],))
             row = cur.fetchone()
             send_json(self, HTTPStatus.OK, {'notifyUploads': bool(row['notify_uploads'])})
 
@@ -3311,7 +3322,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('UPDATE users SET notify_uploads = ? WHERE id = ?', (1 if bool(notify) else 0, user['id']))
+            execute_write(cur, 'UPDATE users SET notify_uploads = ? WHERE id = ?', (1 if bool(notify) else 0, user['id']))
             conn.commit()
             send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
 
@@ -3321,7 +3332,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id, message, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC', (user['id'],))
+            execute_write(cur, 'SELECT id, message, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC', (user['id'],))
             rows = [
                 {'id': row['id'], 'message': row['message'], 'date': row['created_at']}
                 for row in cur.fetchall()
@@ -3336,7 +3347,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         only to administrators."""
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT id, username, role FROM users ORDER BY username ASC')
+            execute_write(cur, 'SELECT id, username, role FROM users ORDER BY username ASC')
             users = []
             for row in cur.fetchall():
                 users.append({
@@ -3360,8 +3371,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('UPDATE users SET role = ? WHERE id = ?', (role, uid))
-            cur.execute('UPDATE memberships SET role = ? WHERE user_id = ?', (role, uid))
+            execute_write(cur, 'UPDATE users SET role = ? WHERE id = ?', (role, uid))
+            execute_write(cur, 'UPDATE memberships SET role = ? WHERE user_id = ?', (role, uid))
             updated = cur.rowcount
             conn.commit()
             if updated:
