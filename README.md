@@ -63,12 +63,14 @@ bases de données sans dépendance à Node.js.
 
 ### Exécution locale sans Docker
 
+Installer les dépendances (``reportlab`` pour l'export PDF) puis démarrer le serveur :
+
 ```bash
+pip install -r requirements.txt
 python3 server.py --port 8080
 ```
 
-Le serveur utilise uniquement la bibliothèque standard de Python et crée la
-base SQLite `bandtrack.db` au premier lancement.
+Le serveur crée la base SQLite `bandtrack.db` au premier lancement.
 
 ## Tests
 
