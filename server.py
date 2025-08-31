@@ -348,12 +348,23 @@ def init_db():
                );'''
         )
         # Notifications: store messages for users
-        execute_write(cur, 
+        execute_write(cur,
             '''CREATE TABLE IF NOT EXISTS notifications (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
                    message TEXT NOT NULL,
                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (user_id) REFERENCES users(id)
+               );'''
+        )
+        # Push subscriptions: store Web Push subscriptions per user
+        execute_write(cur,
+            '''CREATE TABLE IF NOT EXISTS push_subscriptions (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id INTEGER NOT NULL,
+                   endpoint TEXT NOT NULL UNIQUE,
+                   p256dh TEXT NOT NULL,
+                   auth TEXT NOT NULL,
                    FOREIGN KEY (user_id) REFERENCES users(id)
                );'''
         )
@@ -1025,13 +1036,51 @@ def delete_membership(membership_id: int, group_id: int) -> int:
     """Delete a membership by its ID and group."""
     with get_db_connection() as conn:
         cur = conn.cursor()
-        execute_write(cur, 
+        execute_write(cur,
             'DELETE FROM memberships WHERE id = ? AND group_id = ?',
             (membership_id, group_id),
         )
         conn.commit()
         changes = cur.rowcount
     return changes
+
+
+def send_push_to_group(group_id: int, title: str, body: str) -> None:
+    """Send a Web Push notification to all subscribers in a group.
+
+    Uses the ``web-push`` CLI via ``npx`` with VAPID keys supplied
+    through environment variables ``VAPID_PUBLIC_KEY`` and
+    ``VAPID_PRIVATE_KEY``.  Failures are silently ignored so that a
+    notification issue does not affect the main request flow."""
+    vapid_pub = os.environ.get('VAPID_PUBLIC_KEY')
+    vapid_priv = os.environ.get('VAPID_PRIVATE_KEY')
+    if not vapid_pub or not vapid_priv:
+        return
+    payload = json.dumps({'title': title, 'body': body})
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        execute_write(cur,
+            '''SELECT ps.endpoint, ps.p256dh, ps.auth
+               FROM push_subscriptions ps
+               JOIN memberships m ON m.user_id = ps.user_id
+               WHERE m.group_id = ?''',
+            (group_id,),
+        )
+        rows = cur.fetchall()
+    for row in rows:
+        try:
+            subprocess.run([
+                'npx', '-y', 'web-push', 'send-notification',
+                f'--endpoint={row["endpoint"]}',
+                f'--key={row["p256dh"]}',
+                f'--auth={row["auth"]}',
+                f'--payload={payload}',
+                f'--vapid-subject=mailto:example@example.com',
+                f'--vapid-pubkey={vapid_pub}',
+                f'--vapid-pvtkey={vapid_priv}',
+            ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            continue
 
 #############################
 # HTTP request handler
@@ -1395,6 +1444,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if method == 'PUT':
                     return self.api_update_user_settings(body, user)
                 raise NotImplementedError
+
+            if path == '/api/push-subscribe' and method == 'POST':
+                return self.api_push_subscribe(body, user)
 
             # Notifications
             if path == '/api/notifications':
@@ -2112,6 +2164,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     'versionOf': row['version_of'],
                 }
                 send_json(self, HTTPStatus.CREATED, result)
+                send_push_to_group(user['group_id'], 'Nouvelle suggestion', f"{row['title']}")
             else:
                 send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Failed to fetch created suggestion'})
 
@@ -2255,13 +2308,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         with get_db_connection() as conn:
             cur = conn.cursor()
-            execute_write(cur, 
+            execute_write(cur,
                 'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (title, author, youtube, spotify, version_of, json.dumps({}), json.dumps({}), json.dumps({}), 0, user['id'], user['group_id'])
             )
             rehearsal_id = cur.lastrowid
             conn.commit()
             send_json(self, HTTPStatus.CREATED, {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify, 'mastered': False, 'versionOf': version_of, 'sheetMusic': {}})
+            send_push_to_group(user['group_id'], 'Nouvelle répétition', title)
 
     def api_update_rehearsal(self, body: dict, user: dict):
         """Backward‑compatible endpoint for updating a rehearsal.  The
@@ -3325,6 +3379,34 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             execute_write(cur, 'UPDATE users SET notify_uploads = ? WHERE id = ?', (1 if bool(notify) else 0, user['id']))
             conn.commit()
             send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
+
+    def api_push_subscribe(self, body: dict, user: dict):
+        if not user:
+            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
+            return
+        endpoint = body.get('endpoint')
+        p256dh = body.get('p256dh')
+        auth = body.get('auth')
+        unsubscribe = body.get('unsubscribe')
+        if not endpoint:
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'endpoint required'})
+            return
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if unsubscribe:
+                execute_write(cur,
+                    'DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?',
+                    (endpoint, user['id']),
+                )
+                conn.commit()
+                send_json(self, HTTPStatus.OK, {'status': 'unsubscribed'})
+            else:
+                execute_write(cur,
+                    'INSERT OR REPLACE INTO push_subscriptions (endpoint, p256dh, auth, user_id) VALUES (?, ?, ?, ?)',
+                    (endpoint, p256dh, auth, user['id']),
+                )
+                conn.commit()
+                send_json(self, HTTPStatus.OK, {'status': 'subscribed'})
 
     def api_get_notifications(self, user: dict):
         if not user:
