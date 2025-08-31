@@ -46,11 +46,10 @@ def test_group_member_can_leave_and_context_cleared(tmp_path):
         assert status == 403
 
         # last_group_id in database is cleared
-        conn = server.get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT last_group_id FROM users WHERE id = ?', (bob_user_id,))
-        row = cur.fetchone()
-        conn.close()
+        with server.get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT last_group_id FROM users WHERE id = ?', (bob_user_id,))
+            row = cur.fetchone()
         assert row['last_group_id'] is None
     finally:
         stop_test_server(httpd, thread)
