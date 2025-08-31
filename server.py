@@ -98,8 +98,10 @@ MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE', 5 * 1024 * 1024))
 @contextmanager
 def get_db_connection():
     """Yield a database connection with foreign keys enabled."""
-    conn = sqlite3.connect(DB_FILENAME, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
     conn.execute('PRAGMA foreign_keys = ON')
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=30000')
     conn.row_factory = sqlite3.Row
     try:
         yield conn
