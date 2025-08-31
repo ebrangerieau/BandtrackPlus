@@ -452,6 +452,17 @@ Object.defineProperties(state, {
     container.className = 'home-container';
     app.appendChild(container);
 
+    const welcome = document.createElement('p');
+    const userName = currentUser ? currentUser.username : '';
+    welcome.appendChild(document.createTextNode('Salut '));
+    const nameStrong = document.createElement('strong');
+    nameStrong.textContent = userName;
+    welcome.appendChild(nameStrong);
+    welcome.appendChild(
+      document.createTextNode(", voici où en est votre groupe aujourd'hui...")
+    );
+    container.appendChild(welcome);
+
     let nextPerfInfo = 'Aucune prestation prévue';
     try {
       const list = await api('/performances');
