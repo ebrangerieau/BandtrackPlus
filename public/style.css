@@ -646,6 +646,7 @@ textarea {
   justify-content: center;
   /* Trame de fond pour mieux distinguer la navigation */
   background-color: rgba(255, 255, 255, 0.7);
+  color: #000;
   padding: 4px 8px;
   border-radius: 4px;
 }
@@ -668,6 +669,7 @@ textarea {
 .calendar-nav span {
   font-weight: bold;
   background-color: rgba(255, 255, 255, 0.7);
+  color: #000;
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -684,6 +686,7 @@ textarea {
   text-align: center;
   /* Fond léger pour les jours de la semaine */
   background-color: rgba(255, 255, 255, 0.7);
+  color: #000;
   padding: 4px 0;
   border-radius: 4px;
 }
@@ -705,6 +708,7 @@ textarea {
   /* Fond léger derrière le numéro pour une meilleure lisibilité */
   display: inline-block;
   background-color: rgba(255, 255, 255, 0.7);
+  color: #000;
   padding: 2px 4px;
   border-radius: 4px;
 }
