@@ -347,6 +347,12 @@ select:focus {
   font-weight: bold;
 }
 
+.nav-bar button svg {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 4px;
+}
+
 .nav-bar button.active {
   color: var(--primary-color);
 }
