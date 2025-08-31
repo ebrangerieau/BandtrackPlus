@@ -80,6 +80,8 @@ import subprocess
 import shlex
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
 from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
 from scripts.migrate_suggestion_votes import migrate as migrate_suggestion_votes
 from scripts.migrate_performance_location import migrate as migrate_performance_location
@@ -1453,6 +1455,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if method == 'GET':
                     return self.api_get_notifications(user)
                 raise NotImplementedError
+
+            if path == '/api/repertoire.pdf' and method == 'GET':
+                return self.api_repertoire_pdf(user)
 
             # Logs
             if path == '/api/logs':
@@ -3420,6 +3425,41 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 for row in cur.fetchall()
             ]
             send_json(self, HTTPStatus.OK, rows)
+
+    def api_repertoire_pdf(self, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
+        buffer = io.BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=A4)
+        width, height = A4
+        y = height - 40
+        pdf.setFont("Helvetica", 12)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            execute_write(cur,
+                'SELECT title, author FROM rehearsals WHERE group_id = ? ORDER BY title',
+                (user['group_id'],)
+            )
+            for row in cur.fetchall():
+                line = row['title']
+                if row['author']:
+                    line += f" - {row['author']}"
+                pdf.drawString(40, y, line)
+                y -= 20
+                if y < 40:
+                    pdf.showPage()
+                    pdf.setFont("Helvetica", 12)
+                    y = height - 40
+        pdf.save()
+        data = buffer.getvalue()
+        self.send_response(HTTPStatus.OK)
+        self.send_header('Content-Type', 'application/pdf')
+        self.send_header('Content-Disposition', 'attachment; filename="repertoire.pdf"')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     # ------------------------------------------------------------------
     # Users management (admin only)
