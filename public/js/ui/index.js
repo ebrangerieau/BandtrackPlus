@@ -1022,6 +1022,27 @@ Object.defineProperties(state, {
     header.textContent = 'Morceaux en cours de travail';
     header.className = 'section-title';
     container.appendChild(header);
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = 'Exporter en PDF';
+    exportBtn.className = 'btn-secondary';
+    exportBtn.onclick = async () => {
+      try {
+        const res = await fetch('/api/repertoire.pdf', { credentials: 'include' });
+        if (!res.ok) throw new Error("Échec de l'export PDF");
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'repertoire.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    container.appendChild(exportBtn);
     let list = rehearsalsCache;
     if (list.length === 0) {
       try {

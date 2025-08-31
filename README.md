@@ -10,9 +10,16 @@ minimaliste via une API REST.
 - Conversion suggestions ↔ répétitions
 - Gestion des prestations (avec date et heure)
 - Paramètres du groupe (nom, mode sombre activé par défaut)
+- Export du répertoire en PDF (`GET /api/repertoire.pdf`)
 - Les administrateurs peuvent gérer les membres via l'API (`POST /api/groups/<id>/members` pour ajouter, `DELETE /api/groups/<id>/members` en fournissant `id` ou `userId` pour supprimer)
 - Écran d'accueil indiquant la prochaine prestation et la date de la prochaine
   répétition
+
+## Export en PDF
+
+Un bouton "Exporter en PDF" dans la page des répétitions permet de télécharger le
+répertoire des morceaux. Celui-ci appelle l'endpoint `GET /api/repertoire.pdf`
+qui génère un document listant les titres et auteurs du groupe actif.
 
 ## Déploiement avec Docker
 
