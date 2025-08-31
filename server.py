@@ -110,6 +110,16 @@ def get_db_connection():
         conn.close()
 
 
+def open_db_connection() -> sqlite3.Connection:
+    """Return a new database connection with the standard settings applied."""
+    conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
+    conn.execute('PRAGMA foreign_keys = ON')
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=30000')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 class PartitionDAO:
     """Data access helper for the partitions table."""
 
@@ -338,126 +348,150 @@ def init_db():
     # will raise an OperationalError if a column already exists; we
     # silently ignore such errors.  Users table: role, last_group_id and
     # notify_uploads preference
+    conn = None
     try:
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('PRAGMA table_info(users)')
-            columns = [row['name'] for row in cur.fetchall()]
-            if 'role' not in columns:
-                cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
-            if 'last_group_id' not in columns:
-                cur.execute('ALTER TABLE users ADD COLUMN last_group_id INTEGER')
-            if 'notify_uploads' not in columns:
-                cur.execute('ALTER TABLE users ADD COLUMN notify_uploads INTEGER NOT NULL DEFAULT 1')
-            conn.commit()
+        conn = open_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(users)')
+        columns = [row['name'] for row in cur.fetchall()]
+        if 'role' not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+        if 'last_group_id' not in columns:
+            cur.execute('ALTER TABLE users ADD COLUMN last_group_id INTEGER')
+        if 'notify_uploads' not in columns:
+            cur.execute('ALTER TABLE users ADD COLUMN notify_uploads INTEGER NOT NULL DEFAULT 1')
+        conn.commit()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
     # Suggestions table: ensure additional columns exist
+    conn = None
     try:
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('PRAGMA table_info(suggestions)')
-            s_columns = [row['name'] for row in cur.fetchall()]
-            if 'author' not in s_columns:
-                cur.execute('ALTER TABLE suggestions ADD COLUMN author TEXT')
-            if 'youtube' not in s_columns:
-                cur.execute('ALTER TABLE suggestions ADD COLUMN youtube TEXT')
-            if 'version_of' not in s_columns:
-                cur.execute('ALTER TABLE suggestions ADD COLUMN version_of TEXT')
-            if 'likes' not in s_columns:
-                cur.execute('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0')
-            if 'group_id' not in s_columns:
-                cur.execute('ALTER TABLE suggestions ADD COLUMN group_id INTEGER')
-                # Populate group_id using creator's active group
-                cur.execute(
-                    '''UPDATE suggestions SET group_id = (
-                            SELECT group_id FROM memberships m
-                            WHERE m.user_id = suggestions.creator_id AND m.active = 1
-                            ORDER BY m.group_id LIMIT 1
-                        ) WHERE group_id IS NULL'''
-                )
-            conn.commit()
+        conn = open_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(suggestions)')
+        s_columns = [row['name'] for row in cur.fetchall()]
+        if 'author' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN author TEXT')
+        if 'youtube' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN youtube TEXT')
+        if 'version_of' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN version_of TEXT')
+        if 'likes' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0')
+        if 'group_id' not in s_columns:
+            cur.execute('ALTER TABLE suggestions ADD COLUMN group_id INTEGER')
+            # Populate group_id using creator's active group
+            cur.execute(
+                '''UPDATE suggestions SET group_id = (
+                        SELECT group_id FROM memberships m
+                        WHERE m.user_id = suggestions.creator_id AND m.active = 1
+                        ORDER BY m.group_id LIMIT 1
+                    ) WHERE group_id IS NULL'''
+            )
+        conn.commit()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
     # Rehearsals table: ensure additional columns exist
+    conn = None
     try:
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('PRAGMA table_info(rehearsals)')
-            r_columns = [row['name'] for row in cur.fetchall()]
-            if 'author' not in r_columns:
-                cur.execute('ALTER TABLE rehearsals ADD COLUMN author TEXT')
-            if 'audio_notes_json' not in r_columns:
-                cur.execute("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
-            if 'sheet_music_json' in r_columns and not new_db:
-                try:
-                    cur.execute('ALTER TABLE rehearsals DROP COLUMN sheet_music_json')
-                except sqlite3.OperationalError:
-                    pass
-            if 'mastered' not in r_columns:
-                cur.execute('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0')
-            if 'version_of' not in r_columns:
-                cur.execute('ALTER TABLE rehearsals ADD COLUMN version_of TEXT')
-            if 'group_id' not in r_columns:
-                cur.execute('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER')
-                cur.execute(
-                    '''UPDATE rehearsals SET group_id = (
-                            SELECT group_id FROM memberships m
-                            WHERE m.user_id = rehearsals.creator_id AND m.active = 1
-                            ORDER BY m.group_id LIMIT 1
-                        ) WHERE group_id IS NULL'''
-                )
-            conn.commit()
+        conn = open_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(rehearsals)')
+        r_columns = [row['name'] for row in cur.fetchall()]
+        if 'author' not in r_columns:
+            cur.execute('ALTER TABLE rehearsals ADD COLUMN author TEXT')
+        if 'audio_notes_json' not in r_columns:
+            cur.execute("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
+        if 'sheet_music_json' in r_columns and not new_db:
+            try:
+                cur.execute('ALTER TABLE rehearsals DROP COLUMN sheet_music_json')
+            except sqlite3.OperationalError:
+                pass
+        if 'mastered' not in r_columns:
+            cur.execute('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0')
+        if 'version_of' not in r_columns:
+            cur.execute('ALTER TABLE rehearsals ADD COLUMN version_of TEXT')
+        if 'group_id' not in r_columns:
+            cur.execute('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER')
+            cur.execute(
+                '''UPDATE rehearsals SET group_id = (
+                        SELECT group_id FROM memberships m
+                        WHERE m.user_id = rehearsals.creator_id AND m.active = 1
+                        ORDER BY m.group_id LIMIT 1
+                    ) WHERE group_id IS NULL'''
+            )
+        conn.commit()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Performances table: ensure group_id column exists
+    conn = None
     try:
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('PRAGMA table_info(performances)')
-            p_columns = [row['name'] for row in cur.fetchall()]
-            if 'group_id' not in p_columns:
-                cur.execute('ALTER TABLE performances ADD COLUMN group_id INTEGER')
-                cur.execute(
-                    '''UPDATE performances SET group_id = (
-                            SELECT group_id FROM memberships m
-                            WHERE m.user_id = performances.creator_id AND m.active = 1
-                            ORDER BY m.group_id LIMIT 1
-                        ) WHERE group_id IS NULL'''
-                )
-            conn.commit()
+        conn = open_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(performances)')
+        p_columns = [row['name'] for row in cur.fetchall()]
+        if 'group_id' not in p_columns:
+            cur.execute('ALTER TABLE performances ADD COLUMN group_id INTEGER')
+            cur.execute(
+                '''UPDATE performances SET group_id = (
+                        SELECT group_id FROM memberships m
+                        WHERE m.user_id = performances.creator_id AND m.active = 1
+                        ORDER BY m.group_id LIMIT 1
+                    ) WHERE group_id IS NULL'''
+            )
+        conn.commit()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Settings table: ensure newer columns exist. Older databases may lack
     # the "template" field, so add it if missing.
+    conn = None
     try:
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('PRAGMA table_info(settings)')
-            settings_columns = [row['name'] for row in cur.fetchall()]
-            if 'template' not in settings_columns:
-                cur.execute("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
-            if 'group_id' not in settings_columns:
-                cur.execute('ALTER TABLE settings ADD COLUMN group_id INTEGER')
-                cur.execute('UPDATE settings SET group_id = 1 WHERE group_id IS NULL')
-            conn.commit()
+        conn = open_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(settings)')
+        settings_columns = [row['name'] for row in cur.fetchall()]
+        if 'template' not in settings_columns:
+            cur.execute("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
+        if 'group_id' not in settings_columns:
+            cur.execute('ALTER TABLE settings ADD COLUMN group_id INTEGER')
+            cur.execute('UPDATE settings SET group_id = 1 WHERE group_id IS NULL')
+        conn.commit()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Sessions table: ensure a group_id column exists to store the active
     # group for a session.
+    conn = None
     try:
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('PRAGMA table_info(sessions)')
-            sess_columns = [row['name'] for row in cur.fetchall()]
-            if 'group_id' not in sess_columns:
-                cur.execute('ALTER TABLE sessions ADD COLUMN group_id INTEGER')
-            conn.commit()
+        conn = open_db_connection()
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(sessions)')
+        sess_columns = [row['name'] for row in cur.fetchall()]
+        if 'group_id' not in sess_columns:
+            cur.execute('ALTER TABLE sessions ADD COLUMN group_id INTEGER')
+        conn.commit()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
 
 #############################
 # Helper functions
