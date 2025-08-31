@@ -742,3 +742,12 @@ textarea {
   margin-top: 8px;
   color: var(--primary-color);
 }
+
+.welcome-section {
+  margin-bottom: 1rem;
+  font-size: 1.25rem;
+}
+
+.upcoming-section {
+  margin-top: 1rem;
+}
