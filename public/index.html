@@ -20,13 +20,16 @@
 </head>
 <body class="font-sans bg-pastel-50 text-slate-800">
     <header class="header fixed top-0 w-full bg-pastel-50 transition-transform">
-        <img src="Logobt.png" alt="BandTrack logo" class="logo-img">
-        <span id="group-name"></span>
+        <img src="logobt220.png" alt="BandTrack logo" class="logo-img">
+        <div class="group-info">
+            <span>Groupe</span>
+            <span id="group-name"></span>
+            <span class="chevron">›</span>
+        </div>
+        <button id="theme-toggle" aria-label="Changer le thème">🌙</button>
         <div id="menu-container">
-            <button id="hamburger" class="flex flex-col justify-center items-center w-8 h-8">
-                <span class="block w-6 h-0.5 bg-slate-800 mb-1 transition-transform"></span>
-                <span class="block w-6 h-0.5 bg-slate-800 mb-1 transition-transform"></span>
-                <span class="block w-6 h-0.5 bg-slate-800 transition-transform"></span>
+            <button id="profile-btn" aria-label="Profil">
+                <img src="avatar.png" alt="Avatar">
             </button>
             <div id="profile-menu" class="hidden flex flex-col">
                 <button id="menu-performances">Prestations</button>
