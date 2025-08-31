@@ -79,14 +79,12 @@ def test_login_without_group(tmp_path):
             {"username": "dave", "password": "pw"},
         )
         # Remove group memberships for this user
-        conn = server.get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "DELETE FROM memberships WHERE user_id = (SELECT id FROM users WHERE username = ?)",
-            ("dave",),
-        )
-        conn.commit()
-        conn.close()
+        with server.get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM memberships WHERE user_id = (SELECT id FROM users WHERE username = ?)",
+                ("dave",),
+            )
         status, headers, body = request(
             "POST", port, "/api/login", {"username": "dave", "password": "pw"}
         )

@@ -64,6 +64,7 @@ import argparse
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 import secrets
 import string
 import hashlib
@@ -94,23 +95,24 @@ UPLOADS_ROOT = os.path.join(os.path.dirname(__file__), 'uploads', 'partitions')
 # Maximum allowed size for uploaded partition files (default 5 MB)
 MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE', 5 * 1024 * 1024))
 
+@contextmanager
 def get_db_connection():
-    """Return a new database connection.  SQLite connections are not
-    thread‑safe by default when used from multiple threads (as in
-    ``ThreadingHTTPServer``).  Consequently, each request handler
-    obtains its own connection.  ``check_same_thread=False`` allows
-    connections to be shared across threads safely."""
+    """Yield a database connection with foreign keys enabled."""
     conn = sqlite3.connect(DB_FILENAME, check_same_thread=False)
     conn.execute('PRAGMA foreign_keys = ON')
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class PartitionDAO:
     """Data access helper for the partitions table."""
 
-    def __init__(self, conn: sqlite3.Connection | None = None):
-        self.conn = conn or get_db_connection()
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
 
     def create(self, rehearsal_id: int, path: str, display_name: str, uploader_id: int) -> int:
         cur = self.conn.cursor()
@@ -132,333 +134,326 @@ class PartitionDAO:
         self.conn.commit()
 
 
-def get_partition_dao(conn: sqlite3.Connection | None = None) -> PartitionDAO:
+def get_partition_dao(conn: sqlite3.Connection) -> PartitionDAO:
     return PartitionDAO(conn)
 
 def init_db():
     """Create tables if they do not already exist and insert the
     default settings row.  This function is idempotent."""
     new_db = not os.path.exists(DB_FILENAME)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    # Users table: store username, salt and password hash
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS users (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               username TEXT NOT NULL UNIQUE,
-               salt BLOB NOT NULL,
-               password_hash BLOB NOT NULL,
-               role TEXT NOT NULL DEFAULT 'user',
-               last_group_id INTEGER,
-               notify_uploads INTEGER NOT NULL DEFAULT 1,
-               FOREIGN KEY (last_group_id) REFERENCES groups(id)
-           );'''
-    )
-    # WebAuthn credentials associated with users
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS users_webauthn (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               user_id INTEGER NOT NULL,
-               credential_id TEXT NOT NULL UNIQUE,
-               FOREIGN KEY (user_id) REFERENCES users(id)
-           );'''
-    )
-    # Suggestions: simple list of suggestions with optional URL and creator
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS suggestions (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               title TEXT NOT NULL,
-               author TEXT,
-               youtube TEXT,
-               url TEXT,
-               version_of TEXT,
-               likes INTEGER NOT NULL DEFAULT 0,
-               creator_id INTEGER NOT NULL,
-               group_id INTEGER NOT NULL,
-               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY (creator_id) REFERENCES users(id),
-               FOREIGN KEY (group_id) REFERENCES groups(id)
-           );'''
-    )
-    # Individual suggestion votes per user
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS suggestion_votes (
-               suggestion_id INTEGER NOT NULL,
-               user_id INTEGER NOT NULL,
-               PRIMARY KEY (suggestion_id, user_id),
-               FOREIGN KEY (suggestion_id) REFERENCES suggestions(id),
-               FOREIGN KEY (user_id) REFERENCES users(id)
-           );'''
-    )
-    # Rehearsals: store levels and notes per user as JSON strings.  Include
-    # optional author, YouTube/Spotify links and audio notes JSON.  The
-    # ``audio_notes_json`` field stores base64‑encoded audio notes per user.
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS rehearsals (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               title TEXT NOT NULL,
-               author TEXT,
-               youtube TEXT,
-               spotify TEXT,
-               version_of TEXT,
-               levels_json TEXT DEFAULT '{}',
-               notes_json TEXT DEFAULT '{}',
-               audio_notes_json TEXT DEFAULT '{}',
-               mastered INTEGER NOT NULL DEFAULT 0,
-               creator_id INTEGER NOT NULL,
-               group_id INTEGER NOT NULL,
-               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY (creator_id) REFERENCES users(id),
-               FOREIGN KEY (group_id) REFERENCES groups(id)
-           );'''
-    )
-    # Partitions associated with rehearsals
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS partitions (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               rehearsal_id INTEGER NOT NULL,
-               path TEXT NOT NULL,
-               display_name TEXT NOT NULL,
-               uploader_id INTEGER NOT NULL,
-               uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY (rehearsal_id) REFERENCES rehearsals(id) ON DELETE CASCADE,
-               FOREIGN KEY (uploader_id) REFERENCES users(id)
-           );'''
-    )
-    # Performances: contains name, date and a JSON array of rehearsal IDs
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS performances (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               name TEXT NOT NULL,
-               date TEXT NOT NULL,
-               location TEXT,
-               songs_json TEXT DEFAULT '[]',
-               creator_id INTEGER NOT NULL,
-               group_id INTEGER NOT NULL,
-               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY (creator_id) REFERENCES users(id),
-               FOREIGN KEY (group_id) REFERENCES groups(id)
-           );'''
-    )
-    # Rehearsal events: standalone rehearsal occurrences with date and
-    # location information.  These are distinct from the "rehearsals"
-    # table above, which stores songs to rehearse.
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS rehearsal_events (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               date TEXT NOT NULL,
-               location TEXT,
-               group_id INTEGER NOT NULL,
-               creator_id INTEGER NOT NULL,
-               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY (group_id) REFERENCES groups(id),
-               FOREIGN KEY (creator_id) REFERENCES users(id)
-           );'''
-    )
-    # Groups allow multiple band configurations and are owned by a user
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS groups (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               name TEXT NOT NULL,
-               invitation_code TEXT NOT NULL UNIQUE,
-               description TEXT,
-               logo_url TEXT,
-               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-               owner_id INTEGER NOT NULL,
-               FOREIGN KEY (owner_id) REFERENCES users(id)
-           );'''
-    )
-    # Memberships link users to groups with a role and optional nickname
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS memberships (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               user_id INTEGER NOT NULL,
-               group_id INTEGER NOT NULL,
-               role TEXT NOT NULL,
-               nickname TEXT,
-               joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-               active INTEGER NOT NULL DEFAULT 1,
-               FOREIGN KEY (user_id) REFERENCES users(id),
-               FOREIGN KEY (group_id) REFERENCES groups(id)
-           );'''
-    )
-    # Index for quick lookup of a membership by user and group
-    cur.execute(
-        'CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships(user_id, group_id)'
-    )
-    # Settings: single row with group name, dark mode flag and optional
-    # next rehearsal info.  "template" selects the UI theme.
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS settings (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               group_id INTEGER NOT NULL UNIQUE,
-               group_name TEXT NOT NULL,
-               dark_mode INTEGER NOT NULL DEFAULT 1,
-               template TEXT NOT NULL DEFAULT 'classic',
-               FOREIGN KEY (group_id) REFERENCES groups(id)
-           );'''
-    )
-    # Sessions: store session token, associated user and expiry timestamp (epoch)
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS sessions (
-               token TEXT PRIMARY KEY,
-               user_id INTEGER NOT NULL,
-               expires_at INTEGER NOT NULL,
-               FOREIGN KEY (user_id) REFERENCES users(id)
-           );'''
-    )
-    # Logs: record key user actions
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS logs (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-               user_id INTEGER,
-               action TEXT NOT NULL,
-               metadata TEXT,
-               FOREIGN KEY (user_id) REFERENCES users(id)
-           );'''
-    )
-    # Notifications: store messages for users
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS notifications (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               user_id INTEGER NOT NULL,
-               message TEXT NOT NULL,
-               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY (user_id) REFERENCES users(id)
-           );'''
-    )
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        # Users table: store username, salt and password hash
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS users (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   username TEXT NOT NULL UNIQUE,
+                   salt BLOB NOT NULL,
+                   password_hash BLOB NOT NULL,
+                   role TEXT NOT NULL DEFAULT 'user',
+                   last_group_id INTEGER,
+                   notify_uploads INTEGER NOT NULL DEFAULT 1,
+                   FOREIGN KEY (last_group_id) REFERENCES groups(id)
+               );'''
+        )
+        # WebAuthn credentials associated with users
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS users_webauthn (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id INTEGER NOT NULL,
+                   credential_id TEXT NOT NULL UNIQUE,
+                   FOREIGN KEY (user_id) REFERENCES users(id)
+               );'''
+        )
+        # Suggestions: simple list of suggestions with optional URL and creator
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS suggestions (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   title TEXT NOT NULL,
+                   author TEXT,
+                   youtube TEXT,
+                   url TEXT,
+                   version_of TEXT,
+                   likes INTEGER NOT NULL DEFAULT 0,
+                   creator_id INTEGER NOT NULL,
+                   group_id INTEGER NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (creator_id) REFERENCES users(id),
+                   FOREIGN KEY (group_id) REFERENCES groups(id)
+               );'''
+        )
+        # Individual suggestion votes per user
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS suggestion_votes (
+                   suggestion_id INTEGER NOT NULL,
+                   user_id INTEGER NOT NULL,
+                   PRIMARY KEY (suggestion_id, user_id),
+                   FOREIGN KEY (suggestion_id) REFERENCES suggestions(id),
+                   FOREIGN KEY (user_id) REFERENCES users(id)
+               );'''
+        )
+        # Rehearsals: store levels and notes per user as JSON strings.  Include
+        # optional author, YouTube/Spotify links and audio notes JSON.  The
+        # ``audio_notes_json`` field stores base64‑encoded audio notes per user.
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS rehearsals (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   title TEXT NOT NULL,
+                   author TEXT,
+                   youtube TEXT,
+                   spotify TEXT,
+                   version_of TEXT,
+                   levels_json TEXT DEFAULT '{}',
+                   notes_json TEXT DEFAULT '{}',
+                   audio_notes_json TEXT DEFAULT '{}',
+                   mastered INTEGER NOT NULL DEFAULT 0,
+                   creator_id INTEGER NOT NULL,
+                   group_id INTEGER NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (creator_id) REFERENCES users(id),
+                   FOREIGN KEY (group_id) REFERENCES groups(id)
+               );'''
+        )
+        # Partitions associated with rehearsals
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS partitions (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   rehearsal_id INTEGER NOT NULL,
+                   path TEXT NOT NULL,
+                   display_name TEXT NOT NULL,
+                   uploader_id INTEGER NOT NULL,
+                   uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (rehearsal_id) REFERENCES rehearsals(id) ON DELETE CASCADE,
+                   FOREIGN KEY (uploader_id) REFERENCES users(id)
+               );'''
+        )
+        # Performances: contains name, date and a JSON array of rehearsal IDs
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS performances (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL,
+                   date TEXT NOT NULL,
+                   location TEXT,
+                   songs_json TEXT DEFAULT '[]',
+                   creator_id INTEGER NOT NULL,
+                   group_id INTEGER NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (creator_id) REFERENCES users(id),
+                   FOREIGN KEY (group_id) REFERENCES groups(id)
+               );'''
+        )
+        # Rehearsal events: standalone rehearsal occurrences with date and
+        # location information.  These are distinct from the "rehearsals"
+        # table above, which stores songs to rehearse.
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS rehearsal_events (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   date TEXT NOT NULL,
+                   location TEXT,
+                   group_id INTEGER NOT NULL,
+                   creator_id INTEGER NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (group_id) REFERENCES groups(id),
+                   FOREIGN KEY (creator_id) REFERENCES users(id)
+               );'''
+        )
+        # Groups allow multiple band configurations and are owned by a user
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS groups (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL,
+                   invitation_code TEXT NOT NULL UNIQUE,
+                   description TEXT,
+                   logo_url TEXT,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   owner_id INTEGER NOT NULL,
+                   FOREIGN KEY (owner_id) REFERENCES users(id)
+               );'''
+        )
+        # Memberships link users to groups with a role and optional nickname
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS memberships (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id INTEGER NOT NULL,
+                   group_id INTEGER NOT NULL,
+                   role TEXT NOT NULL,
+                   nickname TEXT,
+                   joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   active INTEGER NOT NULL DEFAULT 1,
+                   FOREIGN KEY (user_id) REFERENCES users(id),
+                   FOREIGN KEY (group_id) REFERENCES groups(id)
+               );'''
+        )
+        # Index for quick lookup of a membership by user and group
+        cur.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships(user_id, group_id)'
+        )
+        # Settings: single row with group name, dark mode flag and optional
+        # next rehearsal info.  "template" selects the UI theme.
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS settings (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   group_id INTEGER NOT NULL UNIQUE,
+                   group_name TEXT NOT NULL,
+                   dark_mode INTEGER NOT NULL DEFAULT 1,
+                   template TEXT NOT NULL DEFAULT 'classic',
+                   FOREIGN KEY (group_id) REFERENCES groups(id)
+               );'''
+        )
+        # Sessions: store session token, associated user and expiry timestamp (epoch)
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS sessions (
+                   token TEXT PRIMARY KEY,
+                   user_id INTEGER NOT NULL,
+                   expires_at INTEGER NOT NULL,
+                   FOREIGN KEY (user_id) REFERENCES users(id)
+               );'''
+        )
+        # Logs: record key user actions
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS logs (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   user_id INTEGER,
+                   action TEXT NOT NULL,
+                   metadata TEXT,
+                   FOREIGN KEY (user_id) REFERENCES users(id)
+               );'''
+        )
+        # Notifications: store messages for users
+        cur.execute(
+            '''CREATE TABLE IF NOT EXISTS notifications (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id INTEGER NOT NULL,
+                   message TEXT NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (user_id) REFERENCES users(id)
+               );'''
+        )
+        conn.commit()
 
     # Ensure additional columns are present in existing databases.  SQLite
     # will raise an OperationalError if a column already exists; we
     # silently ignore such errors.  Users table: role, last_group_id and
     # notify_uploads preference
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('PRAGMA table_info(users)')
-        columns = [row['name'] for row in cur.fetchall()]
-        if 'role' not in columns:
-            cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
-        if 'last_group_id' not in columns:
-            cur.execute('ALTER TABLE users ADD COLUMN last_group_id INTEGER')
-        if 'notify_uploads' not in columns:
-            cur.execute('ALTER TABLE users ADD COLUMN notify_uploads INTEGER NOT NULL DEFAULT 1')
-        conn.commit()
-        conn.close()
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('PRAGMA table_info(users)')
+            columns = [row['name'] for row in cur.fetchall()]
+            if 'role' not in columns:
+                cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            if 'last_group_id' not in columns:
+                cur.execute('ALTER TABLE users ADD COLUMN last_group_id INTEGER')
+            if 'notify_uploads' not in columns:
+                cur.execute('ALTER TABLE users ADD COLUMN notify_uploads INTEGER NOT NULL DEFAULT 1')
+            conn.commit()
     except Exception:
         pass
     # Suggestions table: ensure additional columns exist
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('PRAGMA table_info(suggestions)')
-        s_columns = [row['name'] for row in cur.fetchall()]
-        if 'author' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN author TEXT')
-        if 'youtube' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN youtube TEXT')
-        if 'version_of' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN version_of TEXT')
-        if 'likes' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0')
-        if 'group_id' not in s_columns:
-            cur.execute('ALTER TABLE suggestions ADD COLUMN group_id INTEGER')
-            # Populate group_id using creator's active group
-            cur.execute(
-                '''UPDATE suggestions SET group_id = (
-                        SELECT group_id FROM memberships m
-                        WHERE m.user_id = suggestions.creator_id AND m.active = 1
-                        ORDER BY m.group_id LIMIT 1
-                    ) WHERE group_id IS NULL'''
-            )
-        conn.commit()
-        conn.close()
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('PRAGMA table_info(suggestions)')
+            s_columns = [row['name'] for row in cur.fetchall()]
+            if 'author' not in s_columns:
+                cur.execute('ALTER TABLE suggestions ADD COLUMN author TEXT')
+            if 'youtube' not in s_columns:
+                cur.execute('ALTER TABLE suggestions ADD COLUMN youtube TEXT')
+            if 'version_of' not in s_columns:
+                cur.execute('ALTER TABLE suggestions ADD COLUMN version_of TEXT')
+            if 'likes' not in s_columns:
+                cur.execute('ALTER TABLE suggestions ADD COLUMN likes INTEGER NOT NULL DEFAULT 0')
+            if 'group_id' not in s_columns:
+                cur.execute('ALTER TABLE suggestions ADD COLUMN group_id INTEGER')
+                # Populate group_id using creator's active group
+                cur.execute(
+                    '''UPDATE suggestions SET group_id = (
+                            SELECT group_id FROM memberships m
+                            WHERE m.user_id = suggestions.creator_id AND m.active = 1
+                            ORDER BY m.group_id LIMIT 1
+                        ) WHERE group_id IS NULL'''
+                )
+            conn.commit()
     except Exception:
         pass
     # Rehearsals table: ensure additional columns exist
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('PRAGMA table_info(rehearsals)')
-        r_columns = [row['name'] for row in cur.fetchall()]
-        if 'author' not in r_columns:
-            cur.execute('ALTER TABLE rehearsals ADD COLUMN author TEXT')
-        if 'audio_notes_json' not in r_columns:
-            cur.execute("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
-        if 'sheet_music_json' in r_columns and not new_db:
-            try:
-                cur.execute('ALTER TABLE rehearsals DROP COLUMN sheet_music_json')
-            except sqlite3.OperationalError:
-                pass
-        if 'mastered' not in r_columns:
-            cur.execute('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0')
-        if 'version_of' not in r_columns:
-            cur.execute('ALTER TABLE rehearsals ADD COLUMN version_of TEXT')
-        if 'group_id' not in r_columns:
-            cur.execute('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER')
-            cur.execute(
-                '''UPDATE rehearsals SET group_id = (
-                        SELECT group_id FROM memberships m
-                        WHERE m.user_id = rehearsals.creator_id AND m.active = 1
-                        ORDER BY m.group_id LIMIT 1
-                    ) WHERE group_id IS NULL'''
-            )
-        conn.commit()
-        conn.close()
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('PRAGMA table_info(rehearsals)')
+            r_columns = [row['name'] for row in cur.fetchall()]
+            if 'author' not in r_columns:
+                cur.execute('ALTER TABLE rehearsals ADD COLUMN author TEXT')
+            if 'audio_notes_json' not in r_columns:
+                cur.execute("ALTER TABLE rehearsals ADD COLUMN audio_notes_json TEXT DEFAULT '{}'")
+            if 'sheet_music_json' in r_columns and not new_db:
+                try:
+                    cur.execute('ALTER TABLE rehearsals DROP COLUMN sheet_music_json')
+                except sqlite3.OperationalError:
+                    pass
+            if 'mastered' not in r_columns:
+                cur.execute('ALTER TABLE rehearsals ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0')
+            if 'version_of' not in r_columns:
+                cur.execute('ALTER TABLE rehearsals ADD COLUMN version_of TEXT')
+            if 'group_id' not in r_columns:
+                cur.execute('ALTER TABLE rehearsals ADD COLUMN group_id INTEGER')
+                cur.execute(
+                    '''UPDATE rehearsals SET group_id = (
+                            SELECT group_id FROM memberships m
+                            WHERE m.user_id = rehearsals.creator_id AND m.active = 1
+                            ORDER BY m.group_id LIMIT 1
+                        ) WHERE group_id IS NULL'''
+                )
+            conn.commit()
     except Exception:
         pass
 
     # Performances table: ensure group_id column exists
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('PRAGMA table_info(performances)')
-        p_columns = [row['name'] for row in cur.fetchall()]
-        if 'group_id' not in p_columns:
-            cur.execute('ALTER TABLE performances ADD COLUMN group_id INTEGER')
-            cur.execute(
-                '''UPDATE performances SET group_id = (
-                        SELECT group_id FROM memberships m
-                        WHERE m.user_id = performances.creator_id AND m.active = 1
-                        ORDER BY m.group_id LIMIT 1
-                    ) WHERE group_id IS NULL'''
-            )
-        conn.commit()
-        conn.close()
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('PRAGMA table_info(performances)')
+            p_columns = [row['name'] for row in cur.fetchall()]
+            if 'group_id' not in p_columns:
+                cur.execute('ALTER TABLE performances ADD COLUMN group_id INTEGER')
+                cur.execute(
+                    '''UPDATE performances SET group_id = (
+                            SELECT group_id FROM memberships m
+                            WHERE m.user_id = performances.creator_id AND m.active = 1
+                            ORDER BY m.group_id LIMIT 1
+                        ) WHERE group_id IS NULL'''
+                )
+            conn.commit()
     except Exception:
         pass
 
     # Settings table: ensure newer columns exist. Older databases may lack
     # the "template" field, so add it if missing.
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('PRAGMA table_info(settings)')
-        settings_columns = [row['name'] for row in cur.fetchall()]
-        if 'template' not in settings_columns:
-            cur.execute("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
-        if 'group_id' not in settings_columns:
-            cur.execute('ALTER TABLE settings ADD COLUMN group_id INTEGER')
-            cur.execute('UPDATE settings SET group_id = 1 WHERE group_id IS NULL')
-        conn.commit()
-        conn.close()
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('PRAGMA table_info(settings)')
+            settings_columns = [row['name'] for row in cur.fetchall()]
+            if 'template' not in settings_columns:
+                cur.execute("ALTER TABLE settings ADD COLUMN template TEXT NOT NULL DEFAULT 'classic'")
+            if 'group_id' not in settings_columns:
+                cur.execute('ALTER TABLE settings ADD COLUMN group_id INTEGER')
+                cur.execute('UPDATE settings SET group_id = 1 WHERE group_id IS NULL')
+            conn.commit()
     except Exception:
         pass
 
     # Sessions table: ensure a group_id column exists to store the active
     # group for a session.
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('PRAGMA table_info(sessions)')
-        sess_columns = [row['name'] for row in cur.fetchall()]
-        if 'group_id' not in sess_columns:
-            cur.execute('ALTER TABLE sessions ADD COLUMN group_id INTEGER')
-        conn.commit()
-        conn.close()
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('PRAGMA table_info(sessions)')
+            sess_columns = [row['name'] for row in cur.fetchall()]
+            if 'group_id' not in sess_columns:
+                cur.execute('ALTER TABLE sessions ADD COLUMN group_id INTEGER')
+            conn.commit()
     except Exception:
         pass
 
@@ -1412,55 +1407,53 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not username or not password:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Username and password are required'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Check if a user already exists (case‑insensitive)
-        cur.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', (username,))
-        if cur.fetchone():
-            conn.close()
-            send_json(self, HTTPStatus.CONFLICT, {'error': 'User already exists'})
-            return
-        # Determine if this is the first user; if so, assign admin role
-        cur.execute('SELECT COUNT(*) FROM users')
-        count = cur.fetchone()[0]
-        role = 'admin' if count == 0 else 'user'
-        salt, pwd_hash = hash_password(password)
-        cur.execute(
-            'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
-            (username, salt, pwd_hash, role, None)
-        )
-        user_id = cur.lastrowid
-        # Ensure default group exists and is owned by the first user
-        cur.execute('SELECT id FROM groups WHERE id = 1')
-        if cur.fetchone() is None:
-            code = generate_unique_invitation_code()
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            # Check if a user already exists (case‑insensitive)
+            cur.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', (username,))
+            if cur.fetchone():
+                send_json(self, HTTPStatus.CONFLICT, {'error': 'User already exists'})
+                return
+            # Determine if this is the first user; if so, assign admin role
+            cur.execute('SELECT COUNT(*) FROM users')
+            count = cur.fetchone()[0]
+            role = 'admin' if count == 0 else 'user'
+            salt, pwd_hash = hash_password(password)
             cur.execute(
-                'INSERT INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, ?)',
-                ('Groupe de musique', code, user_id),
+                'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
+                (username, salt, pwd_hash, role, None)
             )
+            user_id = cur.lastrowid
+            # Ensure default group exists and is owned by the first user
+            cur.execute('SELECT id FROM groups WHERE id = 1')
+            if cur.fetchone() is None:
+                code = generate_unique_invitation_code()
+                cur.execute(
+                    'INSERT INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, ?)',
+                    ('Groupe de musique', code, user_id),
+                )
+                cur.execute(
+                    "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (1, 'Groupe de musique', 1, 'classic')"
+                )
+            # Add the new user to the default group (id 1)
             cur.execute(
-                "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (1, 'Groupe de musique', 1, 'classic')"
+                'INSERT OR IGNORE INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)',
+                (user_id, role),
             )
-        # Add the new user to the default group (id 1)
-        cur.execute(
-            'INSERT OR IGNORE INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)',
-            (user_id, role),
-        )
-        # Record last group for the user
-        cur.execute('UPDATE users SET last_group_id = 1 WHERE id = ?', (user_id,))
-        conn.commit()
-        conn.close()
-        group_id = 1
-        # Automatically log in the new user and return a session cookie so the
-        # behaviour mirrors the Express implementation.
-        token = generate_session(user_id, group_id)
-        expires_ts = int(time.time()) + 7 * 24 * 3600
-        send_json(
-            self,
-            HTTPStatus.OK,
-            {'id': user_id, 'username': username, 'role': role, 'membershipRole': role},
-            cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
-        )
+            # Record last group for the user
+            cur.execute('UPDATE users SET last_group_id = 1 WHERE id = ?', (user_id,))
+            conn.commit()
+            group_id = 1
+            # Automatically log in the new user and return a session cookie so the
+            # behaviour mirrors the Express implementation.
+            token = generate_session(user_id, group_id)
+            expires_ts = int(time.time()) + 7 * 24 * 3600
+            send_json(
+                self,
+                HTTPStatus.OK,
+                {'id': user_id, 'username': username, 'role': role, 'membershipRole': role},
+                cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+            )
 
     def api_login(self, body: dict):
         username = (body.get('username') or '').strip().lower()
@@ -1468,47 +1461,66 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not username or not password:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Username and password are required'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Perform a case‑insensitive lookup for the username
-        cur.execute(
-            'SELECT id, username, salt, password_hash, role, last_group_id FROM users WHERE LOWER(username) = LOWER(?)',
-            (username,),
-        )
-        row = cur.fetchone()
-        conn.close()
-        if not row:
-            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
-            return
-        salt = row['salt']
-        pwd_hash = row['password_hash']
-        if not verify_password(password, salt, pwd_hash):
-            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
-            return
-        # Determine the active group using the user's last choice if still valid
-        conn = get_db_connection()
-        cur = conn.cursor()
-        group_id = row['last_group_id']
-        if group_id is not None:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            # Perform a case‑insensitive lookup for the username
             cur.execute(
-                'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
-                (row['id'], group_id),
+                'SELECT id, username, salt, password_hash, role, last_group_id FROM users WHERE LOWER(username) = LOWER(?)',
+                (username,),
             )
-            if not cur.fetchone():
-                group_id = None
-        if group_id is None:
-            cur.execute(
-                'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
-                (row['id'],),
-            )
-            g_row = cur.fetchone()
-            group_id = g_row['group_id'] if g_row else None
-        cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, row['id']))
-        conn.commit()
-        conn.close()
-        if group_id is None:
-            token = generate_session(row['id'], None)
+            row = cur.fetchone()
+            if not row:
+                send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
+                return
+            salt = row['salt']
+            pwd_hash = row['password_hash']
+            if not verify_password(password, salt, pwd_hash):
+                send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
+                return
+            # Determine the active group using the user's last choice if still valid
+            conn = get_db_connection()
+            cur = conn.cursor()
+            group_id = row['last_group_id']
+            if group_id is not None:
+                cur.execute(
+                    'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
+                    (row['id'], group_id),
+                )
+                if not cur.fetchone():
+                    group_id = None
+            if group_id is None:
+                cur.execute(
+                    'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
+                    (row['id'],),
+                )
+                g_row = cur.fetchone()
+                group_id = g_row['group_id'] if g_row else None
+            cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, row['id']))
+            conn.commit()
+            if group_id is None:
+                token = generate_session(row['id'], None)
+                expires_ts = int(time.time()) + 7 * 24 * 3600
+                log_event(row['id'], 'login', {'username': row['username']})
+                send_json(
+                    self,
+                    HTTPStatus.OK,
+                    {
+                        'message': 'Logged in',
+                        'user': {
+                            'id': row['id'],
+                            'username': row['username'],
+                            'role': row['role'],
+                            'membershipRole': None,
+                            'needsGroup': True,
+                            'isAdmin': row['role'] == 'admin',
+                        },
+                    },
+                    cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+                )
+                return
+            token = generate_session(row['id'], group_id)
             expires_ts = int(time.time()) + 7 * 24 * 3600
+            membership = get_membership(row['id'], group_id) if group_id else None
             log_event(row['id'], 'login', {'username': row['username']})
             send_json(
                 self,
@@ -1519,33 +1531,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         'id': row['id'],
                         'username': row['username'],
                         'role': row['role'],
-                        'membershipRole': None,
-                        'needsGroup': True,
+                        'membershipRole': membership['role'] if membership else None,
                         'isAdmin': row['role'] == 'admin',
                     },
                 },
                 cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
             )
-            return
-        token = generate_session(row['id'], group_id)
-        expires_ts = int(time.time()) + 7 * 24 * 3600
-        membership = get_membership(row['id'], group_id) if group_id else None
-        log_event(row['id'], 'login', {'username': row['username']})
-        send_json(
-            self,
-            HTTPStatus.OK,
-            {
-                'message': 'Logged in',
-                'user': {
-                    'id': row['id'],
-                    'username': row['username'],
-                    'role': row['role'],
-                    'membershipRole': membership['role'] if membership else None,
-                    'isAdmin': row['role'] == 'admin',
-                },
-            },
-            cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
-        )
 
     def api_logout(self, session_token: str):
         if session_token:
@@ -1589,36 +1580,34 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not user:
             send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        uid = user['id']
-        cur.execute('SELECT COUNT(*) FROM groups WHERE owner_id = ?', (uid,))
-        if cur.fetchone()[0] > 0:
-            conn.close()
-            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Cannot delete account while owning a group'})
-            return
-        cur.execute('DELETE FROM suggestion_votes WHERE user_id = ?', (uid,))
-        cur.execute('DELETE FROM suggestions WHERE creator_id = ?', (uid,))
-        cur.execute('DELETE FROM rehearsals WHERE creator_id = ?', (uid,))
-        cur.execute('DELETE FROM performances WHERE creator_id = ?', (uid,))
-        cur.execute('DELETE FROM rehearsal_events WHERE creator_id = ?', (uid,))
-        cur.execute('DELETE FROM memberships WHERE user_id = ?', (uid,))
-        cur.execute('DELETE FROM sessions WHERE user_id = ?', (uid,))
-        cur.execute('DELETE FROM users_webauthn WHERE user_id = ?', (uid,))
-        cur.execute('UPDATE logs SET user_id = NULL WHERE user_id = ?', (uid,))
-        cur.execute('DELETE FROM users WHERE id = ?', (uid,))
-        conn.commit()
-        conn.close()
-        if session_token:
-            delete_session(session_token)
-        log_event(None, 'delete_account', {'user_id': uid})
-        past_ts = int(time.time()) - 3600
-        send_json(
-            self,
-            HTTPStatus.OK,
-            {'message': 'Account deleted'},
-            cookies=[('session_id', '', {'expires': past_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
-        )
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            uid = user['id']
+            cur.execute('SELECT COUNT(*) FROM groups WHERE owner_id = ?', (uid,))
+            if cur.fetchone()[0] > 0:
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Cannot delete account while owning a group'})
+                return
+            cur.execute('DELETE FROM suggestion_votes WHERE user_id = ?', (uid,))
+            cur.execute('DELETE FROM suggestions WHERE creator_id = ?', (uid,))
+            cur.execute('DELETE FROM rehearsals WHERE creator_id = ?', (uid,))
+            cur.execute('DELETE FROM performances WHERE creator_id = ?', (uid,))
+            cur.execute('DELETE FROM rehearsal_events WHERE creator_id = ?', (uid,))
+            cur.execute('DELETE FROM memberships WHERE user_id = ?', (uid,))
+            cur.execute('DELETE FROM sessions WHERE user_id = ?', (uid,))
+            cur.execute('DELETE FROM users_webauthn WHERE user_id = ?', (uid,))
+            cur.execute('UPDATE logs SET user_id = NULL WHERE user_id = ?', (uid,))
+            cur.execute('DELETE FROM users WHERE id = ?', (uid,))
+            conn.commit()
+            if session_token:
+                delete_session(session_token)
+            log_event(None, 'delete_account', {'user_id': uid})
+            past_ts = int(time.time()) - 3600
+            send_json(
+                self,
+                HTTPStatus.OK,
+                {'message': 'Account deleted'},
+                cookies=[('session_id', '', {'expires': past_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+            )
 
     def api_webauthn_register(self, body: dict, user: dict):
         """Store a new WebAuthn credential for the logged-in user."""
@@ -1643,44 +1632,43 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not user_row:
             send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credential'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        group_id = user_row.get('last_group_id')
-        if group_id is not None:
-            cur.execute(
-                'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
-                (user_row['id'], group_id),
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            group_id = user_row.get('last_group_id')
+            if group_id is not None:
+                cur.execute(
+                    'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
+                    (user_row['id'], group_id),
+                )
+                if not cur.fetchone():
+                    group_id = None
+            if group_id is None:
+                cur.execute(
+                    'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
+                    (user_row['id'],),
+                )
+                g_row = cur.fetchone()
+                group_id = g_row['group_id'] if g_row else None
+            cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user_row['id']))
+            conn.commit()
+            token = generate_session(user_row['id'], group_id)
+            expires_ts = int(time.time()) + 7 * 24 * 3600
+            membership = get_membership(user_row['id'], group_id) if group_id else None
+            log_event(user_row['id'], 'login', {'username': user_row['username'], 'method': 'webauthn'})
+            payload = {
+                'id': user_row['id'],
+                'username': user_row['username'],
+                'role': user_row['role'],
+                'membershipRole': membership['role'] if membership else None,
+                'needsGroup': group_id is None,
+                'isAdmin': user_row['role'] == 'admin',
+            }
+            send_json(
+                self,
+                HTTPStatus.OK,
+                {'message': 'Logged in', 'user': payload},
+                cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})],
             )
-            if not cur.fetchone():
-                group_id = None
-        if group_id is None:
-            cur.execute(
-                'SELECT group_id FROM memberships WHERE user_id = ? AND active = 1 ORDER BY group_id LIMIT 1',
-                (user_row['id'],),
-            )
-            g_row = cur.fetchone()
-            group_id = g_row['group_id'] if g_row else None
-        cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user_row['id']))
-        conn.commit()
-        conn.close()
-        token = generate_session(user_row['id'], group_id)
-        expires_ts = int(time.time()) + 7 * 24 * 3600
-        membership = get_membership(user_row['id'], group_id) if group_id else None
-        log_event(user_row['id'], 'login', {'username': user_row['username'], 'method': 'webauthn'})
-        payload = {
-            'id': user_row['id'],
-            'username': user_row['username'],
-            'role': user_row['role'],
-            'membershipRole': membership['role'] if membership else None,
-            'needsGroup': group_id is None,
-            'isAdmin': user_row['role'] == 'admin',
-        }
-        send_json(
-            self,
-            HTTPStatus.OK,
-            {'message': 'Logged in', 'user': payload},
-            cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})],
-        )
 
     def api_update_password(self, body: dict, user: dict):
         old_password = body.get('oldPassword') or ''
@@ -1688,39 +1676,35 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not old_password or not new_password:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'oldPassword and newPassword are required'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT salt, password_hash FROM users WHERE id = ?', (user['id'],))
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'User not found'})
-            return
-        if not verify_password(old_password, row['salt'], row['password_hash']):
-            conn.close()
-            send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid current password'})
-            return
-        new_salt, new_hash = hash_password(new_password)
-        cur.execute('UPDATE users SET salt = ?, password_hash = ? WHERE id = ?', (new_salt, new_hash, user['id']))
-        conn.commit()
-        conn.close()
-        log_event(user['id'], 'password_change', {})
-        send_json(self, HTTPStatus.OK, {'message': 'Password updated'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT salt, password_hash FROM users WHERE id = ?', (user['id'],))
+            row = cur.fetchone()
+            if not row:
+                send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'User not found'})
+                return
+            if not verify_password(old_password, row['salt'], row['password_hash']):
+                send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid current password'})
+                return
+            new_salt, new_hash = hash_password(new_password)
+            cur.execute('UPDATE users SET salt = ?, password_hash = ? WHERE id = ?', (new_salt, new_hash, user['id']))
+            conn.commit()
+            log_event(user['id'], 'password_change', {})
+            send_json(self, HTTPStatus.OK, {'message': 'Password updated'})
 
     def api_get_context(self, user: dict):
         """Return the currently active group for the session."""
         if user.get('group_id') is None:
             send_json(self, HTTPStatus.NOT_FOUND, {'error': 'No active group'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT id, name FROM groups WHERE id = ?', (user['group_id'],))
-        row = cur.fetchone()
-        conn.close()
-        if not row:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
-            return
-        send_json(self, HTTPStatus.OK, {'id': row['id'], 'name': row['name']})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT id, name FROM groups WHERE id = ?', (user['group_id'],))
+            row = cur.fetchone()
+            if not row:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
+                return
+            send_json(self, HTTPStatus.OK, {'id': row['id'], 'name': row['name']})
 
     def api_set_context(self, body: dict, user: dict, session_token: str):
         """Switch the active group if the user is a member of it."""
@@ -1728,26 +1712,24 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if group_id is None:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'groupId is required'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
-            (user['id'], group_id)
-        )
-        if not cur.fetchone():
-            conn.close()
-            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No membership'})
-            return
-        cur.execute('UPDATE sessions SET group_id = ? WHERE token = ?', (group_id, session_token))
-        cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user['id']))
-        cur.execute('SELECT id, name FROM groups WHERE id = ?', (group_id,))
-        row = cur.fetchone()
-        conn.commit()
-        conn.close()
-        if not row:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
-            return
-        send_json(self, HTTPStatus.OK, {'id': row['id'], 'name': row['name']})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                'SELECT 1 FROM memberships WHERE user_id = ? AND group_id = ? AND active = 1',
+                (user['id'], group_id)
+            )
+            if not cur.fetchone():
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'No membership'})
+                return
+            cur.execute('UPDATE sessions SET group_id = ? WHERE token = ?', (group_id, session_token))
+            cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user['id']))
+            cur.execute('SELECT id, name FROM groups WHERE id = ?', (group_id,))
+            row = cur.fetchone()
+            conn.commit()
+            if not row:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
+                return
+            send_json(self, HTTPStatus.OK, {'id': row['id'], 'name': row['name']})
 
     def api_create_group(self, body: dict, user: dict):
         name = (body.get('name') or '').strip()
@@ -1807,12 +1789,11 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             group.get('description'),
             group.get('logo_url'),
         )
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('UPDATE settings SET group_name = ? WHERE group_id = ?', (name, group_id))
-        conn.commit()
-        conn.close()
-        send_json(self, HTTPStatus.OK, {'id': group_id, 'name': name})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('UPDATE settings SET group_name = ? WHERE group_id = ?', (name, group_id))
+            conn.commit()
+            send_json(self, HTTPStatus.OK, {'id': group_id, 'name': name})
 
     def api_get_groups(self, user: dict):
         groups = get_groups_for_user(user['id'])
@@ -1852,29 +1833,28 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid role'})
                 return
             nickname = body.get('nickname')
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute('SELECT id, username FROM users WHERE id = ?', (target_user_id,))
-            row = cur.fetchone()
-            conn.close()
-            if not row:
-                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute('SELECT id, username FROM users WHERE id = ?', (target_user_id,))
+                row = cur.fetchone()
+                if not row:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})
+                    return
+                if get_membership(target_user_id, group_id):
+                    send_json(self, HTTPStatus.CONFLICT, {'error': 'Membership already exists'})
+                    return
+                create_membership(target_user_id, group_id, new_role, nickname)
+                membership = get_membership(target_user_id, group_id)
+                send_json(self, HTTPStatus.CREATED, {
+                    'id': membership['id'],
+                    'userId': membership['user_id'],
+                    'username': row['username'],
+                    'role': membership['role'],
+                    'nickname': membership['nickname'],
+                    'joinedAt': membership['joined_at'],
+                    'active': bool(membership['active']),
+                })
                 return
-            if get_membership(target_user_id, group_id):
-                send_json(self, HTTPStatus.CONFLICT, {'error': 'Membership already exists'})
-                return
-            create_membership(target_user_id, group_id, new_role, nickname)
-            membership = get_membership(target_user_id, group_id)
-            send_json(self, HTTPStatus.CREATED, {
-                'id': membership['id'],
-                'userId': membership['user_id'],
-                'username': row['username'],
-                'role': membership['role'],
-                'nickname': membership['nickname'],
-                'joinedAt': membership['joined_at'],
-                'active': bool(membership['active']),
-            })
-            return
         if method == 'PUT':
             if role != 'admin':
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
@@ -1920,15 +1900,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid membership id'})
                     return
-                conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute('SELECT user_id FROM memberships WHERE id = ? AND group_id = ?', (membership_id, group_id))
-                row = cur.fetchone()
-                conn.close()
-                if not row:
-                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
-                    return
-                target_user_id = row['user_id']
+                with get_db_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute('SELECT user_id FROM memberships WHERE id = ? AND group_id = ?', (membership_id, group_id))
+                    row = cur.fetchone()
+                    if not row:
+                        send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Membership not found'})
+                        return
+                    target_user_id = row['user_id']
             if role != 'admin' and target_user_id != user['id']:
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
                 return
@@ -1939,13 +1918,12 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if target_user_id == user['id']:
                 remaining = get_groups_for_user(user['id'])
                 new_group_id = remaining[0]['id'] if remaining else None
-                conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (new_group_id, user['id']))
-                cur.execute('UPDATE sessions SET group_id = ? WHERE user_id = ?', (new_group_id, user['id']))
-                conn.commit()
-                conn.close()
-                send_json(self, HTTPStatus.OK, {'message': 'Left group'})
+                with get_db_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute('UPDATE users SET last_group_id = ? WHERE id = ?', (new_group_id, user['id']))
+                    cur.execute('UPDATE sessions SET group_id = ? WHERE user_id = ?', (new_group_id, user['id']))
+                    conn.commit()
+                    send_json(self, HTTPStatus.OK, {'message': 'Left group'})
             else:
                 send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
             return
@@ -1963,88 +1941,85 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not email or '@' not in email:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid email'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)', (email,))
-        row = cur.fetchone()
-        if row:
-            user_id = row['id']
-            username = row['username']
-            conn.close()
-            if get_membership(user_id, group_id):
-                send_json(self, HTTPStatus.CONFLICT, {'error': 'Membership already exists'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)', (email,))
+            row = cur.fetchone()
+            if row:
+                user_id = row['id']
+                username = row['username']
+                if get_membership(user_id, group_id):
+                    send_json(self, HTTPStatus.CONFLICT, {'error': 'Membership already exists'})
+                    return
+                create_membership(user_id, group_id, 'user', None)
+                membership = get_membership(user_id, group_id)
+                send_json(self, HTTPStatus.CREATED, {
+                    'id': membership['id'],
+                    'userId': membership['user_id'],
+                    'username': username,
+                    'role': membership['role'],
+                    'nickname': membership['nickname'],
+                    'joinedAt': membership['joined_at'],
+                    'active': bool(membership['active']),
+                })
                 return
-            create_membership(user_id, group_id, 'user', None)
+            # Create provisional user
+            temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+            salt, pwd_hash = hash_password(temp_password)
+            cur.execute(
+                'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
+                (email, salt, pwd_hash, 'user', group_id),
+            )
+            user_id = cur.lastrowid
+            cur.execute(
+                'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, 1)',
+                (user_id, group_id, 'user', None),
+            )
+            conn.commit()
             membership = get_membership(user_id, group_id)
             send_json(self, HTTPStatus.CREATED, {
                 'id': membership['id'],
                 'userId': membership['user_id'],
-                'username': username,
+                'username': email,
                 'role': membership['role'],
                 'nickname': membership['nickname'],
                 'joinedAt': membership['joined_at'],
                 'active': bool(membership['active']),
+                'temporaryPassword': temp_password,
             })
-            return
-        # Create provisional user
-        temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
-        salt, pwd_hash = hash_password(temp_password)
-        cur.execute(
-            'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
-            (email, salt, pwd_hash, 'user', group_id),
-        )
-        user_id = cur.lastrowid
-        cur.execute(
-            'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, 1)',
-            (user_id, group_id, 'user', None),
-        )
-        conn.commit()
-        conn.close()
-        membership = get_membership(user_id, group_id)
-        send_json(self, HTTPStatus.CREATED, {
-            'id': membership['id'],
-            'userId': membership['user_id'],
-            'username': email,
-            'role': membership['role'],
-            'nickname': membership['nickname'],
-            'joinedAt': membership['joined_at'],
-            'active': bool(membership['active']),
-            'temporaryPassword': temp_password,
-        })
 
     def api_get_suggestions(self, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at, u.username AS creator
-               FROM suggestions s
-               JOIN users u ON u.id = s.creator_id
-               WHERE s.group_id = ?
-               ORDER BY s.likes DESC, s.created_at ASC''',
-            (user['group_id'],)
-        )
-        rows = [dict(row) for row in cur.fetchall()]
-        conn.close()
-        # Rename fields to camelCase and include author and youtube
-        result = []
-        for r in rows:
-            entry = {
-                'id': r['id'],
-                'title': r['title'],
-                'author': r['author'],
-                'youtube': r['youtube'] or r['url'],
-                'creatorId': r['creator_id'],
-                'creator': r['creator'],
-                'createdAt': r['created_at'],
-                'likes': r['likes'],
-                'versionOf': r['version_of'],
-            }
-            result.append(entry)
-        send_json(self, HTTPStatus.OK, result)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at, u.username AS creator
+                   FROM suggestions s
+                   JOIN users u ON u.id = s.creator_id
+                   WHERE s.group_id = ?
+                   ORDER BY s.likes DESC, s.created_at ASC''',
+                (user['group_id'],)
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+            # Rename fields to camelCase and include author and youtube
+            result = []
+            for r in rows:
+                entry = {
+                    'id': r['id'],
+                    'title': r['title'],
+                    'author': r['author'],
+                    'youtube': r['youtube'] or r['url'],
+                    'creatorId': r['creator_id'],
+                    'creator': r['creator'],
+                    'createdAt': r['created_at'],
+                    'likes': r['likes'],
+                    'versionOf': r['version_of'],
+                }
+                result.append(entry)
+            send_json(self, HTTPStatus.OK, result)
 
     def api_create_suggestion(self, body: dict, user: dict):
         title = (body.get('title') or '').strip()
@@ -2058,39 +2033,38 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            'INSERT INTO suggestions (title, author, youtube, url, version_of, group_id, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (title, author, youtube, youtube, version_of, user['group_id'], user['id'])
-        )
-        suggestion_id = cur.lastrowid
-        # Retrieve the created row with creator username and timestamp
-        cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes,
-                     s.creator_id, s.created_at, u.username AS creator
-               FROM suggestions s JOIN users u ON u.id = s.creator_id
-               WHERE s.id = ? AND s.group_id = ?''',
-            (suggestion_id, user['group_id'])
-        )
-        row = cur.fetchone()
-        conn.commit()
-        conn.close()
-        if row:
-            result = {
-                'id': row['id'],
-                'title': row['title'],
-                'author': row['author'],
-                'youtube': row['youtube'] or row['url'],
-                'creatorId': row['creator_id'],
-                'creator': row['creator'],
-                'createdAt': row['created_at'],
-                'likes': row['likes'],
-                'versionOf': row['version_of'],
-            }
-            send_json(self, HTTPStatus.CREATED, result)
-        else:
-            send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Failed to fetch created suggestion'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                'INSERT INTO suggestions (title, author, youtube, url, version_of, group_id, creator_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (title, author, youtube, youtube, version_of, user['group_id'], user['id'])
+            )
+            suggestion_id = cur.lastrowid
+            # Retrieve the created row with creator username and timestamp
+            cur.execute(
+                '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes,
+                         s.creator_id, s.created_at, u.username AS creator
+                   FROM suggestions s JOIN users u ON u.id = s.creator_id
+                   WHERE s.id = ? AND s.group_id = ?''',
+                (suggestion_id, user['group_id'])
+            )
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                result = {
+                    'id': row['id'],
+                    'title': row['title'],
+                    'author': row['author'],
+                    'youtube': row['youtube'] or row['url'],
+                    'creatorId': row['creator_id'],
+                    'creator': row['creator'],
+                    'createdAt': row['created_at'],
+                    'likes': row['likes'],
+                    'versionOf': row['version_of'],
+                }
+                send_json(self, HTTPStatus.CREATED, result)
+            else:
+                send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Failed to fetch created suggestion'})
 
     def api_delete_suggestion(self, body: dict, user: dict):
         """Delete a suggestion using a JSON body.  The body should contain
@@ -2101,25 +2075,24 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid suggestion id'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        if user.get('role') in ('admin', 'moderator'):
-            cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
-        else:
-            cur.execute(
-                'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?',
-                (sug_id, user['id'], user['group_id'])
-            )
-        deleted = cur.rowcount
-        if deleted:
-            cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
-        conn.commit()
-        conn.close()
-        if deleted:
-            log_event(user['id'], 'delete', {'entity': 'suggestion', 'id': sug_id})
-            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if user.get('role') in ('admin', 'moderator'):
+                cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+            else:
+                cur.execute(
+                    'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?',
+                    (sug_id, user['id'], user['group_id'])
+                )
+            deleted = cur.rowcount
+            if deleted:
+                cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+            conn.commit()
+            if deleted:
+                log_event(user['id'], 'delete', {'entity': 'suggestion', 'id': sug_id})
+                send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
 
     def api_update_suggestion(self, body: dict, user: dict):
         """Backward-compatible endpoint for updating a suggestion.
@@ -2136,16 +2109,59 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
-               FROM rehearsals r JOIN users u ON u.id = r.creator_id
-               WHERE r.group_id = ?''',
-            (user['group_id'],)
-        )
-        rows = []
-        for row in cur.fetchall():
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json, r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
+                   FROM rehearsals r JOIN users u ON u.id = r.creator_id
+                   WHERE r.group_id = ?''',
+                (user['group_id'],)
+            )
+            rows = []
+            for row in cur.fetchall():
+                levels = json.loads(row['levels_json'] or '{}')
+                notes = json.loads(row['notes_json'] or '{}')
+                audio_notes = parse_audio_notes_json(row['audio_notes_json'])
+                avg = (
+                    sum(float(v) for v in levels.values()) / len(levels)
+                    if levels
+                    else 0.0
+                )
+                rows.append({
+                    'id': row['id'],
+                    'title': row['title'],
+                    'author': row['author'],
+                    'youtube': row['youtube'],
+                    'spotify': row['spotify'],
+                    'versionOf': row['version_of'],
+                    'audioNotes': audio_notes,
+                    'levels': levels,
+                    'notes': notes,
+                    'mastered': bool(row['mastered']),
+                    'creatorId': row['creator_id'],
+                    'creator': row['creator'],
+                    'createdAt': row['created_at'],
+                    'avgLevel': avg,
+                })
+            rows.sort(key=lambda r: r['avgLevel'], reverse=True)
+            send_json(self, HTTPStatus.OK, rows)
+
+    def api_get_rehearsal_id(self, rehearsal_id: int, user: dict):
+        role = verify_group_access(user['id'], user['group_id'])
+        if not role:
+            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
+                          r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
+                   FROM rehearsals r JOIN users u ON u.id = r.creator_id
+                   WHERE r.id = ? AND r.group_id = ?''',
+                (rehearsal_id, user['group_id']),
+            )
+            row = cur.fetchone()
+            if not row:
+                return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
             levels = json.loads(row['levels_json'] or '{}')
             notes = json.loads(row['notes_json'] or '{}')
             audio_notes = parse_audio_notes_json(row['audio_notes_json'])
@@ -2154,71 +2170,26 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if levels
                 else 0.0
             )
-            rows.append({
-                'id': row['id'],
-                'title': row['title'],
-                'author': row['author'],
-                'youtube': row['youtube'],
-                'spotify': row['spotify'],
-                'versionOf': row['version_of'],
-                'audioNotes': audio_notes,
-                'levels': levels,
-                'notes': notes,
-                'mastered': bool(row['mastered']),
-                'creatorId': row['creator_id'],
-                'creator': row['creator'],
-                'createdAt': row['created_at'],
-                'avgLevel': avg,
-            })
-        rows.sort(key=lambda r: r['avgLevel'], reverse=True)
-        conn.close()
-        send_json(self, HTTPStatus.OK, rows)
-
-    def api_get_rehearsal_id(self, rehearsal_id: int, user: dict):
-        role = verify_group_access(user['id'], user['group_id'])
-        if not role:
-            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
-                      r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at, u.username AS creator
-               FROM rehearsals r JOIN users u ON u.id = r.creator_id
-               WHERE r.id = ? AND r.group_id = ?''',
-            (rehearsal_id, user['group_id']),
-        )
-        row = cur.fetchone()
-        conn.close()
-        if not row:
-            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-        levels = json.loads(row['levels_json'] or '{}')
-        notes = json.loads(row['notes_json'] or '{}')
-        audio_notes = parse_audio_notes_json(row['audio_notes_json'])
-        avg = (
-            sum(float(v) for v in levels.values()) / len(levels)
-            if levels
-            else 0.0
-        )
-        send_json(
-            self,
-            HTTPStatus.OK,
-            {
-                'id': row['id'],
-                'title': row['title'],
-                'author': row['author'],
-                'youtube': row['youtube'],
-                'spotify': row['spotify'],
-                'versionOf': row['version_of'],
-                'audioNotes': audio_notes,
-                'levels': levels,
-                'notes': notes,
-                'mastered': bool(row['mastered']),
-                'creatorId': row['creator_id'],
-                'creator': row['creator'],
-                'createdAt': row['created_at'],
-                'avgLevel': avg,
-            },
-        )
+            send_json(
+                self,
+                HTTPStatus.OK,
+                {
+                    'id': row['id'],
+                    'title': row['title'],
+                    'author': row['author'],
+                    'youtube': row['youtube'],
+                    'spotify': row['spotify'],
+                    'versionOf': row['version_of'],
+                    'audioNotes': audio_notes,
+                    'levels': levels,
+                    'notes': notes,
+                    'mastered': bool(row['mastered']),
+                    'creatorId': row['creator_id'],
+                    'creator': row['creator'],
+                    'createdAt': row['created_at'],
+                    'avgLevel': avg,
+                },
+            )
 
     def api_create_rehearsal(self, body: dict, user: dict):
         title = (body.get('title') or '').strip()
@@ -2233,16 +2204,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (title, author, youtube, spotify, version_of, json.dumps({}), json.dumps({}), json.dumps({}), 0, user['id'], user['group_id'])
-        )
-        rehearsal_id = cur.lastrowid
-        conn.commit()
-        conn.close()
-        send_json(self, HTTPStatus.CREATED, {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify, 'mastered': False, 'versionOf': version_of, 'sheetMusic': {}})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                'INSERT INTO rehearsals (title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (title, author, youtube, spotify, version_of, json.dumps({}), json.dumps({}), json.dumps({}), 0, user['id'], user['group_id'])
+            )
+            rehearsal_id = cur.lastrowid
+            conn.commit()
+            send_json(self, HTTPStatus.CREATED, {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify, 'mastered': False, 'versionOf': version_of, 'sheetMusic': {}})
 
     def api_update_rehearsal(self, body: dict, user: dict):
         """Backward‑compatible endpoint for updating a rehearsal.  The
@@ -2261,29 +2231,28 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''SELECT p.id, p.name, p.date, p.location, p.songs_json, p.creator_id, u.username AS creator
-               FROM performances p JOIN users u ON u.id = p.creator_id
-               WHERE p.group_id = ?
-               ORDER BY p.date ASC''',
-            (user['group_id'],)
-        )
-        result = []
-        for row in cur.fetchall():
-            result.append({
-                'id': row['id'],
-                'name': row['name'],
-                'date': row['date'],
-                'location': row['location'],
-                'songs': json.loads(row['songs_json'] or '[]'),
-                'creatorId': row['creator_id'],
-                'creator': row['creator'],
-            })
-        conn.close()
-        # Return the list directly to align with the Express API
-        send_json(self, HTTPStatus.OK, result)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                '''SELECT p.id, p.name, p.date, p.location, p.songs_json, p.creator_id, u.username AS creator
+                   FROM performances p JOIN users u ON u.id = p.creator_id
+                   WHERE p.group_id = ?
+                   ORDER BY p.date ASC''',
+                (user['group_id'],)
+            )
+            result = []
+            for row in cur.fetchall():
+                result.append({
+                    'id': row['id'],
+                    'name': row['name'],
+                    'date': row['date'],
+                    'location': row['location'],
+                    'songs': json.loads(row['songs_json'] or '[]'),
+                    'creatorId': row['creator_id'],
+                    'creator': row['creator'],
+                })
+            # Return the list directly to align with the Express API
+            send_json(self, HTTPStatus.OK, result)
 
     def api_create_performance(self, body: dict, user: dict):
         name = (body.get('name') or '').strip()
@@ -2307,16 +2276,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            'INSERT INTO performances (name, date, location, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
-             (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
-        )
-        perf_id = cur.lastrowid
-        conn.commit()
-        conn.close()
-        send_json(self, HTTPStatus.CREATED, {'id': perf_id, 'name': name, 'date': date, 'location': location, 'songs': songs_list})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                'INSERT INTO performances (name, date, location, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
+                 (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
+            )
+            perf_id = cur.lastrowid
+            conn.commit()
+            send_json(self, HTTPStatus.CREATED, {'id': perf_id, 'name': name, 'date': date, 'location': location, 'songs': songs_list})
 
     def api_update_performance(self, body: dict, user: dict):
         try:
@@ -2340,27 +2308,26 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Allow update if current user is creator or has moderator/administrator role
-        if role in ('admin', 'moderator'):
-            cur.execute(
-                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
-                (name, date, location, json.dumps(songs_list), perf_id, user['group_id'])
-            )
-        else:
-            cur.execute(
-                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
-                (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
-            )
-        updated = cur.rowcount
-        conn.commit()
-        conn.close()
-        if updated:
-            log_event(user['id'], 'edit', {'entity': 'performance', 'id': perf_id})
-            send_json(self, HTTPStatus.OK, {'message': 'Updated'})
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            # Allow update if current user is creator or has moderator/administrator role
+            if role in ('admin', 'moderator'):
+                cur.execute(
+                    'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
+                    (name, date, location, json.dumps(songs_list), perf_id, user['group_id'])
+                )
+            else:
+                cur.execute(
+                    'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
+                    (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
+                )
+            updated = cur.rowcount
+            conn.commit()
+            if updated:
+                log_event(user['id'], 'edit', {'entity': 'performance', 'id': perf_id})
+                send_json(self, HTTPStatus.OK, {'message': 'Updated'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
 
     # ------------------------------------------------------------------
     # Helper methods to support REST paths with IDs (e.g. /api/suggestions/1)
@@ -2377,112 +2344,107 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        if role in ('admin', 'moderator'):
-            cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
-        else:
-            cur.execute(
-                'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?',
-                (sug_id, user['id'], user['group_id'])
-            )
-        deleted = cur.rowcount
-        if deleted:
-            cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
-        conn.commit()
-        conn.close()
-        if deleted:
-            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if role in ('admin', 'moderator'):
+                cur.execute('DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+            else:
+                cur.execute(
+                    'DELETE FROM suggestions WHERE id = ? AND creator_id = ? AND group_id = ?',
+                    (sug_id, user['id'], user['group_id'])
+                )
+            deleted = cur.rowcount
+            if deleted:
+                cur.execute('DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+            conn.commit()
+            if deleted:
+                send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found or not owned'})
 
     def api_vote_suggestion_id(self, sug_id: int, user: dict):
         """Register a user's vote for a suggestion and return the updated row."""
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
-        if not cur.fetchone():
-            conn.close()
-            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
-        cur.execute(
-            'INSERT OR IGNORE INTO suggestion_votes (suggestion_id, user_id) VALUES (?, ?)',
-            (sug_id, user['id'])
-        )
-        cur.execute('SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
-        likes = cur.fetchone()[0]
-        cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
-        cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
-                      u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
-               WHERE s.id = ? AND s.group_id = ?''',
-            (sug_id, user['group_id'])
-        )
-        row = cur.fetchone()
-        conn.commit()
-        conn.close()
-        if row:
-            result = {
-                'id': row['id'],
-                'title': row['title'],
-                'author': row['author'],
-                'youtube': row['youtube'] or row['url'],
-                'creatorId': row['creator_id'],
-                'creator': row['creator'],
-                'createdAt': row['created_at'],
-                'likes': row['likes'],
-                'versionOf': row['version_of'],
-            }
-            log_event(user['id'], 'vote', {'suggestionId': sug_id})
-            send_json(self, HTTPStatus.OK, result)
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+            if not cur.fetchone():
+                return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+            cur.execute(
+                'INSERT OR IGNORE INTO suggestion_votes (suggestion_id, user_id) VALUES (?, ?)',
+                (sug_id, user['id'])
+            )
+            cur.execute('SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+            likes = cur.fetchone()[0]
+            cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
+            cur.execute(
+                '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
+                          u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
+                   WHERE s.id = ? AND s.group_id = ?''',
+                (sug_id, user['group_id'])
+            )
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                result = {
+                    'id': row['id'],
+                    'title': row['title'],
+                    'author': row['author'],
+                    'youtube': row['youtube'] or row['url'],
+                    'creatorId': row['creator_id'],
+                    'creator': row['creator'],
+                    'createdAt': row['created_at'],
+                    'likes': row['likes'],
+                    'versionOf': row['version_of'],
+                }
+                log_event(user['id'], 'vote', {'suggestionId': sug_id})
+                send_json(self, HTTPStatus.OK, result)
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
     def api_unvote_suggestion_id(self, sug_id: int, user: dict):
         """Remove a user's vote for a suggestion and return the updated row."""
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
-        if not cur.fetchone():
-            conn.close()
-            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
-        cur.execute(
-            'DELETE FROM suggestion_votes WHERE suggestion_id = ? AND user_id = ?',
-            (sug_id, user['id'])
-        )
-        cur.execute('SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
-        likes = cur.fetchone()[0]
-        cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
-        cur.execute(
-            '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
-                      u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
-               WHERE s.id = ? AND s.group_id = ?''',
-            (sug_id, user['group_id'])
-        )
-        row = cur.fetchone()
-        conn.commit()
-        conn.close()
-        if row:
-            result = {
-                'id': row['id'],
-                'title': row['title'],
-                'author': row['author'],
-                'youtube': row['youtube'] or row['url'],
-                'creatorId': row['creator_id'],
-                'creator': row['creator'],
-                'createdAt': row['created_at'],
-                'likes': row['likes'],
-                'versionOf': row['version_of'],
-            }
-            log_event(user['id'], 'unvote', {'suggestionId': sug_id})
-            send_json(self, HTTPStatus.OK, result)
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+            if not cur.fetchone():
+                return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+            cur.execute(
+                'DELETE FROM suggestion_votes WHERE suggestion_id = ? AND user_id = ?',
+                (sug_id, user['id'])
+            )
+            cur.execute('SELECT COUNT(*) FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
+            likes = cur.fetchone()[0]
+            cur.execute('UPDATE suggestions SET likes = ? WHERE id = ?', (likes, sug_id))
+            cur.execute(
+                '''SELECT s.id, s.title, s.author, s.youtube, s.url, s.version_of, s.likes, s.creator_id, s.created_at,
+                          u.username AS creator FROM suggestions s JOIN users u ON u.id = s.creator_id
+                   WHERE s.id = ? AND s.group_id = ?''',
+                (sug_id, user['group_id'])
+            )
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                result = {
+                    'id': row['id'],
+                    'title': row['title'],
+                    'author': row['author'],
+                    'youtube': row['youtube'] or row['url'],
+                    'creatorId': row['creator_id'],
+                    'creator': row['creator'],
+                    'createdAt': row['created_at'],
+                    'likes': row['likes'],
+                    'versionOf': row['version_of'],
+                }
+                log_event(user['id'], 'unvote', {'suggestionId': sug_id})
+                send_json(self, HTTPStatus.OK, result)
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
     def api_update_suggestion_id(self, sug_id: int, body: dict, user: dict):
         """Update a suggestion's title and optional fields by ID."""
@@ -2497,34 +2459,32 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        if role in ('admin', 'moderator'):
-            cur.execute(
-                'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ?, version_of = ? WHERE id = ? AND group_id = ?',
-                (title, author, youtube, youtube, version_of, sug_id, user['group_id']),
-            )
-        else:
-            cur.execute(
-                'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ?, version_of = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
-                (title, author, youtube, youtube, version_of, sug_id, user['id'], user['group_id']),
-            )
-        updated = cur.rowcount
-        if updated:
-            conn.commit()
-            conn.close()
-            log_event(user['id'], 'edit', {'entity': 'suggestion', 'id': sug_id})
-            send_json(self, HTTPStatus.OK, {'message': 'Updated'})
-        else:
-            # Determine if the suggestion exists
-            cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
-            exists = cur.fetchone()
-            conn.commit()
-            conn.close()
-            if exists:
-                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if role in ('admin', 'moderator'):
+                cur.execute(
+                    'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ?, version_of = ? WHERE id = ? AND group_id = ?',
+                    (title, author, youtube, youtube, version_of, sug_id, user['group_id']),
+                )
             else:
-                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
+                cur.execute(
+                    'UPDATE suggestions SET title = ?, author = ?, youtube = ?, url = ?, version_of = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
+                    (title, author, youtube, youtube, version_of, sug_id, user['id'], user['group_id']),
+                )
+            updated = cur.rowcount
+            if updated:
+                conn.commit()
+                log_event(user['id'], 'edit', {'entity': 'suggestion', 'id': sug_id})
+                send_json(self, HTTPStatus.OK, {'message': 'Updated'})
+            else:
+                # Determine if the suggestion exists
+                cur.execute('SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
+                exists = cur.fetchone()
+                conn.commit()
+                if exists:
+                    send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed'})
+                else:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
     def api_update_rehearsal_id(self, rehearsal_id: int, body: dict, user: dict):
         """Update a rehearsal by ID.  This method handles two scenarios:
@@ -2571,183 +2531,175 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         ):
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing to update'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Fetch current rehearsal record including author and audio notes JSON
-        cur.execute(
-            'SELECT title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id '
-            'FROM rehearsals WHERE id = ? AND group_id = ?',
-            (rehearsal_id, user['group_id'])
-        )
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-            return
-        # Prepare modifications
-        updated_metadata = False
-        # Check if we need to update metadata
-        if any(v is not None for v in (title, author, youtube, spotify, version_of)):
-            # Only creator, moderator or admin can modify metadata
-            if not (role in ('admin', 'moderator') or user['id'] == row['creator_id']):
-                conn.close()
-                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal details'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            # Fetch current rehearsal record including author and audio notes JSON
+            cur.execute(
+                'SELECT title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered, creator_id '
+                'FROM rehearsals WHERE id = ? AND group_id = ?',
+                (rehearsal_id, user['group_id'])
+            )
+            row = cur.fetchone()
+            if not row:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
                 return
-            # Use current values if None provided
-            new_title = (title or row['title']).strip() if title is not None else row['title']
-            new_author = (author or '').strip() if author is not None else row['author']
-            new_author = new_author or None
-            new_youtube = (youtube or '').strip() if youtube is not None else row['youtube']
-            new_youtube = new_youtube or None
-            new_spotify = (spotify or '').strip() if spotify is not None else row['spotify']
-            new_spotify = new_spotify or None
-            new_version = (version_of or '').strip() if version_of is not None else row['version_of']
-            new_version = new_version or None
-            # Update the row
-            cur.execute(
-                'UPDATE rehearsals SET title = ?, author = ?, youtube = ?, spotify = ?, version_of = ? WHERE id = ? AND group_id = ?',
-                (new_title, new_author, new_youtube, new_spotify, new_version, rehearsal_id, user['group_id'])
-            )
-            updated_metadata = cur.rowcount > 0
-        # Update level/note/audio if provided
-        updated_levels_notes_audio = False
-        if (
-            level is not None
-            or note is not None
-            or audio_b64 is not None
-            or audio_index is not None
-        ):
-            # Parse JSON fields
-            levels = json.loads(row['levels_json'] or '{}')
-            notes = json.loads(row['notes_json'] or '{}')
-            audio_notes = parse_audio_notes_json(row['audio_notes_json'])
-            if level is not None:
-                try:
-                    level_val = float(level)
-                except (TypeError, ValueError):
-                    conn.close()
-                    send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid level'})
+            # Prepare modifications
+            updated_metadata = False
+            # Check if we need to update metadata
+            if any(v is not None for v in (title, author, youtube, spotify, version_of)):
+                # Only creator, moderator or admin can modify metadata
+                if not (role in ('admin', 'moderator') or user['id'] == row['creator_id']):
+                    send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal details'})
                     return
-                levels[user['username']] = max(0, min(10, level_val))
-            if note is not None:
-                notes[user['username']] = str(note)
-            if audio_b64 is not None:
-                # Accept empty string to clear all notes for user
-                if audio_b64 == '':
-                    audio_notes.pop(user['username'], None)
-                else:
-                    note_obj = {'title': (audio_title or '').strip(), 'audio': str(audio_b64)}
-                    audio_notes.setdefault(user['username'], []).append(note_obj)
-            elif audio_index is not None:
-                user_list = audio_notes.get(user['username'], [])
-                try:
-                    idx = int(audio_index)
-                    if 0 <= idx < len(user_list):
-                        del user_list[idx]
-                    if user_list:
-                        audio_notes[user['username']] = user_list
-                    else:
+                # Use current values if None provided
+                new_title = (title or row['title']).strip() if title is not None else row['title']
+                new_author = (author or '').strip() if author is not None else row['author']
+                new_author = new_author or None
+                new_youtube = (youtube or '').strip() if youtube is not None else row['youtube']
+                new_youtube = new_youtube or None
+                new_spotify = (spotify or '').strip() if spotify is not None else row['spotify']
+                new_spotify = new_spotify or None
+                new_version = (version_of or '').strip() if version_of is not None else row['version_of']
+                new_version = new_version or None
+                # Update the row
+                cur.execute(
+                    'UPDATE rehearsals SET title = ?, author = ?, youtube = ?, spotify = ?, version_of = ? WHERE id = ? AND group_id = ?',
+                    (new_title, new_author, new_youtube, new_spotify, new_version, rehearsal_id, user['group_id'])
+                )
+                updated_metadata = cur.rowcount > 0
+            # Update level/note/audio if provided
+            updated_levels_notes_audio = False
+            if (
+                level is not None
+                or note is not None
+                or audio_b64 is not None
+                or audio_index is not None
+            ):
+                # Parse JSON fields
+                levels = json.loads(row['levels_json'] or '{}')
+                notes = json.loads(row['notes_json'] or '{}')
+                audio_notes = parse_audio_notes_json(row['audio_notes_json'])
+                if level is not None:
+                    try:
+                        level_val = float(level)
+                    except (TypeError, ValueError):
+                        send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid level'})
+                        return
+                    levels[user['username']] = max(0, min(10, level_val))
+                if note is not None:
+                    notes[user['username']] = str(note)
+                if audio_b64 is not None:
+                    # Accept empty string to clear all notes for user
+                    if audio_b64 == '':
                         audio_notes.pop(user['username'], None)
-                except (TypeError, ValueError):
-                    pass
-            cur.execute(
-                'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ? AND group_id = ?',
-                (
-                    json.dumps(levels),
-                    json.dumps(notes),
-                    json.dumps(audio_notes),
-                    rehearsal_id,
-                    user['group_id'],
-                ),
-            )
-            updated_levels_notes_audio = cur.rowcount > 0
-        conn.commit()
-        conn.close()
-        if updated_metadata or updated_levels_notes_audio:
-            log_event(user['id'], 'edit', {'entity': 'rehearsal', 'id': rehearsal_id})
-            send_json(self, HTTPStatus.OK, {'message': 'Updated'})
-        else:
-            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing was updated'})
+                    else:
+                        note_obj = {'title': (audio_title or '').strip(), 'audio': str(audio_b64)}
+                        audio_notes.setdefault(user['username'], []).append(note_obj)
+                elif audio_index is not None:
+                    user_list = audio_notes.get(user['username'], [])
+                    try:
+                        idx = int(audio_index)
+                        if 0 <= idx < len(user_list):
+                            del user_list[idx]
+                        if user_list:
+                            audio_notes[user['username']] = user_list
+                        else:
+                            audio_notes.pop(user['username'], None)
+                    except (TypeError, ValueError):
+                        pass
+                cur.execute(
+                    'UPDATE rehearsals SET levels_json = ?, notes_json = ?, audio_notes_json = ? WHERE id = ? AND group_id = ?',
+                    (
+                        json.dumps(levels),
+                        json.dumps(notes),
+                        json.dumps(audio_notes),
+                        rehearsal_id,
+                        user['group_id'],
+                    ),
+                )
+                updated_levels_notes_audio = cur.rowcount > 0
+            conn.commit()
+            if updated_metadata or updated_levels_notes_audio:
+                log_event(user['id'], 'edit', {'entity': 'rehearsal', 'id': rehearsal_id})
+                send_json(self, HTTPStatus.OK, {'message': 'Updated'})
+            else:
+                send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing was updated'})
 
     def api_toggle_rehearsal_mastered(self, rehearsal_id: int, user: dict):
         """Toggle the mastered flag for a rehearsal."""
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT mastered, creator_id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-        if not (role in ('admin', 'moderator') or user['id'] == row['creator_id']):
-            conn.close()
-            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal'})
-        new_val = 0 if row['mastered'] else 1
-        cur.execute('UPDATE rehearsals SET mastered = ? WHERE id = ? AND group_id = ?', (new_val, rehearsal_id, user['group_id']))
-        conn.commit()
-        cur.execute(
-            '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
-                      r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
-                      u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
-               WHERE r.id = ? AND r.group_id = ?''',
-            (rehearsal_id, user['group_id'])
-        )
-        updated = cur.fetchone()
-        conn.close()
-        if updated:
-            levels = json.loads(updated['levels_json'] or '{}')
-            notes = json.loads(updated['notes_json'] or '{}')
-            audio_notes = parse_audio_notes_json(updated['audio_notes_json'])
-            send_json(
-                self,
-                HTTPStatus.OK,
-                {
-                    'id': updated['id'],
-                    'title': updated['title'],
-                    'author': updated['author'],
-                    'youtube': updated['youtube'],
-                    'spotify': updated['spotify'],
-                    'versionOf': updated['version_of'],
-                    'audioNotes': audio_notes,
-                    'levels': levels,
-                    'notes': notes,
-                    'mastered': bool(updated['mastered']),
-                    'creatorId': updated['creator_id'],
-                    'creator': updated['creator'],
-                    'createdAt': updated['created_at'],
-                },
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT mastered, creator_id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+            row = cur.fetchone()
+            if not row:
+                return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+            if not (role in ('admin', 'moderator') or user['id'] == row['creator_id']):
+                return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal'})
+            new_val = 0 if row['mastered'] else 1
+            cur.execute('UPDATE rehearsals SET mastered = ? WHERE id = ? AND group_id = ?', (new_val, rehearsal_id, user['group_id']))
+            conn.commit()
+            cur.execute(
+                '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
+                          r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
+                          u.username AS creator FROM rehearsals r JOIN users u ON u.id = r.creator_id
+                   WHERE r.id = ? AND r.group_id = ?''',
+                (rehearsal_id, user['group_id'])
             )
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+            updated = cur.fetchone()
+            if updated:
+                levels = json.loads(updated['levels_json'] or '{}')
+                notes = json.loads(updated['notes_json'] or '{}')
+                audio_notes = parse_audio_notes_json(updated['audio_notes_json'])
+                send_json(
+                    self,
+                    HTTPStatus.OK,
+                    {
+                        'id': updated['id'],
+                        'title': updated['title'],
+                        'author': updated['author'],
+                        'youtube': updated['youtube'],
+                        'spotify': updated['spotify'],
+                        'versionOf': updated['version_of'],
+                        'audioNotes': audio_notes,
+                        'levels': levels,
+                        'notes': notes,
+                        'mastered': bool(updated['mastered']),
+                        'creatorId': updated['creator_id'],
+                        'creator': updated['creator'],
+                        'createdAt': updated['created_at'],
+                    },
+                )
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
 
     def api_get_rehearsal_partitions(self, rehearsal_id: int, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''SELECT p.id, p.display_name, p.uploaded_at, p.path, u.username
-               FROM partitions p
-               JOIN rehearsals r ON r.id = p.rehearsal_id
-               JOIN users u ON u.id = p.uploader_id
-               WHERE p.rehearsal_id = ? AND r.group_id = ?''',
-            (rehearsal_id, user['group_id']),
-        )
-        rows = [
-            {
-                'id': row['id'],
-                'displayName': row['display_name'],
-                'uploader': row['username'],
-                'date': row['uploaded_at'],
-                'downloadUrl': '/' + row['path'].lstrip('/'),
-            }
-            for row in cur.fetchall()
-        ]
-        conn.close()
-        return send_json(self, HTTPStatus.OK, rows)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                '''SELECT p.id, p.display_name, p.uploaded_at, p.path, u.username
+                   FROM partitions p
+                   JOIN rehearsals r ON r.id = p.rehearsal_id
+                   JOIN users u ON u.id = p.uploader_id
+                   WHERE p.rehearsal_id = ? AND r.group_id = ?''',
+                (rehearsal_id, user['group_id']),
+            )
+            rows = [
+                {
+                    'id': row['id'],
+                    'displayName': row['display_name'],
+                    'uploader': row['username'],
+                    'date': row['uploaded_at'],
+                    'downloadUrl': '/' + row['path'].lstrip('/'),
+                }
+                for row in cur.fetchall()
+            ]
+            return send_json(self, HTTPStatus.OK, rows)
 
     def api_post_rehearsal_partition(self, rehearsal_id: int, data: bytes, headers, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
@@ -2773,88 +2725,82 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         display_name = sanitize_name(raw_display)
         if display_name is None or (file_field.filename and sanitize_name(file_field.filename) is None):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file name'})
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
-        if not cur.fetchone():
-            conn.close()
-            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-        cur.execute(
-            'INSERT INTO partitions (rehearsal_id, path, display_name, uploader_id) VALUES (?, ?, ?, ?)',
-            (rehearsal_id, '', display_name, user['id']),
-        )
-        part_id = cur.lastrowid
-        rel_path = f'uploads/partitions/{rehearsal_id}/{part_id}.pdf'
-        cur.execute('UPDATE partitions SET path = ? WHERE id = ?', (rel_path, part_id))
-        conn.commit()
-        conn.close()
-        dest_dir = os.path.join(UPLOADS_ROOT, str(rehearsal_id))
-        os.makedirs(dest_dir, exist_ok=True)
-        with open(os.path.join(dest_dir, f'{part_id}.pdf'), 'wb') as f:
-            f.write(file_bytes)
-        log_event(
-            user['id'],
-            'partition_upload',
-            {'rehearsal_id': rehearsal_id, 'partition_id': part_id, 'display_name': display_name},
-        )
-        # Send notifications to group members except the uploader
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''SELECT u.id FROM users u
-               JOIN memberships m ON m.user_id = u.id
-               WHERE m.group_id = ? AND m.active = 1 AND u.id != ? AND u.notify_uploads = 1''',
-            (user['group_id'], user['id']),
-        )
-        recipients = [row['id'] for row in cur.fetchall()]
-        message = f"{user['username']} uploaded {display_name}"
-        for uid in recipients:
-            cur.execute('INSERT INTO notifications (user_id, message) VALUES (?, ?)', (uid, message))
-        conn.commit()
-        conn.close()
-        return send_json(
-            self,
-            HTTPStatus.CREATED,
-            {
-                'id': part_id,
-                'displayName': display_name,
-                'downloadUrl': '/' + rel_path,
-            },
-        )
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+            if not cur.fetchone():
+                return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+            cur.execute(
+                'INSERT INTO partitions (rehearsal_id, path, display_name, uploader_id) VALUES (?, ?, ?, ?)',
+                (rehearsal_id, '', display_name, user['id']),
+            )
+            part_id = cur.lastrowid
+            rel_path = f'uploads/partitions/{rehearsal_id}/{part_id}.pdf'
+            cur.execute('UPDATE partitions SET path = ? WHERE id = ?', (rel_path, part_id))
+            conn.commit()
+            dest_dir = os.path.join(UPLOADS_ROOT, str(rehearsal_id))
+            os.makedirs(dest_dir, exist_ok=True)
+            with open(os.path.join(dest_dir, f'{part_id}.pdf'), 'wb') as f:
+                f.write(file_bytes)
+            log_event(
+                user['id'],
+                'partition_upload',
+                {'rehearsal_id': rehearsal_id, 'partition_id': part_id, 'display_name': display_name},
+            )
+            # Send notifications to group members except the uploader
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute(
+                '''SELECT u.id FROM users u
+                   JOIN memberships m ON m.user_id = u.id
+                   WHERE m.group_id = ? AND m.active = 1 AND u.id != ? AND u.notify_uploads = 1''',
+                (user['group_id'], user['id']),
+            )
+            recipients = [row['id'] for row in cur.fetchall()]
+            message = f"{user['username']} uploaded {display_name}"
+            for uid in recipients:
+                cur.execute('INSERT INTO notifications (user_id, message) VALUES (?, ?)', (uid, message))
+            conn.commit()
+            return send_json(
+                self,
+                HTTPStatus.CREATED,
+                {
+                    'id': part_id,
+                    'displayName': display_name,
+                    'downloadUrl': '/' + rel_path,
+                },
+            )
 
     def api_delete_rehearsal_partition(self, rehearsal_id: int, partition_id: int, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''SELECT p.path, p.uploader_id FROM partitions p
-               JOIN rehearsals r ON r.id = p.rehearsal_id
-               WHERE p.id = ? AND p.rehearsal_id = ? AND r.group_id = ?''',
-            (partition_id, rehearsal_id, user['group_id']),
-        )
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Partition not found'})
-        if row['uploader_id'] != user['id'] and role != 'admin':
-            conn.close()
-            return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
-        cur.execute('DELETE FROM partitions WHERE id = ?', (partition_id,))
-        conn.commit()
-        conn.close()
-        file_path = os.path.join(os.path.dirname(__file__), row['path'])
-        try:
-            os.remove(file_path)
-        except OSError:
-            pass
-        log_event(
-            user['id'],
-            'partition_delete',
-            {'rehearsal_id': rehearsal_id, 'partition_id': partition_id},
-        )
-        return send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                '''SELECT p.path, p.uploader_id FROM partitions p
+                   JOIN rehearsals r ON r.id = p.rehearsal_id
+                   WHERE p.id = ? AND p.rehearsal_id = ? AND r.group_id = ?''',
+                (partition_id, rehearsal_id, user['group_id']),
+            )
+            row = cur.fetchone()
+            if not row:
+                return send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Partition not found'})
+            if row['uploader_id'] != user['id'] and role != 'admin':
+                return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            cur.execute('DELETE FROM partitions WHERE id = ?', (partition_id,))
+            conn.commit()
+            file_path = os.path.join(os.path.dirname(__file__), row['path'])
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+            log_event(
+                user['id'],
+                'partition_delete',
+                {'rehearsal_id': rehearsal_id, 'partition_id': partition_id},
+            )
+            return send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
 
     def api_move_suggestion_to_rehearsal_id(self, sug_id: int, user: dict):
         """Move a suggestion to rehearsals."""
@@ -2892,26 +2838,25 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Allow update if user is creator or has moderator/administrator role
-        if user.get('role') in ('admin', 'moderator'):
-            cur.execute(
-                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
-                (name, date, location, json.dumps(songs_list), perf_id, user['group_id'])
-            )
-        else:
-            cur.execute(
-                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
-                (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
-            )
-        updated = cur.rowcount
-        conn.commit()
-        conn.close()
-        if updated:
-            send_json(self, HTTPStatus.OK, {'message': 'Updated'})
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            # Allow update if user is creator or has moderator/administrator role
+            if user.get('role') in ('admin', 'moderator'):
+                cur.execute(
+                    'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
+                    (name, date, location, json.dumps(songs_list), perf_id, user['group_id'])
+                )
+            else:
+                cur.execute(
+                    'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND creator_id = ? AND group_id = ?',
+                    (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
+                )
+            updated = cur.rowcount
+            conn.commit()
+            if updated:
+                send_json(self, HTTPStatus.OK, {'message': 'Updated'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
 
     def api_delete_performance_id(self, perf_id: int, user: dict):
         """Delete a performance by ID.  The performance can be removed by its
@@ -2920,20 +2865,19 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        if role in ('admin', 'moderator'):
-            cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (perf_id, user['group_id']))
-        else:
-            cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
-        deleted = cur.rowcount
-        conn.commit()
-        conn.close()
-        if deleted:
-            log_event(user['id'], 'delete', {'entity': 'performance', 'id': perf_id})
-            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if role in ('admin', 'moderator'):
+                cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (perf_id, user['group_id']))
+            else:
+                cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
+            deleted = cur.rowcount
+            conn.commit()
+            if deleted:
+                log_event(user['id'], 'delete', {'entity': 'performance', 'id': perf_id})
+                send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
 
     def api_create_agenda(self, body: dict, user: dict):
         item_type = body.get('type')
@@ -2947,23 +2891,22 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if not role:
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
                 return
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute(
-                'INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)',
-                (date, location, user['group_id'], user['id'])
-            )
-            reh_id = cur.lastrowid
-            conn.commit()
-            conn.close()
-            send_json(self, HTTPStatus.CREATED, {
-                'type': 'rehearsal',
-                'id': reh_id,
-                'date': date,
-                'title': '',
-                'location': location,
-            })
-            return
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    'INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)',
+                    (date, location, user['group_id'], user['id'])
+                )
+                reh_id = cur.lastrowid
+                conn.commit()
+                send_json(self, HTTPStatus.CREATED, {
+                    'type': 'rehearsal',
+                    'id': reh_id,
+                    'date': date,
+                    'title': '',
+                    'location': location,
+                })
+                return
         if item_type == 'performance':
             name = (body.get('name') or '').strip()
             date = (body.get('date') or '').strip()
@@ -2981,23 +2924,22 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
                 return
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute(
-                'INSERT INTO performances (name, date, location, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
-                (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
-            )
-            perf_id = cur.lastrowid
-            conn.commit()
-            conn.close()
-            send_json(self, HTTPStatus.CREATED, {
-                'type': 'performance',
-                'id': perf_id,
-                'date': date,
-                'title': name,
-                'location': location,
-            })
-            return
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    'INSERT INTO performances (name, date, location, songs_json, creator_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
+                    (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
+                )
+                perf_id = cur.lastrowid
+                conn.commit()
+                send_json(self, HTTPStatus.CREATED, {
+                    'type': 'performance',
+                    'id': perf_id,
+                    'date': date,
+                    'title': name,
+                    'location': location,
+                })
+                return
         send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid type'})
 
     def api_update_agenda_id(self, item_id: int, body: dict, user: dict):
@@ -3012,31 +2954,29 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if not role:
                 send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
                 return
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute(
-                'UPDATE rehearsal_events SET date = ?, location = ? WHERE id = ? AND group_id = ?',
-                (date, location, item_id, user['group_id'])
-            )
-            if cur.rowcount == 0:
-                conn.close()
-                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    'UPDATE rehearsal_events SET date = ?, location = ? WHERE id = ? AND group_id = ?',
+                    (date, location, item_id, user['group_id'])
+                )
+                if cur.rowcount == 0:
+                    send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
+                    return
+                conn.commit()
+                cur.execute('SELECT id, date, location FROM rehearsal_events WHERE id = ?', (item_id,))
+                row = cur.fetchone()
+                if not row:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Not found'})
+                    return
+                send_json(self, HTTPStatus.OK, {
+                    'type': 'rehearsal',
+                    'id': row['id'],
+                    'date': row['date'],
+                    'title': '',
+                    'location': row['location'],
+                })
                 return
-            conn.commit()
-            cur.execute('SELECT id, date, location FROM rehearsal_events WHERE id = ?', (item_id,))
-            row = cur.fetchone()
-            conn.close()
-            if not row:
-                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Not found'})
-                return
-            send_json(self, HTTPStatus.OK, {
-                'type': 'rehearsal',
-                'id': row['id'],
-                'date': row['date'],
-                'title': '',
-                'location': row['location'],
-            })
-            return
         if item_type == 'performance':
             name = (body.get('name') or '').strip()
             date = (body.get('date') or '').strip()
@@ -3054,31 +2994,29 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid songs list'})
                 return
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute(
-                'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
-                (name, date, location, json.dumps(songs_list), item_id, user['group_id'])
-            )
-            if cur.rowcount == 0:
-                conn.close()
-                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    'UPDATE performances SET name = ?, date = ?, location = ?, songs_json = ? WHERE id = ? AND group_id = ?',
+                    (name, date, location, json.dumps(songs_list), item_id, user['group_id'])
+                )
+                if cur.rowcount == 0:
+                    send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
+                    return
+                conn.commit()
+                cur.execute('SELECT id, name, date, location FROM performances WHERE id = ?', (item_id,))
+                row = cur.fetchone()
+                if not row:
+                    send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Not found'})
+                    return
+                send_json(self, HTTPStatus.OK, {
+                    'type': 'performance',
+                    'id': row['id'],
+                    'date': row['date'],
+                    'title': row['name'],
+                    'location': row['location'],
+                })
                 return
-            conn.commit()
-            cur.execute('SELECT id, name, date, location FROM performances WHERE id = ?', (item_id,))
-            row = cur.fetchone()
-            conn.close()
-            if not row:
-                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Not found'})
-                return
-            send_json(self, HTTPStatus.OK, {
-                'type': 'performance',
-                'id': row['id'],
-                'date': row['date'],
-                'title': row['name'],
-                'location': row['location'],
-            })
-            return
         send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid type'})
 
     def api_delete_agenda_id(self, item_id: int, body: dict, user: dict):
@@ -3087,30 +3025,25 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        if item_type == 'rehearsal':
-            cur.execute('DELETE FROM rehearsal_events WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
-            if cur.rowcount == 0:
-                conn.close()
-                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if item_type == 'rehearsal':
+                cur.execute('DELETE FROM rehearsal_events WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
+                if cur.rowcount == 0:
+                    send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
+                    return
+                conn.commit()
+                send_json(self, HTTPStatus.OK, {'success': True})
                 return
-            conn.commit()
-            conn.close()
-            send_json(self, HTTPStatus.OK, {'success': True})
-            return
-        if item_type == 'performance':
-            cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
-            if cur.rowcount == 0:
-                conn.close()
-                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
+            if item_type == 'performance':
+                cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (item_id, user['group_id']))
+                if cur.rowcount == 0:
+                    send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
+                    return
+                conn.commit()
+                send_json(self, HTTPStatus.OK, {'success': True})
                 return
-            conn.commit()
-            conn.close()
-            send_json(self, HTTPStatus.OK, {'success': True})
-            return
-        conn.close()
-        send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid type'})
+            send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid type'})
 
     def api_get_agenda(self, query: dict[str, list[str]], user: dict):
         """Return combined rehearsal events and performances for the active
@@ -3126,46 +3059,45 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         end_param = query.get('end', [None])[0]
         start = (start_param + ('T00:00' if 'T' not in start_param else '')) if start_param else None
         end = (end_param + ('T23:59' if 'T' not in end_param else '')) if end_param else None
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Fetch rehearsal events
-        cur.execute(
-            'SELECT id, date, location FROM rehearsal_events WHERE group_id = ? ORDER BY date ASC',
-            (user['group_id'],),
-        )
-        rehearsal_rows = [dict(row) for row in cur.fetchall()]
-        # Fetch performances
-        cur.execute(
-            'SELECT id, name, date, location FROM performances WHERE group_id = ? ORDER BY date ASC',
-            (user['group_id'],),
-        )
-        performance_rows = [dict(row) for row in cur.fetchall()]
-        conn.close()
-        items = [
-            {
-                'type': 'rehearsal',
-                'date': r['date'],
-                'id': r['id'],
-                'title': '',
-                'location': r['location'],
-            }
-            for r in rehearsal_rows
-        ] + [
-            {
-                'type': 'performance',
-                'date': p['date'],
-                'id': p['id'],
-                'title': p['name'],
-                'location': p['location'],
-            }
-            for p in performance_rows
-        ]
-        if start:
-            items = [i for i in items if i['date'] >= start]
-        if end:
-            items = [i for i in items if i['date'] <= end]
-        items.sort(key=lambda x: x['date'])
-        send_json(self, HTTPStatus.OK, items)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            # Fetch rehearsal events
+            cur.execute(
+                'SELECT id, date, location FROM rehearsal_events WHERE group_id = ? ORDER BY date ASC',
+                (user['group_id'],),
+            )
+            rehearsal_rows = [dict(row) for row in cur.fetchall()]
+            # Fetch performances
+            cur.execute(
+                'SELECT id, name, date, location FROM performances WHERE group_id = ? ORDER BY date ASC',
+                (user['group_id'],),
+            )
+            performance_rows = [dict(row) for row in cur.fetchall()]
+            items = [
+                {
+                    'type': 'rehearsal',
+                    'date': r['date'],
+                    'id': r['id'],
+                    'title': '',
+                    'location': r['location'],
+                }
+                for r in rehearsal_rows
+            ] + [
+                {
+                    'type': 'performance',
+                    'date': p['date'],
+                    'id': p['id'],
+                    'title': p['name'],
+                    'location': p['location'],
+                }
+                for p in performance_rows
+            ]
+            if start:
+                items = [i for i in items if i['date'] >= start]
+            if end:
+                items = [i for i in items if i['date'] <= end]
+            items.sort(key=lambda x: x['date'])
+            send_json(self, HTTPStatus.OK, items)
 
     def api_delete_rehearsal_id(self, rehearsal_id: int, user: dict):
         """Delete a rehearsal by ID.  The rehearsal may be removed by its
@@ -3178,40 +3110,37 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Fetch creator_id to check permissions
-        cur.execute('SELECT creator_id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
-            return
-        creator_id = row['creator_id']
-        if not (role in ('admin', 'moderator') or user['id'] == creator_id):
-            conn.close()
-            send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to delete rehearsal'})
-            return
-        # Remove the rehearsal ID from all performances
-        cur.execute('SELECT id, songs_json FROM performances WHERE group_id = ?', (user['group_id'],))
-        performances_to_update = []
-        for perf in cur.fetchall():
-            songs = json.loads(perf['songs_json'] or '[]')
-            if rehearsal_id in songs:
-                songs = [sid for sid in songs if sid != rehearsal_id]
-                performances_to_update.append((json.dumps(songs), perf['id']))
-        for songs_json, perf_id in performances_to_update:
-            cur.execute('UPDATE performances SET songs_json = ? WHERE id = ?', (songs_json, perf_id))
-        # Now delete the rehearsal itself
-        cur.execute('DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
-        deleted = cur.rowcount
-        conn.commit()
-        conn.close()
-        if deleted:
-            log_event(user['id'], 'delete', {'entity': 'rehearsal', 'id': rehearsal_id})
-            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found or not owned'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            # Fetch creator_id to check permissions
+            cur.execute('SELECT creator_id FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+            row = cur.fetchone()
+            if not row:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
+                return
+            creator_id = row['creator_id']
+            if not (role in ('admin', 'moderator') or user['id'] == creator_id):
+                send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to delete rehearsal'})
+                return
+            # Remove the rehearsal ID from all performances
+            cur.execute('SELECT id, songs_json FROM performances WHERE group_id = ?', (user['group_id'],))
+            performances_to_update = []
+            for perf in cur.fetchall():
+                songs = json.loads(perf['songs_json'] or '[]')
+                if rehearsal_id in songs:
+                    songs = [sid for sid in songs if sid != rehearsal_id]
+                    performances_to_update.append((json.dumps(songs), perf['id']))
+            for songs_json, perf_id in performances_to_update:
+                cur.execute('UPDATE performances SET songs_json = ? WHERE id = ?', (songs_json, perf_id))
+            # Now delete the rehearsal itself
+            cur.execute('DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+            deleted = cur.rowcount
+            conn.commit()
+            if deleted:
+                log_event(user['id'], 'delete', {'entity': 'rehearsal', 'id': rehearsal_id})
+                send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found or not owned'})
 
     def api_delete_performance(self, body: dict, user: dict):
         try:
@@ -3223,78 +3152,75 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        if role in ('admin', 'moderator'):
-            cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (perf_id, user['group_id']))
-        else:
-            cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
-        deleted = cur.rowcount
-        conn.commit()
-        conn.close()
-        if deleted:
-            log_event(user['id'], 'delete', {'entity': 'performance', 'id': perf_id})
-            send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if role in ('admin', 'moderator'):
+                cur.execute('DELETE FROM performances WHERE id = ? AND group_id = ?', (perf_id, user['group_id']))
+            else:
+                cur.execute('DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
+            deleted = cur.rowcount
+            conn.commit()
+            if deleted:
+                log_event(user['id'], 'delete', {'entity': 'performance', 'id': perf_id})
+                send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Performance not found or not owned'})
 
     def api_get_logs(self):
         """Return recent log entries."""
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            '''SELECT l.id, l.timestamp, l.user_id, u.username, l.action, l.metadata
-               FROM logs l LEFT JOIN users u ON u.id = l.user_id
-               ORDER BY l.timestamp DESC LIMIT 100'''
-        )
-        rows = []
-        for row in cur.fetchall():
-            rows.append({
-                'id': row['id'],
-                'timestamp': row['timestamp'],
-                'userId': row['user_id'],
-                'username': row['username'],
-                'action': row['action'],
-                'metadata': json.loads(row['metadata'] or '{}'),
-            })
-        conn.close()
-        send_json(self, HTTPStatus.OK, rows)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                '''SELECT l.id, l.timestamp, l.user_id, u.username, l.action, l.metadata
+                   FROM logs l LEFT JOIN users u ON u.id = l.user_id
+                   ORDER BY l.timestamp DESC LIMIT 100'''
+            )
+            rows = []
+            for row in cur.fetchall():
+                rows.append({
+                    'id': row['id'],
+                    'timestamp': row['timestamp'],
+                    'userId': row['user_id'],
+                    'username': row['username'],
+                    'action': row['action'],
+                    'metadata': json.loads(row['metadata'] or '{}'),
+                })
+            send_json(self, HTTPStatus.OK, rows)
 
     def api_get_settings(self, user: dict):
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            'SELECT group_name, dark_mode, template FROM settings WHERE group_id = ?',
-            (user['group_id'],),
-        )
-        row = cur.fetchone()
-        if not row:
-            # Create default settings row if missing
-            cur.execute('SELECT name FROM groups WHERE id = ?', (user['group_id'],))
-            g = cur.fetchone()
-            group_name = g['name'] if g else ''
+        with get_db_connection() as conn:
+            cur = conn.cursor()
             cur.execute(
-                "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
-                (user['group_id'], group_name),
+                'SELECT group_name, dark_mode, template FROM settings WHERE group_id = ?',
+                (user['group_id'],),
             )
-            conn.commit()
-            row = {
-                'group_name': group_name,
-                'dark_mode': 1,
-                'template': 'classic',
-            }
-        else:
-            row = dict(row)
-        conn.close()
-        send_json(self, HTTPStatus.OK, {
-            'groupName': row['group_name'],
-            'darkMode': bool(row['dark_mode']),
-            'template': row['template'] or 'classic',
-        })
+            row = cur.fetchone()
+            if not row:
+                # Create default settings row if missing
+                cur.execute('SELECT name FROM groups WHERE id = ?', (user['group_id'],))
+                g = cur.fetchone()
+                group_name = g['name'] if g else ''
+                cur.execute(
+                    "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
+                    (user['group_id'], group_name),
+                )
+                conn.commit()
+                row = {
+                    'group_name': group_name,
+                    'dark_mode': 1,
+                    'template': 'classic',
+                }
+            else:
+                row = dict(row)
+            send_json(self, HTTPStatus.OK, {
+                'groupName': row['group_name'],
+                'darkMode': bool(row['dark_mode']),
+                'template': row['template'] or 'classic',
+            })
 
     def api_update_settings(self, body: dict, user: dict):
         role = verify_group_access(user['id'], user['group_id'], 'admin')
@@ -3310,36 +3236,34 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # If template is provided, ensure it is a non-empty string
         if template is not None:
             template = (str(template).strip() or 'classic')
-        conn = get_db_connection()
-        cur = conn.cursor()
-        if template is None:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if template is None:
+                cur.execute(
+                    'UPDATE settings SET group_name = ?, dark_mode = ? WHERE group_id = ?',
+                    (group_name, 1 if bool(dark_mode) else 0, user['group_id'])
+                )
+            else:
+                cur.execute(
+                    'UPDATE settings SET group_name = ?, dark_mode = ?, template = ? WHERE group_id = ?',
+                    (group_name, 1 if bool(dark_mode) else 0, template, user['group_id'])
+                )
             cur.execute(
-                'UPDATE settings SET group_name = ?, dark_mode = ? WHERE group_id = ?',
-                (group_name, 1 if bool(dark_mode) else 0, user['group_id'])
+                'UPDATE groups SET name = ? WHERE id = ?',
+                (group_name, user['group_id'])
             )
-        else:
-            cur.execute(
-                'UPDATE settings SET group_name = ?, dark_mode = ?, template = ? WHERE group_id = ?',
-                (group_name, 1 if bool(dark_mode) else 0, template, user['group_id'])
-            )
-        cur.execute(
-            'UPDATE groups SET name = ? WHERE id = ?',
-            (group_name, user['group_id'])
-        )
-        conn.commit()
-        conn.close()
-        send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
+            conn.commit()
+            send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
 
     def api_get_user_settings(self, user: dict):
         if not user:
             send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT notify_uploads FROM users WHERE id = ?', (user['id'],))
-        row = cur.fetchone()
-        conn.close()
-        send_json(self, HTTPStatus.OK, {'notifyUploads': bool(row['notify_uploads'])})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT notify_uploads FROM users WHERE id = ?', (user['id'],))
+            row = cur.fetchone()
+            send_json(self, HTTPStatus.OK, {'notifyUploads': bool(row['notify_uploads'])})
 
     def api_update_user_settings(self, body: dict, user: dict):
         if not user:
@@ -3349,26 +3273,24 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if notify is None:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'notifyUploads is required'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('UPDATE users SET notify_uploads = ? WHERE id = ?', (1 if bool(notify) else 0, user['id']))
-        conn.commit()
-        conn.close()
-        send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('UPDATE users SET notify_uploads = ? WHERE id = ?', (1 if bool(notify) else 0, user['id']))
+            conn.commit()
+            send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
 
     def api_get_notifications(self, user: dict):
         if not user:
             send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Not authenticated'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT id, message, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC', (user['id'],))
-        rows = [
-            {'id': row['id'], 'message': row['message'], 'date': row['created_at']}
-            for row in cur.fetchall()
-        ]
-        conn.close()
-        send_json(self, HTTPStatus.OK, rows)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT id, message, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC', (user['id'],))
+            rows = [
+                {'id': row['id'], 'message': row['message'], 'date': row['created_at']}
+                for row in cur.fetchall()
+            ]
+            send_json(self, HTTPStatus.OK, rows)
 
     # ------------------------------------------------------------------
     # Users management (admin only)
@@ -3376,18 +3298,17 @@ class BandTrackHandler(BaseHTTPRequestHandler):
     def api_get_users(self):
         """Return a list of all users with their admin status.  Accessible
         only to administrators."""
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT id, username, role FROM users ORDER BY username ASC')
-        users = []
-        for row in cur.fetchall():
-            users.append({
-                'id': row['id'],
-                'username': row['username'],
-                'role': row['role'],
-            })
-        conn.close()
-        send_json(self, HTTPStatus.OK, users)
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT id, username, role FROM users ORDER BY username ASC')
+            users = []
+            for row in cur.fetchall():
+                users.append({
+                    'id': row['id'],
+                    'username': row['username'],
+                    'role': row['role'],
+                })
+            send_json(self, HTTPStatus.OK, users)
 
     def api_update_user_id(self, uid: int, body: dict, current_user: dict):
         """Update a user's role.  Only administrators can call this
@@ -3401,18 +3322,17 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if uid == current_user['id'] and role != 'admin':
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Cannot change your own admin role'})
             return
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('UPDATE users SET role = ? WHERE id = ?', (role, uid))
-        cur.execute('UPDATE memberships SET role = ? WHERE user_id = ?', (role, uid))
-        updated = cur.rowcount
-        conn.commit()
-        conn.close()
-        if updated:
-            log_event(current_user['id'], 'role_change', {'targetUserId': uid, 'newRole': role})
-            send_json(self, HTTPStatus.OK, {'message': 'User updated'})
-        else:
-            send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('UPDATE users SET role = ? WHERE id = ?', (role, uid))
+            cur.execute('UPDATE memberships SET role = ? WHERE user_id = ?', (role, uid))
+            updated = cur.rowcount
+            conn.commit()
+            if updated:
+                log_event(current_user['id'], 'role_change', {'targetUserId': uid, 'newRole': role})
+                send_json(self, HTTPStatus.OK, {'message': 'User updated'})
+            else:
+                send_json(self, HTTPStatus.NOT_FOUND, {'error': 'User not found'})
 
 #############################
 # Server entry point

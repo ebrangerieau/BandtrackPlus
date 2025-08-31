@@ -30,11 +30,9 @@ def test_default_settings_creation(tmp_path):
         }
 
         # delete settings row and ensure GET recreates defaults
-        conn = server.get_db_connection()
-        cur = conn.cursor()
-        cur.execute('DELETE FROM settings WHERE group_id = ?', (group_id,))
-        conn.commit()
-        conn.close()
+        with server.get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute('DELETE FROM settings WHERE group_id = ?', (group_id,))
 
         status, _, body = request('GET', port, f'/api/{group_id}/settings', headers=headers)
         assert status == 200
