@@ -80,8 +80,12 @@ import subprocess
 import shlex
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
+try:
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+except ImportError:  # pragma: no cover - optional dependency
+    canvas = None
+    A4 = None
 from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
 from scripts.migrate_suggestion_votes import migrate as migrate_suggestion_votes
 from scripts.migrate_performance_location import migrate as migrate_performance_location
@@ -3430,6 +3434,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         role = verify_group_access(user['id'], user['group_id'])
         if not role:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
+            return
+        if canvas is None:
+            send_json(
+                self,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {'error': 'PDF export requires reportlab. Install dependencies with "pip install -r requirements.txt".'},
+            )
             return
         buffer = io.BytesIO()
         pdf = canvas.Canvas(buffer, pagesize=A4)
