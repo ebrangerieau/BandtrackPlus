@@ -17,6 +17,7 @@
 import { state, resetCaches } from "../state.js";
 import { api, syncRehearsalsCache, uploadPartition, deletePartition } from "../api.js";
 import { checkSession, handleLogout, applyTheme, applyTemplate } from "../auth.js";
+import { audioPlayer } from "../audio-player.js";
 
 
   let currentUser = null;
@@ -1220,10 +1221,11 @@ Object.defineProperties(state, {
           t.textContent = note.title;
           wrapper.appendChild(t);
         }
-        const player = document.createElement('audio');
-        player.controls = true;
-        player.src = note.audio;
-        wrapper.appendChild(player);
+        const playBtn = document.createElement('button');
+        playBtn.className = 'btn-secondary';
+        playBtn.textContent = 'Écouter';
+        playBtn.onclick = () => audioPlayer.play(note.audio);
+        wrapper.appendChild(playBtn);
         const del = document.createElement('button');
         del.className = 'btn-danger';
         del.textContent = 'Supprimer audio';
@@ -1373,18 +1375,19 @@ Object.defineProperties(state, {
           wrapper.appendChild(pUser);
           const otherAudios = (song.audioNotes && song.audioNotes[u]) || [];
           otherAudios.forEach((note) => {
-            const audioEl = document.createElement('audio');
-            audioEl.controls = true;
-            audioEl.src = note.audio;
-            audioEl.style.display = 'block';
-            audioEl.style.marginTop = '4px';
             if (note.title) {
               const t = document.createElement('div');
               t.textContent = note.title;
               t.style.marginTop = '4px';
               wrapper.appendChild(t);
             }
-            wrapper.appendChild(audioEl);
+            const playBtn = document.createElement('button');
+            playBtn.className = 'btn-secondary';
+            playBtn.textContent = 'Écouter';
+            playBtn.style.display = 'block';
+            playBtn.style.marginTop = '4px';
+            playBtn.onclick = () => audioPlayer.play(note.audio);
+            wrapper.appendChild(playBtn);
           });
           othersDiv.appendChild(wrapper);
         });
@@ -2596,10 +2599,11 @@ Object.defineProperties(state, {
         t.textContent = note.title;
         wrap.appendChild(t);
       }
-      const audioPlayer2 = document.createElement('audio');
-      audioPlayer2.controls = true;
-      audioPlayer2.src = note.audio;
-      wrap.appendChild(audioPlayer2);
+      const playBtn2 = document.createElement('button');
+      playBtn2.className = 'btn-secondary';
+      playBtn2.textContent = 'Écouter';
+      playBtn2.onclick = () => audioPlayer.play(note.audio);
+      wrap.appendChild(playBtn2);
       const delAudioBtn2 = document.createElement('button');
       delAudioBtn2.className = 'btn-danger';
       delAudioBtn2.textContent = 'Supprimer audio';
@@ -2768,12 +2772,13 @@ Object.defineProperties(state, {
             t.style.marginTop = '4px';
             wrapper.appendChild(t);
           }
-          const audioEl = document.createElement('audio');
-          audioEl.controls = true;
-          audioEl.src = note.audio;
-          audioEl.style.display = 'block';
-          audioEl.style.marginTop = '4px';
-          wrapper.appendChild(audioEl);
+          const playBtn = document.createElement('button');
+          playBtn.className = 'btn-secondary';
+          playBtn.textContent = 'Écouter';
+          playBtn.style.display = 'block';
+          playBtn.style.marginTop = '4px';
+          playBtn.onclick = () => audioPlayer.play(note.audio);
+          wrapper.appendChild(playBtn);
         });
         othersDiv.appendChild(wrapper);
       });
