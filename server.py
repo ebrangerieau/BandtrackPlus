@@ -80,7 +80,10 @@ import subprocess
 import shlex
 import asyncio
 import threading
-import websockets
+try:
+    import websockets  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    websockets = None  # type: ignore
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 try:
@@ -118,7 +121,7 @@ async def ws_handler(websocket):
 
 
 def broadcast_ws(event: dict) -> None:
-    if not WS_LOOP or not WS_CLIENTS:
+    if websockets is None or not WS_LOOP or not WS_CLIENTS:
         return
     message = json.dumps(event)
     for ws in list(WS_CLIENTS):
@@ -126,6 +129,8 @@ def broadcast_ws(event: dict) -> None:
 
 
 def start_ws_server(host: str, port: int) -> None:
+    if websockets is None:  # pragma: no cover - optional dependency
+        return
     global WS_LOOP
     WS_LOOP = asyncio.new_event_loop()
     asyncio.set_event_loop(WS_LOOP)
