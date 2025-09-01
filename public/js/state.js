@@ -5,8 +5,10 @@ export const state = {
   groupsCache: [],
   activeGroupId: null,
   agendaDate: new Date(),
+  suggestionsCache: [],
 };
 
 export function resetCaches() {
   state.rehearsalsCache = [];
+  state.suggestionsCache = [];
 }

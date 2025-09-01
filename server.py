@@ -78,6 +78,9 @@ import io
 import cgi
 import subprocess
 import shlex
+import asyncio
+import threading
+import websockets
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 try:
@@ -100,6 +103,35 @@ UPLOADS_ROOT = os.path.join(os.path.dirname(__file__), 'uploads', 'partitions')
 
 # Maximum allowed size for uploaded partition files (default 5 MB)
 MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE', 5 * 1024 * 1024))
+
+# WebSocket server state
+WS_CLIENTS: set = set()
+WS_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+async def ws_handler(websocket):
+    WS_CLIENTS.add(websocket)
+    try:
+        await websocket.wait_closed()
+    finally:
+        WS_CLIENTS.discard(websocket)
+
+
+def broadcast_ws(event: dict) -> None:
+    if not WS_LOOP or not WS_CLIENTS:
+        return
+    message = json.dumps(event)
+    for ws in list(WS_CLIENTS):
+        asyncio.run_coroutine_threadsafe(ws.send(message), WS_LOOP)
+
+
+def start_ws_server(host: str, port: int) -> None:
+    global WS_LOOP
+    WS_LOOP = asyncio.new_event_loop()
+    asyncio.set_event_loop(WS_LOOP)
+    server = websockets.serve(ws_handler, host, port)
+    WS_LOOP.run_until_complete(server)
+    WS_LOOP.run_forever()
 
 
 def execute_write(target, sql, params=()):
@@ -2174,6 +2206,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 }
                 send_json(self, HTTPStatus.CREATED, result)
                 send_push_to_group(user['group_id'], 'Nouvelle suggestion', f"{row['title']}")
+                broadcast_ws({'type': 'suggestion:new', 'suggestion': result, 'groupId': user['group_id']})
             else:
                 send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Failed to fetch created suggestion'})
 
@@ -2323,8 +2356,10 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             )
             rehearsal_id = cur.lastrowid
             conn.commit()
-            send_json(self, HTTPStatus.CREATED, {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify, 'mastered': False, 'versionOf': version_of, 'sheetMusic': {}})
+            rehearsal = {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify, 'mastered': False, 'versionOf': version_of, 'sheetMusic': {}}
+            send_json(self, HTTPStatus.CREATED, rehearsal)
             send_push_to_group(user['group_id'], 'Nouvelle répétition', title)
+            broadcast_ws({'type': 'rehearsal:new', 'rehearsal': rehearsal, 'groupId': user['group_id']})
 
     def api_update_rehearsal(self, body: dict, user: dict):
         """Backward‑compatible endpoint for updating a rehearsal.  The
@@ -2513,6 +2548,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 }
                 log_event(user['id'], 'vote', {'suggestionId': sug_id})
                 send_json(self, HTTPStatus.OK, result)
+                broadcast_ws({'type': 'suggestion:vote', 'suggestion': result, 'groupId': user['group_id']})
             else:
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
@@ -2555,6 +2591,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 }
                 log_event(user['id'], 'unvote', {'suggestionId': sug_id})
                 send_json(self, HTTPStatus.OK, result)
+                broadcast_ws({'type': 'suggestion:vote', 'suggestion': result, 'groupId': user['group_id']})
             else:
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Suggestion not found'})
 
@@ -2733,6 +2770,22 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             conn.commit()
             if updated_metadata or updated_levels_notes_audio:
                 log_event(user['id'], 'edit', {'entity': 'rehearsal', 'id': rehearsal_id})
+                execute_write(cur, 'SELECT id, title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
+                updated_row = cur.fetchone()
+                if updated_row:
+                    rehearsal = {
+                        'id': updated_row['id'],
+                        'title': updated_row['title'],
+                        'author': updated_row['author'],
+                        'youtube': updated_row['youtube'],
+                        'spotify': updated_row['spotify'],
+                        'versionOf': updated_row['version_of'],
+                        'levels': json.loads(updated_row['levels_json'] or '{}'),
+                        'notes': json.loads(updated_row['notes_json'] or '{}'),
+                        'audioNotes': parse_audio_notes_json(updated_row['audio_notes_json']),
+                        'mastered': bool(updated_row['mastered']),
+                    }
+                    broadcast_ws({'type': 'rehearsal:update', 'rehearsal': rehearsal, 'groupId': user['group_id']})
                 send_json(self, HTTPStatus.OK, {'message': 'Updated'})
             else:
                 send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Nothing was updated'})
@@ -2765,25 +2818,23 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 levels = json.loads(updated['levels_json'] or '{}')
                 notes = json.loads(updated['notes_json'] or '{}')
                 audio_notes = parse_audio_notes_json(updated['audio_notes_json'])
-                send_json(
-                    self,
-                    HTTPStatus.OK,
-                    {
-                        'id': updated['id'],
-                        'title': updated['title'],
-                        'author': updated['author'],
-                        'youtube': updated['youtube'],
-                        'spotify': updated['spotify'],
-                        'versionOf': updated['version_of'],
-                        'audioNotes': audio_notes,
-                        'levels': levels,
-                        'notes': notes,
-                        'mastered': bool(updated['mastered']),
-                        'creatorId': updated['creator_id'],
-                        'creator': updated['creator'],
-                        'createdAt': updated['created_at'],
-                    },
-                )
+                rehearsal = {
+                    'id': updated['id'],
+                    'title': updated['title'],
+                    'author': updated['author'],
+                    'youtube': updated['youtube'],
+                    'spotify': updated['spotify'],
+                    'versionOf': updated['version_of'],
+                    'audioNotes': audio_notes,
+                    'levels': levels,
+                    'notes': notes,
+                    'mastered': bool(updated['mastered']),
+                    'creatorId': updated['creator_id'],
+                    'creator': updated['creator'],
+                    'createdAt': updated['created_at'],
+                }
+                send_json(self, HTTPStatus.OK, rehearsal)
+                broadcast_ws({'type': 'rehearsal:update', 'rehearsal': rehearsal, 'groupId': user['group_id']})
             else:
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Rehearsal not found'})
 
@@ -3523,6 +3574,8 @@ def run_server(host: str = '0.0.0.0', port: int = 8080):
     init_db()
     migrate_performance_location()
     migrate_suggestion_votes()
+    ws_port = int(os.environ.get('WS_PORT', port + 1))
+    threading.Thread(target=start_ws_server, args=(host, ws_port), daemon=True).start()
     server = ThreadingHTTPServer((host, port), BandTrackHandler)
     print(f"BandTrack server running on http://{host}:{port} (Ctrl-C to stop)")
     try:
