@@ -138,6 +138,7 @@ body, html {
   box-sizing: border-box;
   /* Ajout d’un padding en haut pour laisser de la place au logo */
   padding-top: 60px;
+  touch-action: pan-y;
 }
 
 /* En-tête avec logo */
@@ -407,6 +408,7 @@ select:focus {
 /* Contenu de page */
 .page {
   padding: 20px;
+  touch-action: pan-y;
 }
 
 /* Cartes pour les listes */

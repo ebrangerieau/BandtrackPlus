@@ -617,15 +617,11 @@ Object.defineProperties(state, {
     ];
     // Gestion du balayage (swipe) pour changer de page
     let startX = null;
+    let currentX = null;
     const swipeThreshold = 50;
 
-    pageDiv.addEventListener('pointerdown', (e) => {
-      startX = e.clientX;
-    });
-
-    pageDiv.addEventListener('pointerup', (e) => {
-      if (startX === null) return;
-      const diff = e.clientX - startX;
+    function finalizeSwipe(endX) {
+      const diff = endX - startX;
       if (Math.abs(diff) > swipeThreshold) {
         const currentIndex = navItems.findIndex((n) => n.key === currentPage);
         const newIndex = diff < 0 ? currentIndex + 1 : currentIndex - 1;
@@ -635,6 +631,47 @@ Object.defineProperties(state, {
         }
       }
       startX = null;
+      currentX = null;
+    }
+
+    pageDiv.addEventListener('pointerdown', (e) => {
+      startX = e.clientX;
+      currentX = startX;
+    });
+
+    pageDiv.addEventListener('pointerup', (e) => {
+      if (startX === null) return;
+      finalizeSwipe(e.clientX);
+    });
+
+    pageDiv.addEventListener('pointercancel', () => {
+      startX = null;
+      currentX = null;
+    });
+
+    pageDiv.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        startX = e.touches[0].clientX;
+        currentX = startX;
+      }
+    });
+
+    pageDiv.addEventListener('touchmove', (e) => {
+      if (startX !== null && e.touches.length === 1) {
+        currentX = e.touches[0].clientX;
+      }
+    });
+
+    function handleTouchEnd(e) {
+      if (startX === null) return;
+      const endX = currentX ?? e.changedTouches[0]?.clientX;
+      finalizeSwipe(endX);
+    }
+
+    pageDiv.addEventListener('touchend', handleTouchEnd);
+    pageDiv.addEventListener('touchcancel', () => {
+      startX = null;
+      currentX = null;
     });
     navItems.forEach((item) => {
       const btn = document.createElement('button');
