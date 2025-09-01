@@ -18,6 +18,7 @@ import { state, resetCaches } from "../state.js";
 import { api, syncRehearsalsCache, uploadPartition, deletePartition } from "../api.js";
 import { checkSession, handleLogout, applyTheme, applyTemplate } from "../auth.js";
 import { audioPlayer } from "../audio-player.js";
+import "../ws.js";
 
 
   let currentUser = null;
