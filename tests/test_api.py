@@ -239,3 +239,22 @@ def test_roles_and_permissions(tmp_path):
         assert status == 200
     finally:
         stop_test_server(httpd, thread)
+
+
+def test_request_body_limit(tmp_path):
+    old_limit = server.MAX_REQUEST_SIZE
+    server.MAX_REQUEST_SIZE = 1024
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        large_username = "x" * (server.MAX_REQUEST_SIZE * 2)
+        status, _, body = request(
+            "POST",
+            port,
+            "/api/register",
+            {"username": large_username, "password": "pw"},
+        )
+        assert status == 413
+        assert json.loads(body)["error"] == "Payload too large"
+    finally:
+        stop_test_server(httpd, thread)
+        server.MAX_REQUEST_SIZE = old_limit

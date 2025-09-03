@@ -119,6 +119,9 @@ UPLOADS_ROOT = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads
 # Maximum allowed size for uploaded partition files (default 5 MB)
 MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE', 5 * 1024 * 1024))
 
+# Maximum allowed size for HTTP request bodies (default 1 MB)
+MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', 1 * 1024 * 1024))
+
 # WebSocket server state
 WS_CLIENTS: set = set()
 WS_LOOP: asyncio.AbstractEventLoop | None = None
@@ -229,13 +232,22 @@ def verify_webauthn_credential(user_id: int, credential_id: str) -> bool:
             return True
     return False
 
-def read_request_body(handler: BaseHTTPRequestHandler) -> bytes:
-    """Read and return the request body for the current request.  If the
-    Content‑Length header is missing or invalid, returns empty bytes."""
+def read_request_body(handler: BaseHTTPRequestHandler) -> bytes | None:
+    """Read and return the request body for the current request.
+
+    Enforces ``MAX_REQUEST_SIZE`` to prevent excessive memory usage.  If the
+    ``Content-Length`` header is missing or invalid, empty bytes are returned.
+    When the declared length exceeds ``MAX_REQUEST_SIZE`` an HTTP
+    ``413 Payload Too Large`` response is sent and ``None`` is returned so the
+    caller can abort further processing."""
     try:
         length = int(handler.headers.get('Content-Length', 0))
     except ValueError:
         return b''
+    if length > MAX_REQUEST_SIZE:
+        send_json(handler, HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {'error': 'Payload too large'})
+        return None
+    length = min(length, MAX_REQUEST_SIZE)
     return handler.rfile.read(length) if length > 0 else b''
 
 def send_json(handler: BaseHTTPRequestHandler, status: int, data: dict, *, cookies: list[tuple[str, str, dict]] = None) -> None:
@@ -694,6 +706,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         # the body.
         if method in ('POST', 'PUT', 'DELETE'):
             body_bytes = read_request_body(self)
+            if body_bytes is None:
+                return
             content_type = self.headers.get('Content-Type', '')
             if content_type.startswith('multipart/form-data'):
                 body = body_bytes
