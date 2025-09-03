@@ -75,6 +75,16 @@ def test_migrate_performance_location_db_path(tmp_path):
     conn.close()
 
 
+def test_migrate_performance_location_missing_table(tmp_path):
+    db = tmp_path / "test.db"
+    conn = sqlite3.connect(db)
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE other (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+    assert migrate_performance_location(str(db)) is False
+
+
 def test_migrate_sessions_group_id_db_path(tmp_path):
     db = tmp_path / "test.db"
     conn = sqlite3.connect(db)
