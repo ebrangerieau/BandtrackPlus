@@ -779,7 +779,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if handler is None:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
-            if handler is not self.handle_auth:
+            if handler.__name__ != "handle_auth":
                 if user is None or user.get('group_id') is None:
                     raise PermissionError
             return handler(method, path, query, body, user, session_token)
