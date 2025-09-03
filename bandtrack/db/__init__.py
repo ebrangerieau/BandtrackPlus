@@ -358,6 +358,7 @@ def init_db():
     from scripts.migrate_performance_location import migrate as migrate_performance_location
     from scripts.migrate_sessions_group_id import migrate as migrate_sessions_group_id
 
+    # Run migrations that operate on a given database file
     migrate_to_multigroup(DB_FILENAME)
     migrate_suggestion_votes(DB_FILENAME)
     migrate_performance_location(DB_FILENAME)

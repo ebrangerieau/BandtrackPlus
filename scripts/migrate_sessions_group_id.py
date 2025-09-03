@@ -1,7 +1,21 @@
+import sqlite3
+
 from bandtrack.db import _using_postgres, get_db_connection, execute_write
 
 
-def migrate() -> bool:
+def migrate(db_path: str | None = None) -> bool:
+    if db_path and not _using_postgres():
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute('PRAGMA table_info(sessions)')
+        columns = [row[1] for row in cur.fetchall()]
+        if 'group_id' in columns:
+            conn.close()
+            return False
+        cur.execute('ALTER TABLE sessions ADD COLUMN group_id INTEGER')
+        conn.commit()
+        conn.close()
+        return True
     if not _using_postgres():
         return False
     with get_db_connection() as conn:
