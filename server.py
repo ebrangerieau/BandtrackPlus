@@ -90,6 +90,8 @@ import subprocess
 import shlex
 import asyncio
 import threading
+import sqlparse
+from sqlparse import tokens as T
 try:
     import websockets  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
@@ -179,10 +181,33 @@ def _pg_dsn() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
 
 
+def to_psycopg2_params(query: str, params: tuple) -> tuple[str, tuple]:
+    """Convert SQLite-style '?' placeholders to psycopg2 parameters.
+
+    Uses ``sqlparse`` to avoid replacing question marks that appear inside
+    string literals or comments. Raises ``ValueError`` if the number of
+    placeholders does not match ``params``.
+    """
+    parsed = sqlparse.parse(query)
+    if not parsed:
+        return query, params
+    tokens: list[str] = []
+    count = 0
+    for token in parsed[0].flatten():
+        if token.ttype == T.Name.Placeholder and token.value == "?":
+            tokens.append("%s")
+            count += 1
+        else:
+            tokens.append(token.value)
+    if count != len(params):
+        raise ValueError("Mismatched number of parameters")
+    return "".join(tokens), params
+
+
 def execute_write(target, sql, params=()):
     """Execute a SQL statement with retry on database locks."""
     if _using_postgres():
-        sql = sql.replace("?", "%s")
+        sql, params = to_psycopg2_params(sql, params)
         try:
             result = target.execute(sql, params)
         except Psycopg2Error:

@@ -18,11 +18,13 @@ def test_agenda_endpoint(tmp_path):
         # Insert rehearsal events directly into the database
         with server.get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            server.execute_write(
+                cur,
                 "INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)",
                 ("2024-01-10T20:00", "Studio", 1, user_id),
             )
-            cur.execute(
+            server.execute_write(
+                cur,
                 "INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)",
                 ("2024-02-05T20:00", "Studio B", 1, user_id),
             )

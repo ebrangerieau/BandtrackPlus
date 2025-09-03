@@ -48,7 +48,7 @@ def test_group_member_can_leave_and_context_cleared(tmp_path):
         # last_group_id in database is cleared
         with server.get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT last_group_id FROM users WHERE id = ?', (bob_user_id,))
+            server.execute_write(cur, 'SELECT last_group_id FROM users WHERE id = ?', (bob_user_id,))
             row = cur.fetchone()
         assert row['last_group_id'] is None
     finally:
