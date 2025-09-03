@@ -8,8 +8,17 @@ import bandtrack.api as server
 
 
 def start_test_server(tmp_db_path=None):
+    if tmp_db_path is not None:
+        import bandtrack.db as db_module
+
+        httpd_old_db = db_module.DB_FILENAME
+        db_module.DB_FILENAME = str(tmp_db_path)
+    else:
+        httpd_old_db = None
     server.init_db()
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.BandTrackHandler)
+    httpd.db_path = str(tmp_db_path) if tmp_db_path is not None else None
+    httpd.old_db_filename = httpd_old_db
     port = httpd.server_address[1]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -21,6 +30,14 @@ def start_test_server(tmp_db_path=None):
 def stop_test_server(httpd, thread):
     httpd.shutdown()
     thread.join()
+    db_path = getattr(httpd, "db_path", None)
+    if db_path and os.path.exists(db_path):
+        os.remove(db_path)
+    old_db = getattr(httpd, "old_db_filename", None)
+    if old_db is not None:
+        import bandtrack.db as db_module
+
+        db_module.DB_FILENAME = old_db
 
 
 def request(method, port, path, body=None, headers=None):
