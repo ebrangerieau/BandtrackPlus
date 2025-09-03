@@ -1,7 +1,7 @@
 import json
 
 from test_api import start_test_server, stop_test_server, request, extract_cookie
-import server
+import bandtrack.api as server
 
 
 def test_agenda_endpoint(tmp_path):
