@@ -78,6 +78,7 @@ import threading
 import hmac
 import secrets
 import string
+import re
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 try:
@@ -609,6 +610,32 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 
     server_version = 'BandTrack/1.0'
 
+    # Routing table: (HTTP method, regex pattern) -> handler method name
+    ROUTES = [
+        ('POST', r'^/api/register$', 'handle_auth'),
+        ('POST', r'^/api/login$', 'handle_auth'),
+        ('POST', r'^/api/logout$', 'handle_auth'),
+        ('GET', r'^/api/me$', 'handle_auth'),
+        ('DELETE', r'^/api/me$', 'handle_auth'),
+        ('POST', r'^/api/webauthn/authenticate$', 'handle_auth'),
+        ('POST', r'^/api/webauthn/register$', 'handle_auth'),
+        ('PUT', r'^/api/password$', 'handle_auth'),
+        ('GET', r'^/api/context$', 'handle_context'),
+        ('PUT', r'^/api/context$', 'handle_context'),
+        ('ANY', r'^/api/groups', 'handle_groups'),
+        ('ANY', r'^/api/suggestions', 'handle_suggestions'),
+        ('ANY', r'^/api/rehearsals', 'handle_rehearsals'),
+        ('ANY', r'^/api/performances', 'handle_performances'),
+        ('ANY', r'^/api/agenda', 'handle_agenda'),
+        ('ANY', r'^/api/settings$', 'handle_settings'),
+        ('ANY', r'^/api/user-settings$', 'handle_settings'),
+        ('POST', r'^/api/push-subscribe$', 'handle_misc'),
+        ('ANY', r'^/api/notifications$', 'handle_misc'),
+        ('GET', r'^/api/repertoire\.pdf$', 'handle_misc'),
+        ('ANY', r'^/api/logs$', 'handle_admin'),
+        ('ANY', r'^/api/users', 'handle_admin'),
+    ]
+
     def do_OPTIONS(self):  # noqa: N802 (matching http.server naming)
         """Handle CORS preflight requests if needed.  Since the server and
         client run on the same origin in our deployment, CORS is not
@@ -696,14 +723,15 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
+    def _find_route_handler(self, method: str, path: str):
+        """Return the handler method for a given HTTP method and path."""
+        for m, pattern, handler_name in self.ROUTES:
+            if (m == method or m == 'ANY') and re.match(pattern, path):
+                return getattr(self, handler_name)
+        return None
+
     def handle_api_request(self, method: str, path: str, query: dict[str, list[str]]):
         """Dispatch API requests based on the path and HTTP method."""
-        # Parse JSON body if present.  HTTP methods that typically carry
-        # a body include POST, PUT and DELETE.  We intentionally
-        # include DELETE here because curl and fetch may send JSON
-        # payloads with DELETE requests even though the RFC does not
-        # require servers to accept them.  For other methods we ignore
-        # the body.
         if method in ('POST', 'PUT', 'DELETE'):
             body_bytes = read_request_body(self)
             if body_bytes is None:
@@ -720,7 +748,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         else:
             body = {}
 
-        # Authentication: obtain current user via session cookie
         cookie_header = self.headers.get('Cookie', '')
         cookies = {}
         for part in cookie_header.split(';'):
@@ -730,10 +757,6 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         session_token = cookies.get('session_id')
         user = get_user_by_session(session_token)
 
-        # Extract optional group ID from the path.  Paths of the form
-        # /api/<groupId>/resource will operate within that group instead of
-        # the session's current group.  If no group ID segment is present, we
-        # fall back to the group stored in the session.
         group_id_from_path = None
         parts = path.split('/')
         if len(parts) > 2 and parts[2].isdigit():
@@ -745,280 +768,259 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if group_id_from_path is not None:
                 user['group_id'] = group_id_from_path
 
-        # Route handling
         try:
-            # Authentication routes that do not require an existing session
-            if path == '/api/register' and method == 'POST':
-                return self.api_register(body)
-            if path == '/api/login' and method == 'POST':
-                return self.api_login(body)
-            if path == '/api/logout' and method == 'POST':
-                return self.api_logout(session_token)
-            if path == '/api/me':
-                if method == 'GET':
-                    return self.api_me(user)
-                if method == 'DELETE':
-                    return self.api_delete_me(user, session_token)
-            if path == '/api/webauthn/authenticate' and method == 'POST':
-                return self.api_webauthn_authenticate(body)
-            if path == '/api/webauthn/register' and method == 'POST':
-                if user is None:
+            handler = self._find_route_handler(method, path)
+            if handler is None:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            if handler is not self.handle_auth:
+                if user is None or user.get('group_id') is None:
                     raise PermissionError
-                return self.api_webauthn_register(body, user)
-            if path == '/api/password' and method == 'PUT':
-                if user is None:
-                    raise PermissionError
-                return self.api_update_password(body, user)
-
-            # Remaining routes require authentication and an active group
-            if user is None or user.get('group_id') is None:
-                raise PermissionError
-
-            # Context endpoints
-            if path == '/api/context':
-                if method == 'GET':
-                    return self.api_get_context(user)
-                if method == 'PUT':
-                    return self.api_set_context(body, user, session_token)
-
-            # Group management
-            if path == '/api/groups':
-                if method == 'POST':
-                    return self.api_create_group(body, user)
-                if method == 'GET':
-                    return self.api_get_groups(user)
-            if path == '/api/groups/join' and method == 'POST':
-                return self.api_join_group(body, user)
-            if path == '/api/groups/renew-code' and method == 'POST':
-                return self.api_renew_group_code(user)
-
-            if path.startswith('/api/groups/'):
-                parts = path.split('/')
-                if len(parts) == 4:
-                    try:
-                        gid = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
-                    if method == 'PUT':
-                        return self.api_update_group(gid, body, user)
-                if len(parts) >= 5 and parts[4] == 'invite' and method == 'POST':
-                    try:
-                        gid = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
-                    return self.api_group_invite(gid, body, user)
-                if len(parts) >= 5 and parts[4] == 'members':
-                    try:
-                        gid = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
-                    return self.api_group_members(gid, method, body, user)
-
-            # Suggestions
-            if path.startswith('/api/suggestions'):
-                parts = path.split('/')
-                # e.g. /api/suggestions or /api/suggestions/
-                if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
-                    if method == 'GET':
-                        return self.api_get_suggestions(user)
-                    if method == 'POST':
-                        return self.api_create_suggestion(body, user)
-                    raise NotImplementedError
-                # e.g. /api/suggestions/{id}
-                if len(parts) >= 4:
-                    try:
-                        sug_id = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    if len(parts) == 5 and parts[4] == 'to-rehearsal' and method == 'POST':
-                        return self.api_move_suggestion_to_rehearsal_id(sug_id, user)
-                    if len(parts) == 5 and parts[4] == 'vote':
-                        if method == 'POST':
-                            return self.api_vote_suggestion_id(sug_id, user)
-                        if method == 'DELETE':
-                            return self.api_unvote_suggestion_id(sug_id, user)
-                        raise NotImplementedError
-                    if method == 'PUT':
-                        return self.api_update_suggestion_id(sug_id, body, user)
-                    if method == 'DELETE':
-                        return self.api_delete_suggestion_id(sug_id, user)
-                    else:
-                        raise NotImplementedError
-                # any other variation
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-
-            # Rehearsals
-            if path.startswith('/api/rehearsals'):
-                parts = path.split('/')
-                if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
-                    if method == 'GET':
-                        return self.api_get_rehearsals(user)
-                    if method == 'POST':
-                        return self.api_create_rehearsal(body, user)
-                    raise NotImplementedError
-                if len(parts) == 5 and parts[4] == 'partitions':
-                    try:
-                        reh_id = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    if method == 'GET':
-                        return self.api_get_rehearsal_partitions(reh_id, user)
-                    if method == 'POST':
-                        return self.api_post_rehearsal_partition(reh_id, body, self.headers, user)
-                    else:
-                        raise NotImplementedError
-                if len(parts) == 6 and parts[4] == 'partitions':
-                    try:
-                        reh_id = int(parts[3])
-                        part_id = int(parts[5])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    if method == 'DELETE':
-                        return self.api_delete_rehearsal_partition(reh_id, part_id, user)
-                    else:
-                        raise NotImplementedError
-                if len(parts) == 4:
-                    try:
-                        reh_id = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    if method == 'GET':
-                        return self.api_get_rehearsal_id(reh_id, user)
-                    if method == 'PUT':
-                        return self.api_update_rehearsal_id(reh_id, body, user)
-                    if method == 'DELETE':
-                        return self.api_delete_rehearsal_id(reh_id, user)
-                    else:
-                        raise NotImplementedError
-                if len(parts) == 5 and parts[4] == 'mastered' and method == 'PUT':
-                    try:
-                        reh_id = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    return self.api_toggle_rehearsal_mastered(reh_id, user)
-                if len(parts) == 5 and parts[4] == 'to-suggestion' and method == 'POST':
-                    try:
-                        reh_id = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    return self.api_move_rehearsal_to_suggestion_id(reh_id, user)
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-
-            # Performances
-            if path.startswith('/api/performances'):
-                parts = path.split('/')
-                if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
-                    if method == 'GET':
-                        return self.api_get_performances(user)
-                    if method == 'POST':
-                        return self.api_create_performance(body, user)
-                    raise NotImplementedError
-                if len(parts) == 4:
-                    try:
-                        perf_id = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    if method == 'PUT':
-                        return self.api_update_performance_id(perf_id, body, user)
-                    if method == 'DELETE':
-                        return self.api_delete_performance_id(perf_id, user)
-                    else:
-                        raise NotImplementedError
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-
-            if path == '/api/agenda':
-                if method == 'GET':
-                    return self.api_get_agenda(query, user)
-                if method == 'POST':
-                    return self.api_create_agenda(body, user)
-                raise NotImplementedError
-            if path.startswith('/api/agenda/'):
-                parts = path.split('/')
-                if len(parts) == 4:
-                    try:
-                        item_id = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
-                    if method == 'PUT':
-                        return self.api_update_agenda_id(item_id, body, user)
-                    if method == 'DELETE':
-                        return self.api_delete_agenda_id(item_id, body, user)
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-
-            # Settings
-            if path == '/api/settings':
-                if method == 'GET':
-                    return self.api_get_settings(user)
-                if method == 'PUT':
-                    return self.api_update_settings(body, user)
-                raise NotImplementedError
-
-            # User settings
-            if path == '/api/user-settings':
-                if method == 'GET':
-                    return self.api_get_user_settings(user)
-                if method == 'PUT':
-                    return self.api_update_user_settings(body, user)
-                raise NotImplementedError
-
-            if path == '/api/push-subscribe' and method == 'POST':
-                return self.api_push_subscribe(body, user)
-
-            # Notifications
-            if path == '/api/notifications':
-                if method == 'GET':
-                    return self.api_get_notifications(user)
-                raise NotImplementedError
-
-            if path == '/api/repertoire.pdf' and method == 'GET':
-                return self.api_repertoire_pdf(user)
-
-            # Logs
-            if path == '/api/logs':
-                if not user or user.get('role') != 'admin':
-                    raise PermissionError
-                if method == 'GET':
-                    return self.api_get_logs()
-                raise NotImplementedError
-
-            # Users management (admin only)
-            if path.startswith('/api/users'):
-                # Ensure user is authenticated and admin
-                if not user or user.get('role') != 'admin':
-                    raise PermissionError
-                parts = path.split('/')
-                # GET /api/users
-                if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
-                    if method == 'GET':
-                        return self.api_get_users()
-                    raise NotImplementedError
-                # PUT /api/users/{id}
-                if len(parts) == 4:
-                    try:
-                        uid = int(parts[3])
-                    except ValueError:
-                        return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid user id'})
-                    if method == 'PUT':
-                        return self.api_update_user_id(uid, body, user)
-                    else:
-                        raise NotImplementedError
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-
-            # Unknown path
-            self.send_error(HTTPStatus.NOT_FOUND)
+            return handler(method, path, query, body, user, session_token)
         except PermissionError:
             send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         except NotImplementedError:
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
         except Exception as exc:
-            # Log the error on server side and return 500
             print(f"Internal server error: {exc}")
             send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Internal server error'})
+
+    def handle_auth(self, method, path, query, body, user, session_token):
+        if path == '/api/register' and method == 'POST':
+            return self.api_register(body)
+        if path == '/api/login' and method == 'POST':
+            return self.api_login(body)
+        if path == '/api/logout' and method == 'POST':
+            return self.api_logout(session_token)
+        if path == '/api/me':
+            if method == 'GET':
+                return self.api_me(user)
+            if method == 'DELETE':
+                return self.api_delete_me(user, session_token)
+        if path == '/api/webauthn/authenticate' and method == 'POST':
+            return self.api_webauthn_authenticate(body)
+        if path == '/api/webauthn/register' and method == 'POST':
+            if user is None:
+                raise PermissionError
+            return self.api_webauthn_register(body, user)
+        if path == '/api/password' and method == 'PUT':
+            if user is None:
+                raise PermissionError
+            return self.api_update_password(body, user)
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_context(self, method, path, query, body, user, session_token):
+        if path == '/api/context':
+            if method == 'GET':
+                return self.api_get_context(user)
+            if method == 'PUT':
+                return self.api_set_context(body, user, session_token)
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_groups(self, method, path, query, body, user, session_token):
+        if path == '/api/groups':
+            if method == 'POST':
+                return self.api_create_group(body, user)
+            if method == 'GET':
+                return self.api_get_groups(user)
+        if path == '/api/groups/join' and method == 'POST':
+            return self.api_join_group(body, user)
+        if path == '/api/groups/renew-code' and method == 'POST':
+            return self.api_renew_group_code(user)
+        if path.startswith('/api/groups/'):
+            parts = path.split('/')
+            if len(parts) == 4:
+                try:
+                    gid = int(parts[3])
+                except ValueError:
+                    return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
+                if method == 'PUT':
+                    return self.api_update_group(gid, body, user)
+            if len(parts) >= 5 and parts[4] == 'invite' and method == 'POST':
+                try:
+                    gid = int(parts[3])
+                except ValueError:
+                    return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
+                return self.api_group_invite(gid, body, user)
+            if len(parts) >= 5 and parts[4] == 'members':
+                try:
+                    gid = int(parts[3])
+                except ValueError:
+                    return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid group id'})
+                return self.api_group_members(gid, method, body, user)
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_suggestions(self, method, path, query, body, user, session_token):
+        parts = path.split('/')
+        if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
+            if method == 'GET':
+                return self.api_get_suggestions(user)
+            if method == 'POST':
+                return self.api_create_suggestion(body, user)
+            raise NotImplementedError
+        if len(parts) >= 4:
+            try:
+                sug_id = int(parts[3])
+            except ValueError:
+                return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+            if len(parts) == 5 and parts[4] == 'to-rehearsal' and method == 'POST':
+                return self.api_move_suggestion_to_rehearsal_id(sug_id, user)
+            if len(parts) == 5 and parts[4] == 'vote':
+                if method == 'POST':
+                    return self.api_vote_suggestion_id(sug_id, user)
+                if method == 'DELETE':
+                    return self.api_unvote_suggestion_id(sug_id, user)
+                raise NotImplementedError
+            if method == 'PUT':
+                return self.api_update_suggestion_id(sug_id, body, user)
+            if method == 'DELETE':
+                return self.api_delete_suggestion_id(sug_id, user)
+            raise NotImplementedError
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_rehearsals(self, method, path, query, body, user, session_token):
+        parts = path.split('/')
+        if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
+            if method == 'GET':
+                return self.api_get_rehearsals(user)
+            if method == 'POST':
+                return self.api_create_rehearsal(body, user)
+            raise NotImplementedError
+        if len(parts) == 5 and parts[4] == 'partitions':
+            try:
+                reh_id = int(parts[3])
+            except ValueError:
+                return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+            if method == 'GET':
+                return self.api_get_rehearsal_partitions(reh_id, user)
+            if method == 'POST':
+                return self.api_post_rehearsal_partition(reh_id, body, self.headers, user)
+            raise NotImplementedError
+        if len(parts) == 6 and parts[4] == 'partitions':
+            try:
+                reh_id = int(parts[3])
+                part_id = int(parts[5])
+            except ValueError:
+                return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+            if method == 'DELETE':
+                return self.api_delete_rehearsal_partition(reh_id, part_id, user)
+            raise NotImplementedError
+        if len(parts) == 4:
+            try:
+                reh_id = int(parts[3])
+            except ValueError:
+                return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+            if method == 'GET':
+                return self.api_get_rehearsal_id(reh_id, user)
+            if method == 'PUT':
+                return self.api_update_rehearsal_id(reh_id, body, user)
+            if method == 'DELETE':
+                return self.api_delete_rehearsal_id(reh_id, user)
+            raise NotImplementedError
+        if len(parts) == 5 and parts[4] == 'mastered' and method == 'PUT':
+            try:
+                reh_id = int(parts[3])
+            except ValueError:
+                return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+            return self.api_toggle_rehearsal_mastered(reh_id, user)
+        if len(parts) == 5 and parts[4] == 'to-suggestion' and method == 'POST':
+            try:
+                reh_id = int(parts[3])
+            except ValueError:
+                return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+            return self.api_move_rehearsal_to_suggestion_id(reh_id, user)
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_performances(self, method, path, query, body, user, session_token):
+        parts = path.split('/')
+        if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
+            if method == 'GET':
+                return self.api_get_performances(user)
+            if method == 'POST':
+                return self.api_create_performance(body, user)
+            raise NotImplementedError
+        if len(parts) == 4:
+            try:
+                perf_id = int(parts[3])
+            except ValueError:
+                return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+            if method == 'PUT':
+                return self.api_update_performance_id(perf_id, body, user)
+            if method == 'DELETE':
+                return self.api_delete_performance_id(perf_id, user)
+            raise NotImplementedError
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_agenda(self, method, path, query, body, user, session_token):
+        if path == '/api/agenda':
+            if method == 'GET':
+                return self.api_get_agenda(query, user)
+            if method == 'POST':
+                return self.api_create_agenda(body, user)
+            raise NotImplementedError
+        if path.startswith('/api/agenda/'):
+            parts = path.split('/')
+            if len(parts) == 4:
+                try:
+                    item_id = int(parts[3])
+                except ValueError:
+                    return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid ID'})
+                if method == 'PUT':
+                    return self.api_update_agenda_id(item_id, body, user)
+                if method == 'DELETE':
+                    return self.api_delete_agenda_id(item_id, body, user)
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_settings(self, method, path, query, body, user, session_token):
+        if path == '/api/settings':
+            if method == 'GET':
+                return self.api_get_settings(user)
+            if method == 'PUT':
+                return self.api_update_settings(body, user)
+            raise NotImplementedError
+        if path == '/api/user-settings':
+            if method == 'GET':
+                return self.api_get_user_settings(user)
+            if method == 'PUT':
+                return self.api_update_user_settings(body, user)
+            raise NotImplementedError
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_misc(self, method, path, query, body, user, session_token):
+        if path == '/api/push-subscribe' and method == 'POST':
+            return self.api_push_subscribe(body, user)
+        if path == '/api/notifications':
+            if method == 'GET':
+                return self.api_get_notifications(user)
+            raise NotImplementedError
+        if path == '/api/repertoire.pdf' and method == 'GET':
+            return self.api_repertoire_pdf(user)
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def handle_admin(self, method, path, query, body, user, session_token):
+        if path == '/api/logs':
+            if not user or user.get('role') != 'admin':
+                raise PermissionError
+            if method == 'GET':
+                return self.api_get_logs()
+            raise NotImplementedError
+        if path.startswith('/api/users'):
+            if not user or user.get('role') != 'admin':
+                raise PermissionError
+            parts = path.split('/')
+            if len(parts) == 3 or (len(parts) == 4 and parts[3] == ''):
+                if method == 'GET':
+                    return self.api_get_users()
+                raise NotImplementedError
+            if len(parts) == 4:
+                try:
+                    uid = int(parts[3])
+                except ValueError:
+                    return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid user id'})
+                if method == 'PUT':
+                    return self.api_update_user_id(uid, body, user)
+                raise NotImplementedError
+        self.send_error(HTTPStatus.NOT_FOUND)
 
     #############################
     # API endpoint handlers
