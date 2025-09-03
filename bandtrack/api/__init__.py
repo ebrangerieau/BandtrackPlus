@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-bandtrack-server/server.py
-==========================
+bandtrack.api
+=============
 
 This module implements a simple HTTP server in pure Python to provide a
 centralised backend for the BandTrack application.  It serves both the
@@ -35,10 +35,10 @@ Key features
 Usage
 -----
 
-Running the server is as simple as executing this file with Python:
+Running the server is as simple as executing ``main.py`` with Python:
 
 ```
-python3 server.py
+python3 main.py
 ```
 
 The server listens on port 8080 by default.  You can override the port
@@ -46,7 +46,7 @@ by setting the ``PORT`` environment variable or passing ``--port`` on
 the command line.  Example:
 
 ```
-python3 server.py --port 5000
+python3 main.py --port 5000
 ```
 
 The server automatically creates the database and tables on first run,

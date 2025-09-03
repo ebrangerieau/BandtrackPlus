@@ -1,19 +1,19 @@
-import server
+from bandtrack.db import _using_postgres, get_db_connection, execute_write
 
 
 def migrate() -> bool:
-    if not server._using_postgres():
+    if not _using_postgres():
         return False
-    with server.get_db_connection() as conn:
+    with get_db_connection() as conn:
         cur = conn.cursor()
-        server.execute_write(
+        execute_write(
             cur,
             "SELECT column_name FROM information_schema.columns WHERE table_name='sessions' AND column_name='group_id'",
         )
         if cur.fetchone():
             return False
-        server.execute_write(cur, 'ALTER TABLE sessions ADD COLUMN group_id INTEGER')
-        server.execute_write(cur, 'UPDATE sessions SET group_id = NULL WHERE group_id IS NULL')
+        execute_write(cur, 'ALTER TABLE sessions ADD COLUMN group_id INTEGER')
+        execute_write(cur, 'UPDATE sessions SET group_id = NULL WHERE group_id IS NULL')
     return True
 
 
