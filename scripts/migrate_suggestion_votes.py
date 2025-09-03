@@ -22,6 +22,11 @@ def migrate(db_path: str | None = None) -> bool:
     if cur.fetchone()[0] > 0:
         conn.close()
         return False
+    # Ensure users table exists before querying
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if cur.fetchone() is None:
+        conn.close()
+        return False
     # Fetch all users
     cur.execute('SELECT id FROM users')
     users = [row[0] for row in cur.fetchall()]
