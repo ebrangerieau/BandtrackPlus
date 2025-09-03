@@ -691,7 +691,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return
             # Static public files.  Remove leading '/' and normalise path
             local_path = path.lstrip('/') or 'index.html'
-            static_root = os.path.join(os.path.dirname(__file__), 'public')
+            static_root = os.environ.get(
+                'STATIC_ROOT',
+                os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    'public',
+                ),
+            )
             normalized = os.path.normpath(os.path.join(static_root, local_path))
             if not normalized.startswith(static_root):
                 self.send_error(HTTPStatus.FORBIDDEN)
