@@ -265,6 +265,26 @@ def init_db():
                 )
             execute_write(cur, stmt)
 
+        # Groups allow multiple band configurations and are owned by a user
+        groups_stmt = (
+            '''CREATE TABLE IF NOT EXISTS groups (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL,
+                   invitation_code TEXT NOT NULL UNIQUE,
+                   description TEXT,
+                   logo_url TEXT,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   owner_id INTEGER NOT NULL,
+                   FOREIGN KEY (owner_id) REFERENCES users(id)
+               );'''
+        )
+        if _using_postgres():
+            groups_stmt = groups_stmt.replace(
+                ',\n                   FOREIGN KEY (owner_id) REFERENCES users(id)',
+                '',
+            )
+        run(groups_stmt)
+
         # Users table: store username, salt and password hash
         run(
             '''CREATE TABLE IF NOT EXISTS users (
@@ -278,6 +298,14 @@ def init_db():
                    FOREIGN KEY (last_group_id) REFERENCES groups(id)
                );'''
         )
+        if _using_postgres():
+            try:
+                run(
+                    'ALTER TABLE groups ADD CONSTRAINT fk_groups_owner '
+                    'FOREIGN KEY (owner_id) REFERENCES users(id)'
+                )
+            except Exception:
+                pass
         # WebAuthn credentials associated with users
         run(
             '''CREATE TABLE IF NOT EXISTS users_webauthn (
@@ -377,19 +405,6 @@ def init_db():
                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                    FOREIGN KEY (group_id) REFERENCES groups(id),
                    FOREIGN KEY (creator_id) REFERENCES users(id)
-               );'''
-        )
-        # Groups allow multiple band configurations and are owned by a user
-        run(
-            '''CREATE TABLE IF NOT EXISTS groups (
-                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   name TEXT NOT NULL,
-                   invitation_code TEXT NOT NULL UNIQUE,
-                   description TEXT,
-                   logo_url TEXT,
-                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                   owner_id INTEGER NOT NULL,
-                   FOREIGN KEY (owner_id) REFERENCES users(id)
                );'''
         )
         # Memberships link users to groups with a role and optional nickname
