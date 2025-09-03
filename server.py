@@ -64,6 +64,8 @@ import argparse
 import json
 import os
 import sqlite3
+import psycopg2
+import psycopg2.extras
 from contextlib import contextmanager
 import secrets
 import string
@@ -139,8 +141,35 @@ def start_ws_server(host: str, port: int) -> None:
     WS_LOOP.run_forever()
 
 
+def _using_postgres() -> bool:
+    """Return True if a PostgreSQL DSN is configured."""
+    return bool(
+        os.environ.get("DATABASE_URL")
+        or os.environ.get("DB_HOST")
+    )
+
+
+def _pg_dsn() -> str:
+    """Build a PostgreSQL connection string from environment variables."""
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        return url
+    host = os.environ.get("DB_HOST", "localhost")
+    port = os.environ.get("DB_PORT", "5432")
+    user = os.environ.get("DB_USER", "postgres")
+    password = os.environ.get("DB_PASSWORD", "")
+    dbname = os.environ.get("DB_NAME", "postgres")
+    return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+
+
 def execute_write(target, sql, params=()):
     """Execute a SQL statement with retry on database locks."""
+    if _using_postgres():
+        sql = sql.replace("?", "%s")
+        result = target.execute(sql, params)
+        if sql.lstrip().upper().startswith("INSERT") and not getattr(target, "lastrowid", None):
+            target.execute("SELECT LASTVAL()"); target.lastrowid = target.fetchone()[0]
+        return result
     delay = 0.05
     for attempt in range(5):
         try:
@@ -156,11 +185,14 @@ def execute_write(target, sql, params=()):
 @contextmanager
 def get_db_connection():
     """Yield a database connection with foreign keys enabled."""
-    conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
-    execute_write(conn, 'PRAGMA foreign_keys = ON')
-    execute_write(conn, 'PRAGMA journal_mode=WAL')
-    execute_write(conn, 'PRAGMA busy_timeout=30000')
-    conn.row_factory = sqlite3.Row
+    if _using_postgres():
+        conn = psycopg2.connect(_pg_dsn(), cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
+        execute_write(conn, 'PRAGMA foreign_keys = ON')
+        execute_write(conn, 'PRAGMA journal_mode=WAL')
+        execute_write(conn, 'PRAGMA busy_timeout=30000')
+        conn.row_factory = sqlite3.Row
     try:
         yield conn
         conn.commit()
@@ -168,8 +200,10 @@ def get_db_connection():
         conn.close()
 
 
-def open_db_connection() -> sqlite3.Connection:
+def open_db_connection():
     """Return a new database connection with the standard settings applied."""
+    if _using_postgres():
+        return psycopg2.connect(_pg_dsn(), cursor_factory=psycopg2.extras.RealDictCursor)
     conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
     execute_write(conn, 'PRAGMA foreign_keys = ON')
     execute_write(conn, 'PRAGMA journal_mode=WAL')
@@ -181,7 +215,7 @@ def open_db_connection() -> sqlite3.Connection:
 class PartitionDAO:
     """Data access helper for the partitions table."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn):
         self.conn = conn
 
     def create(self, rehearsal_id: int, path: str, display_name: str, uploader_id: int) -> int:
@@ -193,7 +227,7 @@ class PartitionDAO:
         self.conn.commit()
         return cur.lastrowid
 
-    def list_by_rehearsal(self, rehearsal_id: int) -> list[sqlite3.Row]:
+    def list_by_rehearsal(self, rehearsal_id: int) -> list:
         cur = self.conn.cursor()
         execute_write(cur, 'SELECT * FROM partitions WHERE rehearsal_id = ?', (rehearsal_id,))
         return cur.fetchall()
@@ -210,11 +244,21 @@ def get_partition_dao(conn: sqlite3.Connection) -> PartitionDAO:
 def init_db():
     """Create tables if they do not already exist and insert the
     default settings row.  This function is idempotent."""
-    new_db = not os.path.exists(DB_FILENAME)
+    new_db = (not _using_postgres()) and not os.path.exists(DB_FILENAME)
     with get_db_connection() as conn:
         cur = conn.cursor()
+
+        def run(stmt: str) -> None:
+            if _using_postgres():
+                stmt = (
+                    stmt.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+                    .replace("BLOB", "BYTEA")
+                    .replace("DATETIME", "TIMESTAMP")
+                )
+            execute_write(cur, stmt)
+
         # Users table: store username, salt and password hash
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS users (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    username TEXT NOT NULL UNIQUE,
@@ -227,7 +271,7 @@ def init_db():
                );'''
         )
         # WebAuthn credentials associated with users
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS users_webauthn (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
@@ -236,7 +280,7 @@ def init_db():
                );'''
         )
         # Suggestions: simple list of suggestions with optional URL and creator
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS suggestions (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    title TEXT NOT NULL,
@@ -253,7 +297,7 @@ def init_db():
                );'''
         )
         # Individual suggestion votes per user
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS suggestion_votes (
                    suggestion_id INTEGER NOT NULL,
                    user_id INTEGER NOT NULL,
@@ -265,7 +309,7 @@ def init_db():
         # Rehearsals: store levels and notes per user as JSON strings.  Include
         # optional author, YouTube/Spotify links and audio notes JSON.  The
         # ``audio_notes_json`` field stores base64‑encoded audio notes per user.
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS rehearsals (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    title TEXT NOT NULL,
@@ -285,7 +329,7 @@ def init_db():
                );'''
         )
         # Partitions associated with rehearsals
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS partitions (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    rehearsal_id INTEGER NOT NULL,
@@ -298,7 +342,7 @@ def init_db():
                );'''
         )
         # Performances: contains name, date and a JSON array of rehearsal IDs
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS performances (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    name TEXT NOT NULL,
@@ -315,7 +359,7 @@ def init_db():
         # Rehearsal events: standalone rehearsal occurrences with date and
         # location information.  These are distinct from the "rehearsals"
         # table above, which stores songs to rehearse.
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS rehearsal_events (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    date TEXT NOT NULL,
@@ -328,7 +372,7 @@ def init_db():
                );'''
         )
         # Groups allow multiple band configurations and are owned by a user
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS groups (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    name TEXT NOT NULL,
@@ -341,7 +385,7 @@ def init_db():
                );'''
         )
         # Memberships link users to groups with a role and optional nickname
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS memberships (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
@@ -355,12 +399,10 @@ def init_db():
                );'''
         )
         # Index for quick lookup of a membership by user and group
-        execute_write(cur, 
-            'CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships(user_id, group_id)'
-        )
+        run('CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_user_group ON memberships(user_id, group_id)')
         # Settings: single row with group name, dark mode flag and optional
         # next rehearsal info.  "template" selects the UI theme.
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS settings (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    group_id INTEGER NOT NULL UNIQUE,
@@ -371,7 +413,7 @@ def init_db():
                );'''
         )
         # Sessions: store session token, associated user and expiry timestamp (epoch)
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS sessions (
                    token TEXT PRIMARY KEY,
                    user_id INTEGER NOT NULL,
@@ -380,7 +422,7 @@ def init_db():
                );'''
         )
         # Logs: record key user actions
-        execute_write(cur, 
+        run(
             '''CREATE TABLE IF NOT EXISTS logs (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -391,7 +433,7 @@ def init_db():
                );'''
         )
         # Notifications: store messages for users
-        execute_write(cur,
+        run(
             '''CREATE TABLE IF NOT EXISTS notifications (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
@@ -401,7 +443,7 @@ def init_db():
                );'''
         )
         # Push subscriptions: store Web Push subscriptions per user
-        execute_write(cur,
+        run(
             '''CREATE TABLE IF NOT EXISTS push_subscriptions (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
@@ -412,6 +454,9 @@ def init_db():
                );'''
         )
         conn.commit()
+
+    if _using_postgres():
+        return
 
     # Ensure additional columns are present in existing databases.  SQLite
     # will raise an OperationalError if a column already exists; we
@@ -1764,7 +1809,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         try:
             add_webauthn_credential(user['id'], credential_id)
-        except sqlite3.IntegrityError:
+        except (sqlite3.IntegrityError, psycopg2.IntegrityError):
             send_json(self, HTTPStatus.CONFLICT, {'error': 'Credential already registered'})
             return
         send_json(self, HTTPStatus.OK, {'message': 'Credential registered'})
