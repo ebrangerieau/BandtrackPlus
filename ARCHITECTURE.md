@@ -40,7 +40,7 @@ Elle repose sur une architecture simple et portable, conçue pour tourner dans u
 
 ### 3.2 Backend
 - **Serveur :** Python (`http.server`)
-- **Fichier principal :** `server.py`
+- **Fichier principal :** `main.py`
 - **Rôle :**
   - Gérer les endpoints REST
   - Authentification & sessions via cookies

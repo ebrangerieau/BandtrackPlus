@@ -55,7 +55,7 @@ docker compose up --build
 
 Les variables d'environnement peuvent aussi être définies dans `docker-compose.yml`.
 
-Lors du démarrage du conteneur, `server.py` exécute automatiquement les
+Lors du démarrage du conteneur, `main.py` exécute automatiquement les
 scripts de migration Python présents dans le dossier `scripts/`
 (`migrate_to_multigroup.py`, `migrate_performance_location.py`,
 `migrate_suggestion_votes.py`). Ils assurent la compatibilité des anciennes
@@ -67,7 +67,7 @@ Installer les dépendances (``reportlab`` pour l'export PDF) puis démarrer le s
 
 ```bash
 pip install -r requirements.txt
-python3 server.py --port 8080
+python3 main.py --port 8080
 ```
 
 Le serveur crée la base SQLite `bandtrack.db` au premier lancement.

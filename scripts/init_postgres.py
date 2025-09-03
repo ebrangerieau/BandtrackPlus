@@ -1,9 +1,9 @@
 """Initialize PostgreSQL schema for BandtrackPlus."""
-import server
+from bandtrack.db import init_db
 
 
 def main():
-    server.init_db()
+    init_db()
 
 if __name__ == "__main__":
     main()

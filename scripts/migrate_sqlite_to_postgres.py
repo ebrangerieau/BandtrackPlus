@@ -4,11 +4,11 @@ Usage:
     python scripts/migrate_sqlite_to_postgres.py path/to/sqlite.db
 
 Environment variables for the PostgreSQL destination are the same as
-those used by ``server.py`` (``DATABASE_URL`` or ``DB_*`` variables).
+those used by ``main.py`` (``DATABASE_URL`` or ``DB_*`` variables).
 """
 import argparse
 import sqlite3
-import server
+from bandtrack.db import init_db, get_db_connection
 
 TABLES = [
     "users",
@@ -30,8 +30,8 @@ TABLES = [
 
 
 def migrate(sqlite_path: str) -> None:
-    server.init_db()
-    with sqlite3.connect(sqlite_path) as src, server.get_db_connection() as dst:
+    init_db()
+    with sqlite3.connect(sqlite_path) as src, get_db_connection() as dst:
         src.row_factory = sqlite3.Row
         cur_src = src.cursor()
         cur_dst = dst.cursor()
