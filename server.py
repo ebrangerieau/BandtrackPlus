@@ -127,11 +127,19 @@ async def ws_handler(websocket):
 
 
 def broadcast_ws(event: dict) -> None:
-    if websockets is None or not WS_LOOP or not WS_CLIENTS:
+    if websockets is None or not WS_CLIENTS:
+        return
+    if WS_LOOP is None:
+        print("Warning: WebSocket loop is not running; skipping broadcast")
+        return
+    if not WS_LOOP.is_running():
         return
     message = json.dumps(event)
     for ws in list(WS_CLIENTS):
-        asyncio.run_coroutine_threadsafe(ws.send(message), WS_LOOP)
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send(message), WS_LOOP)
+        except RuntimeError:
+            return
 
 
 def start_ws_server(host: str, port: int) -> None:
