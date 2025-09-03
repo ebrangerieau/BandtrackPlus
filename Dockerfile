@@ -6,6 +6,13 @@ FROM python:3.11-slim
 # Working directory in the container
 WORKDIR /app
 
+# Copy dependency definitions and install them.  Installing dependencies
+# before copying the rest of the application allows Docker to cache these
+# layers more effectively and avoids reinstalling packages when only source
+# code changes.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Copy the Python server, migration scripts and front‑end assets. The
 # SQLite database will be created at runtime.
 COPY server.py ./
