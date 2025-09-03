@@ -4,7 +4,7 @@ import json
 import threading
 import http.client
 import time
-import server
+import bandtrack.api as server
 
 
 def start_test_server(tmp_db_path=None):

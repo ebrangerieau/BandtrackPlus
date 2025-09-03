@@ -1,7 +1,7 @@
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import json
-import server
+import bandtrack.api as server
 from test_api import start_test_server, stop_test_server, request, extract_cookie
 
 

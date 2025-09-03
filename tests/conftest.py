@@ -6,7 +6,7 @@ try:
     pg = PostgresContainer("postgres:15")
     pg.start()
     os.environ["DATABASE_URL"] = pg.get_connection_url()
-    import server
+    import bandtrack.api as server
     server.init_db()
     _docker_ready = True
 except Exception:  # pragma: no cover - handled during testing

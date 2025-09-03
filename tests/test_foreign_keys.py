@@ -2,7 +2,7 @@ import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import psycopg2
 import pytest
-import server
+import bandtrack.api as server
 
 
 def test_membership_foreign_key_enforced(tmp_path):
