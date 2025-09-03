@@ -342,6 +342,37 @@ def init_db():
                    FOREIGN KEY (user_id) REFERENCES users(id)
                );'''
         )
+        # Settings: per-group configuration such as name, theme and template
+        run(
+            '''CREATE TABLE IF NOT EXISTS settings (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   group_id INTEGER NOT NULL UNIQUE,
+                   group_name TEXT NOT NULL,
+                   dark_mode INTEGER NOT NULL DEFAULT 1,
+                   template TEXT,
+                   FOREIGN KEY (group_id) REFERENCES groups(id)
+               );'''
+        )
+        # Notifications: simple user-facing messages
+        run(
+            '''CREATE TABLE IF NOT EXISTS notifications (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id INTEGER NOT NULL,
+                   message TEXT NOT NULL,
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (user_id) REFERENCES users(id)
+               );'''
+        )
+        # Push subscriptions for Web Push notifications
+        run(
+            '''CREATE TABLE IF NOT EXISTS push_subscriptions (
+                   endpoint TEXT PRIMARY KEY,
+                   p256dh TEXT NOT NULL,
+                   auth TEXT NOT NULL,
+                   user_id INTEGER NOT NULL,
+                   FOREIGN KEY (user_id) REFERENCES users(id)
+               );'''
+        )
         if new_db:
             # Insert default settings row and default group
             execute_write(cur, 'INSERT INTO groups (name, invitation_code, owner_id) VALUES ("Default", "DEF123", 1)')
