@@ -13,9 +13,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the Python server, migration scripts and front‑end assets. The
+# Copy the Python server, migration scripts and front-end assets. The
 # SQLite database will be created at runtime.
-COPY server.py ./
+COPY main.py ./
+COPY bandtrack ./bandtrack
 COPY public ./public
 COPY scripts ./scripts
 
@@ -32,5 +33,5 @@ EXPOSE ${PORT}
 # Entrypoint to run the Python server.  We omit explicit host/port arguments
 # here because environment variables are not expanded when using the JSON
 # form of CMD.  The server reads HOST and PORT from its environment via
-# argparse defaults, so running ``python server.py`` is sufficient.
-CMD ["python", "server.py"]
+# argparse defaults, so running ``python main.py`` is sufficient.
+CMD ["python", "main.py"]
