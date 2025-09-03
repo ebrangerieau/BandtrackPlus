@@ -10,6 +10,10 @@ def migrate(db_path: str | None = None) -> bool:
     conn = sqlite3.connect(db_path or DB_PATH)
     conn.execute('PRAGMA foreign_keys = ON')
     cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='performances'")
+    if cur.fetchone() is None:
+        conn.close()
+        return False
     cur.execute("PRAGMA table_info(performances)")
     columns = [row[1] for row in cur.fetchall()]
     if 'location' not in columns:
