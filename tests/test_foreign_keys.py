@@ -1,13 +1,11 @@
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import sqlite3
+import psycopg2
 import pytest
 import server
 
 
 def test_membership_foreign_key_enforced(tmp_path):
-    db_path = tmp_path / "test.db"
-    server.DB_FILENAME = str(db_path)
     server.init_db()
 
     with server.get_db_connection() as conn:
@@ -25,7 +23,7 @@ def test_membership_foreign_key_enforced(tmp_path):
 
     with server.get_db_connection() as conn:
         cur = conn.cursor()
-        with pytest.raises(sqlite3.IntegrityError):
+        with pytest.raises(psycopg2.IntegrityError):
             cur.execute(
                 "INSERT INTO memberships (user_id, group_id, role) VALUES (?, ?, ?)",
                 (999, group_id, "member"),
@@ -33,8 +31,6 @@ def test_membership_foreign_key_enforced(tmp_path):
 
 
 def test_partition_cascade_on_rehearsal_delete(tmp_path):
-    db_path = tmp_path / "test.db"
-    server.DB_FILENAME = str(db_path)
     server.init_db()
 
     with server.get_db_connection() as conn:

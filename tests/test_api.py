@@ -7,8 +7,7 @@ import time
 import server
 
 
-def start_test_server(tmp_db_path):
-    server.DB_FILENAME = str(tmp_db_path)
+def start_test_server(tmp_db_path=None):
     server.init_db()
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.BandTrackHandler)
     port = httpd.server_address[1]

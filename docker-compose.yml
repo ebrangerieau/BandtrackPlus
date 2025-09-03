@@ -1,6 +1,16 @@
 version: '3.8'
 
 services:
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=bandtrack
+      - POSTGRES_PASSWORD=bandtrack
+      - POSTGRES_DB=bandtrack
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
   bandtrack:
     build: .
     container_name: bandtrack
@@ -14,4 +24,13 @@ services:
       - SSL_KEY=/certs/key.pem
       - SSL_CERT=/certs/cert.pem
       - ORIGIN=https://localhost:8080
+      - DB_HOST=db
+      - DB_USER=bandtrack
+      - DB_PASSWORD=bandtrack
+      - DB_NAME=bandtrack
+    depends_on:
+      - db
     restart: unless-stopped
+
+volumes:
+  pgdata:
