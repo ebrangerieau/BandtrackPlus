@@ -84,7 +84,8 @@ import gzip
 import urllib.parse
 import mimetypes
 import io
-import cgi
+from email.parser import BytesParser
+from email.policy import default
 import subprocess
 import shlex
 import asyncio
@@ -789,6 +790,44 @@ def scan_for_viruses(file_bytes: bytes) -> bool:
         return result.returncode == 0
     except Exception:
         return False
+
+
+def parse_multipart_form_data(data: bytes, content_type: str) -> tuple[dict, dict]:
+    """Parse ``multipart/form-data`` content from ``data``.
+
+    Returns a tuple ``(fields, files)`` where ``fields`` is a mapping of
+    field names to text values and ``files`` maps field names to dictionaries
+    containing ``filename``, ``content_type`` and ``content`` bytes.
+    ``content_type`` must be the value of the ``Content-Type`` header from the
+    original request.
+    """
+
+    parser = BytesParser(policy=default)
+    try:
+        message = parser.parsebytes(b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + data)
+    except Exception:
+        return {}, {}
+
+    fields: dict[str, str] = {}
+    files: dict[str, dict] = {}
+    for part in message.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+        name = part.get_param("name", header="content-disposition")
+        if not name:
+            continue
+        filename = part.get_filename()
+        payload = part.get_payload(decode=True)
+        if filename is not None:
+            files[name] = {
+                "filename": filename,
+                "content_type": part.get_content_type(),
+                "content": payload or b"",
+            }
+        else:
+            charset = part.get_content_charset() or "utf-8"
+            fields[name] = (payload or b"").decode(charset, errors="replace")
+    return fields, files
 
 
 def parse_audio_notes_json(data: str | None) -> dict:
@@ -2970,23 +3009,25 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
         if not data:
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File required'})
-        form = cgi.FieldStorage(fp=io.BytesIO(data), headers=headers, environ={'REQUEST_METHOD': 'POST'})
-        file_field = form['file'] if 'file' in form else None
-        if file_field is None or not getattr(file_field, 'file', None):
+        content_type = headers.get('Content-Type', '')
+        fields, files = parse_multipart_form_data(data, content_type)
+        file_field = files.get('file')
+        if not file_field or not file_field.get('content'):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File required'})
-        file_bytes = file_field.file.read()
+        file_bytes = file_field['content']
         if len(file_bytes) > MAX_PARTITION_SIZE:
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File too large'})
-        file_type = file_field.type or mimetypes.guess_type(file_field.filename)[0]
-        if file_type != 'application/pdf' and not file_field.filename.lower().endswith('.pdf'):
+        file_name = file_field.get('filename') or ''
+        file_type = file_field.get('content_type') or mimetypes.guess_type(file_name)[0]
+        if file_type != 'application/pdf' and not file_name.lower().endswith('.pdf'):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file type'})
         if not file_bytes.startswith(b'%PDF'):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file type'})
         if not scan_for_viruses(file_bytes):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'File failed antivirus scan'})
-        raw_display = form.getvalue('displayName') or file_field.filename or 'partition.pdf'
+        raw_display = fields.get('displayName') or file_name or 'partition.pdf'
         display_name = sanitize_name(raw_display)
-        if display_name is None or (file_field.filename and sanitize_name(file_field.filename) is None):
+        if display_name is None or (file_name and sanitize_name(file_name) is None):
             return send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid file name'})
         with get_db_connection() as conn:
             cur = conn.cursor()
