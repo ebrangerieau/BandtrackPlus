@@ -67,9 +67,12 @@ import sqlite3
 try:
     import psycopg2  # type: ignore
     import psycopg2.extras as psycopg2_extras  # type: ignore
+    Psycopg2Error = psycopg2.Error  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     psycopg2 = None  # type: ignore
     psycopg2_extras = None  # type: ignore
+    class Psycopg2Error(Exception):
+        pass
 from contextlib import contextmanager
 import secrets
 import string
@@ -178,7 +181,11 @@ def execute_write(target, sql, params=()):
     """Execute a SQL statement with retry on database locks."""
     if _using_postgres():
         sql = sql.replace("?", "%s")
-        result = target.execute(sql, params)
+        try:
+            result = target.execute(sql, params)
+        except Psycopg2Error:
+            target.connection.rollback()
+            raise
         if sql.lstrip().upper().startswith("INSERT") and not getattr(target, "lastrowid", None):
             target.execute("SELECT LASTVAL()"); target.lastrowid = target.fetchone()[0]
         return result
@@ -192,6 +199,18 @@ def execute_write(target, sql, params=()):
                 delay *= 2
                 continue
             raise
+
+
+def safe_commit(conn):
+    """Commit the current transaction, rolling back on failure."""
+    if _using_postgres():
+        try:
+            conn.commit()
+        except Psycopg2Error:
+            conn.rollback()
+            raise
+    else:
+        conn.commit()
 
 
 @contextmanager
@@ -209,7 +228,7 @@ def get_db_connection():
         conn.row_factory = sqlite3.Row
     try:
         yield conn
-        conn.commit()
+        safe_commit(conn)
     finally:
         conn.close()
 
@@ -240,7 +259,7 @@ class PartitionDAO:
             'INSERT INTO partitions (rehearsal_id, path, display_name, uploader_id) VALUES (?, ?, ?, ?)',
             (rehearsal_id, path, display_name, uploader_id),
         )
-        self.conn.commit()
+        safe_commit(self.conn)
         return cur.lastrowid
 
     def list_by_rehearsal(self, rehearsal_id: int) -> list:
@@ -251,7 +270,7 @@ class PartitionDAO:
     def delete(self, partition_id: int) -> None:
         cur = self.conn.cursor()
         execute_write(cur, 'DELETE FROM partitions WHERE id = ?', (partition_id,))
-        self.conn.commit()
+        safe_commit(self.conn)
 
 
 def get_partition_dao(conn: sqlite3.Connection) -> PartitionDAO:
@@ -484,7 +503,7 @@ def init_db():
                    FOREIGN KEY (user_id) REFERENCES users(id)
                );'''
         )
-        conn.commit()
+        safe_commit(conn)
 
     if _using_postgres():
         return
@@ -505,7 +524,7 @@ def init_db():
             execute_write(cur, 'ALTER TABLE users ADD COLUMN last_group_id INTEGER')
         if 'notify_uploads' not in columns:
             execute_write(cur, 'ALTER TABLE users ADD COLUMN notify_uploads INTEGER NOT NULL DEFAULT 1')
-        conn.commit()
+        safe_commit(conn)
     except Exception:
         pass
     finally:
@@ -536,7 +555,7 @@ def init_db():
                         ORDER BY m.group_id LIMIT 1
                     ) WHERE group_id IS NULL'''
             )
-        conn.commit()
+        safe_commit(conn)
     except Exception:
         pass
     finally:
@@ -571,7 +590,7 @@ def init_db():
                         ORDER BY m.group_id LIMIT 1
                     ) WHERE group_id IS NULL'''
             )
-        conn.commit()
+        safe_commit(conn)
     except Exception:
         pass
     finally:
@@ -594,7 +613,7 @@ def init_db():
                         ORDER BY m.group_id LIMIT 1
                     ) WHERE group_id IS NULL'''
             )
-        conn.commit()
+        safe_commit(conn)
     except Exception:
         pass
     finally:
@@ -614,7 +633,7 @@ def init_db():
         if 'group_id' not in settings_columns:
             execute_write(cur, 'ALTER TABLE settings ADD COLUMN group_id INTEGER')
             execute_write(cur, 'UPDATE settings SET group_id = 1 WHERE group_id IS NULL')
-        conn.commit()
+        safe_commit(conn)
     except Exception:
         pass
     finally:
@@ -631,7 +650,7 @@ def init_db():
         sess_columns = [row['name'] for row in cur.fetchall()]
         if 'group_id' not in sess_columns:
             execute_write(cur, 'ALTER TABLE sessions ADD COLUMN group_id INTEGER')
-        conn.commit()
+        safe_commit(conn)
     except Exception:
         pass
     finally:
@@ -684,7 +703,7 @@ def generate_session(user_id: int, group_id: int | None, duration_seconds: int =
             'INSERT INTO sessions (token, user_id, group_id, expires_at) VALUES (?, ?, ?, ?)',
             (token, user_id, group_id, expires_at)
         )
-        conn.commit()
+        safe_commit(conn)
     return token
 
 def get_user_by_session(token: str) -> dict | None:
@@ -704,7 +723,7 @@ def get_user_by_session(token: str) -> dict | None:
         )
         row = cur.fetchone()
         if not row:
-            conn.commit()
+            safe_commit(conn)
             return None
         user_id = row['user_id']
         group_id = row['group_id']
@@ -720,7 +739,7 @@ def get_user_by_session(token: str) -> dict | None:
             (user_id,)
         )
         user_row = cur.fetchone()
-        conn.commit()
+        safe_commit(conn)
     if user_row:
         return {
             'id': user_row['id'],
@@ -735,7 +754,7 @@ def delete_session(token: str) -> None:
     with get_db_connection() as conn:
         cur = conn.cursor()
         execute_write(cur, 'DELETE FROM sessions WHERE token = ?', (token,))
-        conn.commit()
+        safe_commit(conn)
 
 def log_event(user_id: int | None, action: str, metadata: dict | None = None) -> None:
     """Insert an entry into the logs table."""
@@ -745,7 +764,7 @@ def log_event(user_id: int | None, action: str, metadata: dict | None = None) ->
             'INSERT INTO logs (user_id, action, metadata) VALUES (?, ?, ?)',
             (user_id, action, json.dumps(metadata or {}))
         )
-        conn.commit()
+        safe_commit(conn)
 
 
 def sanitize_name(name: str) -> str | None:
@@ -806,7 +825,7 @@ def add_webauthn_credential(user_id: int, credential_id: str) -> int:
             (user_id, credential_id),
         )
         cred_id = cur.lastrowid
-        conn.commit()
+        safe_commit(conn)
     return cred_id
 
 
@@ -938,7 +957,7 @@ def move_suggestion_to_rehearsal(sug_id: int):
         new_row = cur.fetchone()
         execute_write(cur, 'DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
         execute_write(cur, 'DELETE FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, row['group_id']))
-        conn.commit()
+        safe_commit(conn)
     if not new_row:
         return None
     return {
@@ -981,7 +1000,7 @@ def move_rehearsal_to_suggestion(reh_id: int):
         )
         new_row = cur.fetchone()
         execute_write(cur, 'DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (reh_id, row['group_id']))
-        conn.commit()
+        safe_commit(conn)
     if not new_row:
         return None
     return {
@@ -1011,7 +1030,7 @@ def create_group(name: str, invitation_code: str, description: str | None, logo_
             "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
             (group_id, name),
         )
-        conn.commit()
+        safe_commit(conn)
     return group_id
 
 
@@ -1058,7 +1077,7 @@ def update_group(group_id: int, name: str, invitation_code: str, description: st
             'UPDATE groups SET name = ?, invitation_code = ?, description = ?, logo_url = ? WHERE id = ?',
             (name, invitation_code, description, logo_url, group_id),
         )
-        conn.commit()
+        safe_commit(conn)
         changes = cur.rowcount
     return changes
 
@@ -1067,7 +1086,7 @@ def update_group_code(group_id: int, invitation_code: str) -> int:
     with get_db_connection() as conn:
         cur = conn.cursor()
         execute_write(cur, 'UPDATE groups SET invitation_code = ? WHERE id = ?', (invitation_code, group_id))
-        conn.commit()
+        safe_commit(conn)
         changes = cur.rowcount
     return changes
 
@@ -1077,7 +1096,7 @@ def delete_group(group_id: int) -> int:
     with get_db_connection() as conn:
         cur = conn.cursor()
         execute_write(cur, 'DELETE FROM groups WHERE id = ?', (group_id,))
-        conn.commit()
+        safe_commit(conn)
         changes = cur.rowcount
     return changes
 
@@ -1091,7 +1110,7 @@ def create_membership(user_id: int, group_id: int, role: str, nickname: str | No
             (user_id, group_id, role, nickname, 1 if active else 0),
         )
         membership_id = cur.lastrowid
-        conn.commit()
+        safe_commit(conn)
     return membership_id
 
 
@@ -1146,7 +1165,7 @@ def update_membership(membership_id: int, role: str, nickname: str | None, activ
             'UPDATE memberships SET role = ?, nickname = ?, active = ? WHERE id = ?',
             (role, nickname, 1 if active else 0, membership_id),
         )
-        conn.commit()
+        safe_commit(conn)
         changes = cur.rowcount
     return changes
 
@@ -1159,7 +1178,7 @@ def delete_membership(membership_id: int, group_id: int) -> int:
             'DELETE FROM memberships WHERE id = ? AND group_id = ?',
             (membership_id, group_id),
         )
-        conn.commit()
+        safe_commit(conn)
         changes = cur.rowcount
     return changes
 
@@ -1667,7 +1686,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             )
             # Record last group for the user
             execute_write(cur, 'UPDATE users SET last_group_id = 1 WHERE id = ?', (user_id,))
-            conn.commit()
+            safe_commit(conn)
             group_id = 1
             # Automatically log in the new user and return a session cookie so the
             # behaviour mirrors the Express implementation.
@@ -1719,7 +1738,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 g_row = cur.fetchone()
                 group_id = g_row['group_id'] if g_row else None
             execute_write(cur, 'UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, row['id']))
-            conn.commit()
+            safe_commit(conn)
             if group_id is None:
                 token = generate_session(row['id'], None)
                 expires_ts = int(time.time()) + 7 * 24 * 3600
@@ -1820,7 +1839,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             execute_write(cur, 'DELETE FROM users_webauthn WHERE user_id = ?', (uid,))
             execute_write(cur, 'UPDATE logs SET user_id = NULL WHERE user_id = ?', (uid,))
             execute_write(cur, 'DELETE FROM users WHERE id = ?', (uid,))
-            conn.commit()
+            safe_commit(conn)
             if session_token:
                 delete_session(session_token)
             log_event(None, 'delete_account', {'user_id': uid})
@@ -1873,7 +1892,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 g_row = cur.fetchone()
                 group_id = g_row['group_id'] if g_row else None
             execute_write(cur, 'UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user_row['id']))
-            conn.commit()
+            safe_commit(conn)
             token = generate_session(user_row['id'], group_id)
             expires_ts = int(time.time()) + 7 * 24 * 3600
             membership = get_membership(user_row['id'], group_id) if group_id else None
@@ -1911,7 +1930,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return
             new_salt, new_hash = hash_password(new_password)
             execute_write(cur, 'UPDATE users SET salt = ?, password_hash = ? WHERE id = ?', (new_salt, new_hash, user['id']))
-            conn.commit()
+            safe_commit(conn)
             log_event(user['id'], 'password_change', {})
             send_json(self, HTTPStatus.OK, {'message': 'Password updated'})
 
@@ -1948,7 +1967,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             execute_write(cur, 'UPDATE users SET last_group_id = ? WHERE id = ?', (group_id, user['id']))
             execute_write(cur, 'SELECT id, name FROM groups WHERE id = ?', (group_id,))
             row = cur.fetchone()
-            conn.commit()
+            safe_commit(conn)
             if not row:
                 send_json(self, HTTPStatus.NOT_FOUND, {'error': 'Group not found'})
                 return
@@ -2015,7 +2034,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             execute_write(cur, 'UPDATE settings SET group_name = ? WHERE group_id = ?', (name, group_id))
-            conn.commit()
+            safe_commit(conn)
             send_json(self, HTTPStatus.OK, {'id': group_id, 'name': name})
 
     def api_get_groups(self, user: dict):
@@ -2145,7 +2164,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     cur = conn.cursor()
                     execute_write(cur, 'UPDATE users SET last_group_id = ? WHERE id = ?', (new_group_id, user['id']))
                     execute_write(cur, 'UPDATE sessions SET group_id = ? WHERE user_id = ?', (new_group_id, user['id']))
-                    conn.commit()
+                    safe_commit(conn)
                     send_json(self, HTTPStatus.OK, {'message': 'Left group'})
             else:
                 send_json(self, HTTPStatus.OK, {'message': 'Member deleted'})
@@ -2198,7 +2217,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'INSERT INTO memberships (user_id, group_id, role, nickname, active) VALUES (?, ?, ?, ?, 1)',
                 (user_id, group_id, 'user', None),
             )
-            conn.commit()
+            safe_commit(conn)
             membership = get_membership(user_id, group_id)
             send_json(self, HTTPStatus.CREATED, {
                 'id': membership['id'],
@@ -2272,7 +2291,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 (suggestion_id, user['group_id'])
             )
             row = cur.fetchone()
-            conn.commit()
+            safe_commit(conn)
             if row:
                 result = {
                     'id': row['id'],
@@ -2312,7 +2331,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             deleted = cur.rowcount
             if deleted:
                 execute_write(cur, 'DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
-            conn.commit()
+            safe_commit(conn)
             if deleted:
                 log_event(user['id'], 'delete', {'entity': 'suggestion', 'id': sug_id})
                 send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
@@ -2436,7 +2455,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 (title, author, youtube, spotify, version_of, json.dumps({}), json.dumps({}), json.dumps({}), 0, user['id'], user['group_id'])
             )
             rehearsal_id = cur.lastrowid
-            conn.commit()
+            safe_commit(conn)
             rehearsal = {'id': rehearsal_id, 'title': title, 'author': author, 'youtube': youtube, 'spotify': spotify, 'mastered': False, 'versionOf': version_of, 'sheetMusic': {}}
             send_json(self, HTTPStatus.CREATED, rehearsal)
             send_push_to_group(user['group_id'], 'Nouvelle répétition', title)
@@ -2511,7 +2530,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                  (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
             )
             perf_id = cur.lastrowid
-            conn.commit()
+            safe_commit(conn)
             send_json(self, HTTPStatus.CREATED, {'id': perf_id, 'name': name, 'date': date, 'location': location, 'songs': songs_list})
 
     def api_update_performance(self, body: dict, user: dict):
@@ -2550,7 +2569,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
                 )
             updated = cur.rowcount
-            conn.commit()
+            safe_commit(conn)
             if updated:
                 log_event(user['id'], 'edit', {'entity': 'performance', 'id': perf_id})
                 send_json(self, HTTPStatus.OK, {'message': 'Updated'})
@@ -2584,7 +2603,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             deleted = cur.rowcount
             if deleted:
                 execute_write(cur, 'DELETE FROM suggestion_votes WHERE suggestion_id = ?', (sug_id,))
-            conn.commit()
+            safe_commit(conn)
             if deleted:
                 send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
             else:
@@ -2614,7 +2633,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 (sug_id, user['group_id'])
             )
             row = cur.fetchone()
-            conn.commit()
+            safe_commit(conn)
             if row:
                 result = {
                     'id': row['id'],
@@ -2657,7 +2676,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 (sug_id, user['group_id'])
             )
             row = cur.fetchone()
-            conn.commit()
+            safe_commit(conn)
             if row:
                 result = {
                     'id': row['id'],
@@ -2703,14 +2722,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 )
             updated = cur.rowcount
             if updated:
-                conn.commit()
+                safe_commit(conn)
                 log_event(user['id'], 'edit', {'entity': 'suggestion', 'id': sug_id})
                 send_json(self, HTTPStatus.OK, {'message': 'Updated'})
             else:
                 # Determine if the suggestion exists
                 execute_write(cur, 'SELECT 1 FROM suggestions WHERE id = ? AND group_id = ?', (sug_id, user['group_id']))
                 exists = cur.fetchone()
-                conn.commit()
+                safe_commit(conn)
                 if exists:
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed'})
                 else:
@@ -2848,7 +2867,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 updated_levels_notes_audio = cur.rowcount > 0
-            conn.commit()
+            safe_commit(conn)
             if updated_metadata or updated_levels_notes_audio:
                 log_event(user['id'], 'edit', {'entity': 'rehearsal', 'id': rehearsal_id})
                 execute_write(cur, 'SELECT id, title, author, youtube, spotify, version_of, levels_json, notes_json, audio_notes_json, mastered FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
@@ -2886,7 +2905,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not allowed to edit rehearsal'})
             new_val = 0 if row['mastered'] else 1
             execute_write(cur, 'UPDATE rehearsals SET mastered = ? WHERE id = ? AND group_id = ?', (new_val, rehearsal_id, user['group_id']))
-            conn.commit()
+            safe_commit(conn)
             execute_write(cur, 
                 '''SELECT r.id, r.title, r.author, r.youtube, r.spotify, r.version_of, r.audio_notes_json,
                           r.levels_json, r.notes_json, r.mastered, r.creator_id, r.created_at,
@@ -2981,7 +3000,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             part_id = cur.lastrowid
             rel_path = f'uploads/partitions/{rehearsal_id}/{part_id}.pdf'
             execute_write(cur, 'UPDATE partitions SET path = ? WHERE id = ?', (rel_path, part_id))
-            conn.commit()
+            safe_commit(conn)
             dest_dir = os.path.join(UPLOADS_ROOT, str(rehearsal_id))
             os.makedirs(dest_dir, exist_ok=True)
             with open(os.path.join(dest_dir, f'{part_id}.pdf'), 'wb') as f:
@@ -3002,7 +3021,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             message = f"{user['username']} uploaded {display_name}"
             for uid in recipients:
                 execute_write(cur, 'INSERT INTO notifications (user_id, message) VALUES (?, ?)', (uid, message))
-            conn.commit()
+            safe_commit(conn)
             return send_json(
                 self,
                 HTTPStatus.CREATED,
@@ -3031,7 +3050,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             if row['uploader_id'] != user['id'] and role != 'admin':
                 return send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Forbidden'})
             execute_write(cur, 'DELETE FROM partitions WHERE id = ?', (partition_id,))
-            conn.commit()
+            safe_commit(conn)
             file_path = os.path.join(os.path.dirname(__file__), row['path'])
             try:
                 os.remove(file_path)
@@ -3094,7 +3113,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     (name, date, location, json.dumps(songs_list), perf_id, user['id'], user['group_id'])
                 )
             updated = cur.rowcount
-            conn.commit()
+            safe_commit(conn)
             if updated:
                 send_json(self, HTTPStatus.OK, {'message': 'Updated'})
             else:
@@ -3114,7 +3133,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             else:
                 execute_write(cur, 'DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
             deleted = cur.rowcount
-            conn.commit()
+            safe_commit(conn)
             if deleted:
                 log_event(user['id'], 'delete', {'entity': 'performance', 'id': perf_id})
                 send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
@@ -3140,7 +3159,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     (date, location, user['group_id'], user['id'])
                 )
                 reh_id = cur.lastrowid
-                conn.commit()
+                safe_commit(conn)
                 send_json(self, HTTPStatus.CREATED, {
                     'type': 'rehearsal',
                     'id': reh_id,
@@ -3173,7 +3192,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     (name, date, location, json.dumps(songs_list), user['id'], user['group_id'])
                 )
                 perf_id = cur.lastrowid
-                conn.commit()
+                safe_commit(conn)
                 send_json(self, HTTPStatus.CREATED, {
                     'type': 'performance',
                     'id': perf_id,
@@ -3205,7 +3224,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if cur.rowcount == 0:
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
                     return
-                conn.commit()
+                safe_commit(conn)
                 execute_write(cur, 'SELECT id, date, location FROM rehearsal_events WHERE id = ?', (item_id,))
                 row = cur.fetchone()
                 if not row:
@@ -3245,7 +3264,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if cur.rowcount == 0:
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to update'})
                     return
-                conn.commit()
+                safe_commit(conn)
                 execute_write(cur, 'SELECT id, name, date, location FROM performances WHERE id = ?', (item_id,))
                 row = cur.fetchone()
                 if not row:
@@ -3274,7 +3293,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if cur.rowcount == 0:
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
                     return
-                conn.commit()
+                safe_commit(conn)
                 send_json(self, HTTPStatus.OK, {'success': True})
                 return
             if item_type == 'performance':
@@ -3282,7 +3301,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 if cur.rowcount == 0:
                     send_json(self, HTTPStatus.FORBIDDEN, {'error': 'Not permitted to delete'})
                     return
-                conn.commit()
+                safe_commit(conn)
                 send_json(self, HTTPStatus.OK, {'success': True})
                 return
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Invalid type'})
@@ -3377,7 +3396,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             # Now delete the rehearsal itself
             execute_write(cur, 'DELETE FROM rehearsals WHERE id = ? AND group_id = ?', (rehearsal_id, user['group_id']))
             deleted = cur.rowcount
-            conn.commit()
+            safe_commit(conn)
             if deleted:
                 log_event(user['id'], 'delete', {'entity': 'rehearsal', 'id': rehearsal_id})
                 send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
@@ -3401,7 +3420,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             else:
                 execute_write(cur, 'DELETE FROM performances WHERE id = ? AND creator_id = ? AND group_id = ?', (perf_id, user['id'], user['group_id']))
             deleted = cur.rowcount
-            conn.commit()
+            safe_commit(conn)
             if deleted:
                 log_event(user['id'], 'delete', {'entity': 'performance', 'id': perf_id})
                 send_json(self, HTTPStatus.OK, {'message': 'Deleted'})
@@ -3450,7 +3469,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (?, ?, 1, 'classic')",
                     (user['group_id'], group_name),
                 )
-                conn.commit()
+                safe_commit(conn)
                 row = {
                     'group_name': group_name,
                     'dark_mode': 1,
@@ -3494,7 +3513,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'UPDATE groups SET name = ? WHERE id = ?',
                 (group_name, user['group_id'])
             )
-            conn.commit()
+            safe_commit(conn)
             send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
 
     def api_get_user_settings(self, user: dict):
@@ -3518,7 +3537,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         with get_db_connection() as conn:
             cur = conn.cursor()
             execute_write(cur, 'UPDATE users SET notify_uploads = ? WHERE id = ?', (1 if bool(notify) else 0, user['id']))
-            conn.commit()
+            safe_commit(conn)
             send_json(self, HTTPStatus.OK, {'message': 'Settings updated'})
 
     def api_push_subscribe(self, body: dict, user: dict):
@@ -3539,14 +3558,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     'DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?',
                     (endpoint, user['id']),
                 )
-                conn.commit()
+                safe_commit(conn)
                 send_json(self, HTTPStatus.OK, {'status': 'unsubscribed'})
             else:
                 execute_write(cur,
                     'INSERT OR REPLACE INTO push_subscriptions (endpoint, p256dh, auth, user_id) VALUES (?, ?, ?, ?)',
                     (endpoint, p256dh, auth, user['id']),
                 )
-                conn.commit()
+                safe_commit(conn)
                 send_json(self, HTTPStatus.OK, {'status': 'subscribed'})
 
     def api_get_notifications(self, user: dict):
@@ -3639,7 +3658,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             execute_write(cur, 'UPDATE users SET role = ? WHERE id = ?', (role, uid))
             execute_write(cur, 'UPDATE memberships SET role = ? WHERE user_id = ?', (role, uid))
             updated = cur.rowcount
-            conn.commit()
+            safe_commit(conn)
             if updated:
                 log_event(current_user['id'], 'role_change', {'targetUserId': uid, 'newRole': role})
                 send_json(self, HTTPStatus.OK, {'message': 'User updated'})
