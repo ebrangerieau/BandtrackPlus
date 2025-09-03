@@ -79,6 +79,22 @@ installez aussi la bibliothèque `psycopg2` :
 pip install psycopg2-binary
 ```
 
+### Installation en mode développement
+
+Pour rendre le paquet `bandtrack` importable depuis n'importe quel
+répertoire, installez le projet en mode editable :
+
+```bash
+pip install -e .
+```
+
+Cette commande crée un lien symbolique vers le code source local. Si le
+projet n'est pas installé, ajoutez son chemin au `PYTHONPATH` :
+
+```bash
+export PYTHONPATH="$(pwd):$PYTHONPATH"
+```
+
 ## Tests
 
 Les tests automatisés ciblent uniquement la version Python et peuvent être exécutés dans le conteneur :
