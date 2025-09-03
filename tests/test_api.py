@@ -80,7 +80,8 @@ def test_login_without_group(tmp_path):
         # Remove group memberships for this user
         with server.get_db_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
+            server.execute_write(
+                cur,
                 "DELETE FROM memberships WHERE user_id = (SELECT id FROM users WHERE username = ?)",
                 ("dave",),
             )
