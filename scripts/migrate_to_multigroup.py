@@ -9,8 +9,8 @@ def generate_code() -> str:
     return base64.urlsafe_b64encode(os.urandom(4)).decode('ascii').rstrip('=')
 
 
-def migrate() -> bool:
-    conn = sqlite3.connect(DB_PATH)
+def migrate(db_path: str | None = None) -> bool:
+    conn = sqlite3.connect(db_path or DB_PATH)
     conn.execute('PRAGMA foreign_keys = ON')
     cur = conn.cursor()
     # If the core "users" table does not exist yet we are dealing with a

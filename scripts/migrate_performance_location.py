@@ -4,10 +4,10 @@ import sqlite3
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'bandtrack.db')
 
 
-def migrate() -> bool:
+def migrate(db_path: str | None = None) -> bool:
     """Ensure the performances table has a location column.
     Returns True if a migration was performed."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path or DB_PATH)
     conn.execute('PRAGMA foreign_keys = ON')
     cur = conn.cursor()
     cur.execute("PRAGMA table_info(performances)")
