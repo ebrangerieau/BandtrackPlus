@@ -105,6 +105,7 @@ except ImportError:  # pragma: no cover - optional dependency
 from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
 from scripts.migrate_suggestion_votes import migrate as migrate_suggestion_votes
 from scripts.migrate_performance_location import migrate as migrate_performance_location
+from scripts.migrate_sessions_group_id import migrate as migrate_sessions_group_id
 
 #############################
 # Database initialisation
@@ -464,14 +465,22 @@ def init_db():
                );'''
         )
         # Sessions: store session token, associated user and expiry timestamp (epoch)
-        run(
+        sessions_stmt = (
             '''CREATE TABLE IF NOT EXISTS sessions (
                    token TEXT PRIMARY KEY,
                    user_id INTEGER NOT NULL,
                    expires_at INTEGER NOT NULL,
+                   {group_id}
                    FOREIGN KEY (user_id) REFERENCES users(id)
                );'''
         )
+        if _using_postgres():
+            sessions_stmt = sessions_stmt.format(
+                group_id='group_id INTEGER,\n                   '
+            )
+        else:
+            sessions_stmt = sessions_stmt.format(group_id='')
+        run(sessions_stmt)
         # Logs: record key user actions
         run(
             '''CREATE TABLE IF NOT EXISTS logs (
@@ -3715,6 +3724,8 @@ def run_server(host: str = '0.0.0.0', port: int = 8080):
     init_db()
     migrate_performance_location()
     migrate_suggestion_votes()
+    if _using_postgres():
+        migrate_sessions_group_id()
     ws_port = int(os.environ.get('WS_PORT', port + 1))
     threading.Thread(target=start_ws_server, args=(host, ws_port), daemon=True).start()
     server = ThreadingHTTPServer((host, port), BandTrackHandler)
