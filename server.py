@@ -64,8 +64,12 @@ import argparse
 import json
 import os
 import sqlite3
-import psycopg2
-import psycopg2.extras
+try:
+    import psycopg2  # type: ignore
+    import psycopg2.extras as psycopg2_extras  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    psycopg2 = None  # type: ignore
+    psycopg2_extras = None  # type: ignore
 from contextlib import contextmanager
 import secrets
 import string
@@ -186,7 +190,9 @@ def execute_write(target, sql, params=()):
 def get_db_connection():
     """Yield a database connection with foreign keys enabled."""
     if _using_postgres():
-        conn = psycopg2.connect(_pg_dsn(), cursor_factory=psycopg2.extras.RealDictCursor)
+        if psycopg2 is None:
+            raise RuntimeError("PostgreSQL support requires installing psycopg2")
+        conn = psycopg2.connect(_pg_dsn(), cursor_factory=psycopg2_extras.RealDictCursor)
     else:
         conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
         execute_write(conn, 'PRAGMA foreign_keys = ON')
@@ -203,7 +209,9 @@ def get_db_connection():
 def open_db_connection():
     """Return a new database connection with the standard settings applied."""
     if _using_postgres():
-        return psycopg2.connect(_pg_dsn(), cursor_factory=psycopg2.extras.RealDictCursor)
+        if psycopg2 is None:
+            raise RuntimeError("PostgreSQL support requires installing psycopg2")
+        return psycopg2.connect(_pg_dsn(), cursor_factory=psycopg2_extras.RealDictCursor)
     conn = sqlite3.connect(DB_FILENAME, check_same_thread=False, timeout=30)
     execute_write(conn, 'PRAGMA foreign_keys = ON')
     execute_write(conn, 'PRAGMA journal_mode=WAL')
@@ -1809,7 +1817,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             return
         try:
             add_webauthn_credential(user['id'], credential_id)
-        except (sqlite3.IntegrityError, psycopg2.IntegrityError):
+        except (sqlite3.IntegrityError, psycopg2.IntegrityError if psycopg2 else sqlite3.IntegrityError):
             send_json(self, HTTPStatus.CONFLICT, {'error': 'Credential already registered'})
             return
         send_json(self, HTTPStatus.OK, {'message': 'Credential registered'})

@@ -72,6 +72,13 @@ python3 server.py --port 8080
 
 Le serveur crée la base SQLite `bandtrack.db` au premier lancement.
 
+Pour activer le mode PostgreSQL (`DATABASE_URL` ou variables `DB_*`),
+installez aussi la bibliothèque `psycopg2` :
+
+```bash
+pip install psycopg2-binary
+```
+
 ## Tests
 
 Les tests automatisés ciblent uniquement la version Python et peuvent être exécutés dans le conteneur :
