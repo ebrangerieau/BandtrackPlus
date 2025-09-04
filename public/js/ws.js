@@ -1,8 +1,14 @@
 import { state } from './state.js';
 
 const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-const port = (location.port ? parseInt(location.port, 10) : (proto === 'wss' ? 443 : 80)) + 1;
-const ws = new WebSocket(`${proto}://${location.hostname}:${port}`);
+
+let wsUrl = window.WS_URL;
+if (!wsUrl) {
+  const basePort = location.port ? parseInt(location.port, 10) : (proto === 'wss' ? 443 : 80);
+  const port = window.WS_PORT ? parseInt(window.WS_PORT, 10) : basePort + 1;
+  wsUrl = `${proto}://${location.hostname}:${port}`;
+}
+const ws = new WebSocket(wsUrl);
 
 ws.onmessage = (event) => {
   try {
