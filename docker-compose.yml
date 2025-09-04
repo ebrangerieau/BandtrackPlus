@@ -16,6 +16,7 @@ services:
     container_name: bandtrack
     ports:
       - "8080:8080"
+      - "8081:8081"
     volumes:
       - ./certs:/certs:ro
     environment:
