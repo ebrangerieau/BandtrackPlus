@@ -72,6 +72,20 @@ python3 main.py --port 8080
 
 Le serveur crée la base SQLite `bandtrack.db` au premier lancement.
 
+### Mot de passe administrateur
+
+Lors du premier démarrage, un compte `admin` est créé. Définissez son mot de
+passe via la variable d'environnement `ADMIN_PASSWORD` :
+
+```bash
+export ADMIN_PASSWORD="monsecret"
+python3 main.py --port 8080
+```
+
+Si cette variable n'est pas fournie, l'application génère un mot de passe
+aléatoire et l'affiche dans la sortie standard. Tant qu'aucun mot de passe
+n'est défini, le serveur refuse de démarrer.
+
 Pour activer le mode PostgreSQL (`DATABASE_URL` ou variables `DB_*`),
 installez aussi la bibliothèque `psycopg2` :
 

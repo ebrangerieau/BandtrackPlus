@@ -1,6 +1,8 @@
 import os
 import time
 import sqlite3
+import secrets
+import string
 from contextlib import contextmanager
 try:
     import psycopg2  # type: ignore
@@ -171,6 +173,8 @@ def init_db():
     """Create tables if they do not already exist and insert the
     default settings row.  This function is idempotent."""
     new_db = (not _using_postgres()) and not os.path.exists(DB_FILENAME)
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    from bandtrack.auth import hash_password
     with get_db_connection() as conn:
         cur = conn.cursor()
 
@@ -376,12 +380,30 @@ def init_db():
         if new_db:
             # Insert default settings row and default group
             execute_write(cur, 'INSERT INTO groups (name, invitation_code, owner_id) VALUES ("Default", "DEF123", 1)')
+            if not admin_password:
+                alphabet = string.ascii_letters + string.digits
+                admin_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+                print(f"Generated admin password: {admin_password}")
+            salt, pwd_hash = hash_password(admin_password)
             execute_write(cur,
-                'INSERT INTO users (username, salt, password_hash) VALUES ("admin", x"00", x"00")'
+                'INSERT INTO users (username, salt, password_hash) VALUES (?, ?, ?)',
+                ('admin', salt, pwd_hash)
             )
             execute_write(cur,
                 'INSERT INTO settings (id, group_name, dark_mode, template, group_id) VALUES (1, "Band", 0, "classic", 1)'
             )
+        else:
+            execute_write(cur, 'SELECT salt, password_hash FROM users WHERE username = ?', ('admin',))
+            row = cur.fetchone()
+            if row and (bytes(row['salt']) == b'\x00' or bytes(row['password_hash']) == b'\x00'):
+                if admin_password:
+                    salt, pwd_hash = hash_password(admin_password)
+                    execute_write(cur,
+                        'UPDATE users SET salt = ?, password_hash = ? WHERE username = ?',
+                        (salt, pwd_hash, 'admin')
+                    )
+                else:
+                    raise RuntimeError('ADMIN_PASSWORD environment variable must be set for initial admin password')
 
     # Migrations to adjust existing databases
     from scripts.migrate_to_multigroup import migrate as migrate_to_multigroup
