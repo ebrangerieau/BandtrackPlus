@@ -2462,7 +2462,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             try:
                 os.remove(file_path)
             except OSError as e:
-                logger.warning("Failed to remove partition file %s: %s", file_path, e)
+                logger.warning(
+                    "Failed to remove partition file %s", file_path, exc_info=e
+                )
             log_event(
                 user['id'],
                 'partition_delete',
