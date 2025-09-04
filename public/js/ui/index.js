@@ -348,12 +348,14 @@ Object.defineProperties(state, {
       const inputUser = document.createElement('input');
       inputUser.type = 'text';
       inputUser.required = true;
+      inputUser.autocomplete = 'username';
       // Champ mot de passe
       const labelPass = document.createElement('label');
       labelPass.textContent = 'Mot de passe';
       const inputPass = document.createElement('input');
       inputPass.type = 'password';
       inputPass.required = true;
+      inputPass.autocomplete = isRegister ? 'new-password' : 'current-password';
       form.appendChild(labelUser);
       form.appendChild(inputUser);
       form.appendChild(labelPass);
@@ -365,6 +367,7 @@ Object.defineProperties(state, {
         inputConfirm = document.createElement('input');
         inputConfirm.type = 'password';
         inputConfirm.required = true;
+        inputConfirm.autocomplete = 'new-password';
         form.appendChild(labelConfirm);
         form.appendChild(inputConfirm);
       }
