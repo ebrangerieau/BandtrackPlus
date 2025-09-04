@@ -157,13 +157,24 @@ def broadcast_ws(event: dict) -> None:
             return
 
 
-def start_ws_server(host: str, port: int) -> None:
+def start_ws_server(host: str, http_port: int) -> None:
     if websockets is None:  # pragma: no cover - optional dependency
         return
+    ws_url = os.environ.get('WS_URL')
+    ws_host = host
+    ws_port = http_port + 1
+    if ws_url:
+        parsed = urllib.parse.urlparse(ws_url)
+        if parsed.hostname:
+            ws_host = parsed.hostname
+        if parsed.port:
+            ws_port = parsed.port
+    else:
+        ws_port = int(os.environ.get('WS_PORT', ws_port))
     global WS_LOOP
     WS_LOOP = asyncio.new_event_loop()
     asyncio.set_event_loop(WS_LOOP)
-    server = websockets.serve(ws_handler, host, port)
+    server = websockets.serve(ws_handler, ws_host, ws_port)
     WS_LOOP.run_until_complete(server)
     WS_LOOP.run_forever()
 
@@ -3080,8 +3091,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
 
 def run_server(host: str = '0.0.0.0', port: int = 8080):
     init_db()
-    ws_port = int(os.environ.get('WS_PORT', port + 1))
-    threading.Thread(target=start_ws_server, args=(host, ws_port), daemon=True).start()
+    threading.Thread(target=start_ws_server, args=(host, port), daemon=True).start()
     server = ThreadingHTTPServer((host, port), BandTrackHandler)
     print(f"BandTrack server running on http://{host}:{port} (Ctrl-C to stop)")
     try:
