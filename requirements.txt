@@ -1,5 +1,4 @@
 reportlab
 websockets
 psycopg2-binary
-testcontainers
 sqlparse
