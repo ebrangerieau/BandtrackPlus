@@ -103,6 +103,7 @@ from bandtrack.db import (
     get_partition_dao,
     init_db,
     _using_postgres,
+    Psycopg2Error,
 )
 from bandtrack.auth import (
     hash_password,
@@ -1091,11 +1092,14 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     {'id': user_id, 'username': username, 'role': role, 'membershipRole': role},
                     cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
                 )
-        except sqlite3.Error:
-            logging.exception('Database error during registration')
+        except (sqlite3.OperationalError, Psycopg2Error, RuntimeError) as e:
+            logging.exception('Database connection failed during registration: %s', e)
+            send_json(self, HTTPStatus.SERVICE_UNAVAILABLE, {'error': 'Database unavailable'})
+        except sqlite3.Error as e:
+            logging.exception('Database error during registration: %s', e)
             send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Registration failed'})
-        except Exception:
-            logging.exception('Unexpected error during registration')
+        except Exception as e:
+            logging.exception('Unexpected error during registration: %s', e)
             send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Registration failed'})
 
     def api_login(self, body: dict):

@@ -17,12 +17,12 @@ def test_duplicate_user_returns_conflict(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_register_db_failure_returns_500(tmp_path):
+def test_register_db_failure_returns_503(tmp_path):
     httpd, thread, port = start_test_server(tmp_path / "test.db")
     try:
-        with mock.patch("bandtrack.api.get_db_connection", side_effect=sqlite3.OperationalError):
+        with mock.patch("bandtrack.api.get_db_connection", side_effect=sqlite3.OperationalError("boom")):
             status, _, body = request("POST", port, "/api/register", {"username": "bob", "password": "pw"})
-        assert status == 500
-        assert json.loads(body) == {"error": "Registration failed"}
+        assert status == 503
+        assert json.loads(body) == {"error": "Database unavailable"}
     finally:
         stop_test_server(httpd, thread)
