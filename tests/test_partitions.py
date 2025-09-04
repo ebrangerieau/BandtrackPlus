@@ -146,5 +146,6 @@ def test_partition_delete_missing_file_logs_warning(tmp_path, caplog):
             )
         assert status == 200
         assert "Failed to remove partition file" in caplog.text
+        assert any(rec.exc_info for rec in caplog.records)
     finally:
         stop_test_server(httpd, thread)
