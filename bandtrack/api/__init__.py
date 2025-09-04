@@ -64,6 +64,8 @@ import argparse
 import json
 import os
 import sqlite3
+import logging
+import time
 try:
     import psycopg2  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
@@ -1041,53 +1043,60 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         if not username or not password:
             send_json(self, HTTPStatus.BAD_REQUEST, {'error': 'Username and password are required'})
             return
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            # Check if a user already exists (case‑insensitive)
-            execute_write(cur, 'SELECT id FROM users WHERE LOWER(username) = LOWER(?)', (username,))
-            if cur.fetchone():
-                send_json(self, HTTPStatus.CONFLICT, {'error': 'User already exists'})
-                return
-            # Determine if this is the first user; if so, assign admin role
-            execute_write(cur, 'SELECT COUNT(*) FROM users')
-            count = cur.fetchone()[0]
-            role = 'admin' if count == 0 else 'user'
-            salt, pwd_hash = hash_password(password)
-            execute_write(cur, 
-                'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
-                (username, salt, pwd_hash, role, None)
-            )
-            user_id = cur.lastrowid
-            # Ensure default group exists and is owned by the first user
-            execute_write(cur, 'SELECT id FROM groups WHERE id = 1')
-            if cur.fetchone() is None:
-                code = generate_unique_invitation_code()
-                execute_write(cur, 
-                    'INSERT INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, ?)',
-                    ('Groupe de musique', code, user_id),
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                # Check if a user already exists (case‑insensitive)
+                execute_write(cur, 'SELECT id FROM users WHERE LOWER(username) = LOWER(?)', (username,))
+                if cur.fetchone():
+                    send_json(self, HTTPStatus.CONFLICT, {'error': 'User already exists'})
+                    return
+                # Determine if this is the first user; if so, assign admin role
+                execute_write(cur, 'SELECT COUNT(*) FROM users')
+                count = cur.fetchone()[0]
+                role = 'admin' if count == 0 else 'user'
+                salt, pwd_hash = hash_password(password)
+                execute_write(cur,
+                    'INSERT INTO users (username, salt, password_hash, role, last_group_id) VALUES (?, ?, ?, ?, ?)',
+                    (username, salt, pwd_hash, role, None),
                 )
-                execute_write(cur, 
-                    "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (1, 'Groupe de musique', 1, 'classic')"
+                user_id = cur.lastrowid
+                # Ensure default group exists and is owned by the first user
+                execute_write(cur, 'SELECT id FROM groups WHERE id = 1')
+                if cur.fetchone() is None:
+                    code = generate_unique_invitation_code()
+                    execute_write(cur,
+                        'INSERT INTO groups (id, name, invitation_code, owner_id) VALUES (1, ?, ?, ?)',
+                        ('Groupe de musique', code, user_id),
+                    )
+                    execute_write(cur,
+                        "INSERT INTO settings (group_id, group_name, dark_mode, template) VALUES (1, 'Groupe de musique', 1, 'classic')",
+                    )
+                # Add the new user to the default group (id 1)
+                execute_write(cur,
+                    'INSERT OR IGNORE INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)',
+                    (user_id, role),
                 )
-            # Add the new user to the default group (id 1)
-            execute_write(cur, 
-                'INSERT OR IGNORE INTO memberships (user_id, group_id, role, active) VALUES (?, 1, ?, 1)',
-                (user_id, role),
-            )
-            # Record last group for the user
-            execute_write(cur, 'UPDATE users SET last_group_id = 1 WHERE id = ?', (user_id,))
-            safe_commit(conn)
-            group_id = 1
-            # Automatically log in the new user and return a session cookie so the
-            # behaviour mirrors the Express implementation.
-            token = generate_session(user_id, group_id)
-            expires_ts = int(time.time()) + 7 * 24 * 3600
-            send_json(
-                self,
-                HTTPStatus.OK,
-                {'id': user_id, 'username': username, 'role': role, 'membershipRole': role},
-                cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
-            )
+                # Record last group for the user
+                execute_write(cur, 'UPDATE users SET last_group_id = 1 WHERE id = ?', (user_id,))
+                safe_commit(conn)
+                group_id = 1
+                # Automatically log in the new user and return a session cookie so the
+                # behaviour mirrors the Express implementation.
+                token = generate_session(user_id, group_id)
+                expires_ts = int(time.time()) + 7 * 24 * 3600
+                send_json(
+                    self,
+                    HTTPStatus.OK,
+                    {'id': user_id, 'username': username, 'role': role, 'membershipRole': role},
+                    cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+                )
+        except sqlite3.Error:
+            logging.exception('Database error during registration')
+            send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Registration failed'})
+        except Exception:
+            logging.exception('Unexpected error during registration')
+            send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Registration failed'})
 
     def api_login(self, body: dict):
         username = (body.get('username') or '').strip().lower()
