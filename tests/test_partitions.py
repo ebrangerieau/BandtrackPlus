@@ -4,6 +4,7 @@ import threading
 import http.client
 import time
 import json
+import logging
 import bandtrack.api as server
 
 
@@ -111,5 +112,39 @@ def test_partition_upload_list_download_and_delete(tmp_path):
 
         status, _, _ = request("DELETE", port, f"/api/rehearsals/{rid}/partitions/{pid3}", headers=headers_alice)
         assert status == 200
+    finally:
+        stop_test_server(httpd, thread)
+
+
+def test_partition_delete_missing_file_logs_warning(tmp_path, caplog):
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        status, headers, _ = request("POST", port, "/api/register", {"username": "alice", "password": "pw"})
+        assert status == 200
+        cookie = extract_cookie(headers)
+        headers_alice = {"Cookie": cookie}
+
+        status, _, body = request("POST", port, "/api/rehearsals", {"title": "Song"}, headers_alice)
+        assert status == 201
+        rid = json.loads(body)["id"]
+
+        pdf_bytes = b"%PDF-1.4\n%EOF"
+        boundary = "testboundary"
+        upload_body = make_pdf_body(boundary, pdf_bytes)
+        upload_headers = {"Cookie": cookie, "Content-Type": f"multipart/form-data; boundary={boundary}"}
+        status, _, body = request("POST", port, f"/api/rehearsals/{rid}/partitions", upload_body, upload_headers)
+        assert status == 201
+        pid = json.loads(body)["id"]
+
+        file_path = os.path.join(server.UPLOADS_ROOT, str(rid), f"{pid}.pdf")
+        assert os.path.exists(file_path)
+        os.remove(file_path)
+
+        with caplog.at_level(logging.WARNING):
+            status, _, _ = request(
+                "DELETE", port, f"/api/rehearsals/{rid}/partitions/{pid}", headers=headers_alice
+            )
+        assert status == 200
+        assert "Failed to remove partition file" in caplog.text
     finally:
         stop_test_server(httpd, thread)

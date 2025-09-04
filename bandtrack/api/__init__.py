@@ -94,6 +94,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     websockets = None  # type: ignore
 
+logger = logging.getLogger(__name__)
+
 from bandtrack.db import (
     get_db_connection,
     open_db_connection,
@@ -2459,8 +2461,8 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             file_path = os.path.join(os.path.dirname(__file__), row['path'])
             try:
                 os.remove(file_path)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("Failed to remove partition file %s: %s", file_path, e)
             log_event(
                 user['id'],
                 'partition_delete',
