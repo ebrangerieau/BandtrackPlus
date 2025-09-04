@@ -97,9 +97,10 @@ export PYTHONPATH="$(pwd):$PYTHONPATH"
 
 ## Tests
 
-Les tests automatisés ciblent uniquement la version Python et peuvent être exécutés dans le conteneur :
+Les tests automatisés ciblent uniquement la version Python. Installez d'abord les dépendances de test via l'extra `dev` puis exécutez-les dans le conteneur :
 
 ```bash
+pip install .[dev]
 pytest
 ```
 

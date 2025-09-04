@@ -13,9 +13,12 @@ dependencies = [
     "reportlab",
     "websockets",
     "psycopg2-binary",
-    "testcontainers",
     "sqlparse",
 ]
+
+[project.optional-dependencies]
+# Development and test dependencies
+dev = ["testcontainers"]
 
 [tool.setuptools]
 packages = ["bandtrack"]
