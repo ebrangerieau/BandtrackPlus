@@ -96,6 +96,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     websockets = None  # type: ignore
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from bandtrack.db import (
@@ -1142,11 +1143,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             )
             row = cur.fetchone()
             if not row:
+                logger.warning("Login failed for user '%s': unknown user", username)
                 send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
                 return
             salt = row['salt']
             pwd_hash = row['password_hash']
             if not verify_password(password, salt, pwd_hash):
+                logger.warning("Login failed for user '%s': invalid password", username)
                 send_json(self, HTTPStatus.UNAUTHORIZED, {'error': 'Invalid credentials'})
                 return
             # Determine the active group using the user's last choice if still valid
