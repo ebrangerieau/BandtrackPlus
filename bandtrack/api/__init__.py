@@ -55,8 +55,10 @@ and inserts a default settings row if none exists.  Data persists in
 
 Note: Because this server runs on the same domain as the frontend, no
 CORS headers are necessary.  The session cookie is marked ``HttpOnly``
-and ``SameSite=Lax`` to mitigate cross‑site scripting and request
-forgery attacks.  HTTPS termination should be handled by an upstream
+with ``SameSite=None`` and, by default, ``Secure`` to mitigate cross‑site
+scripting and request forgery attacks.  The ``Secure`` flag can be
+disabled in non‑HTTPS environments via the ``SESSION_COOKIE_SECURE``
+environment variable.  HTTPS termination should be handled by an upstream
 proxy in production.
 """
 
@@ -127,6 +129,10 @@ MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE', 5 * 1024 * 1024))
 
 # Maximum allowed size for HTTP request bodies (default 1 MB)
 MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', 1 * 1024 * 1024))
+
+# Whether to mark session cookies as ``Secure``. Set ``0`` to disable when
+# running over plain HTTP (e.g., in development environments).
+SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', '1') != '0'
 
 # WebSocket server state
 WS_CLIENTS: set = set()
@@ -1103,7 +1109,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     self,
                     HTTPStatus.OK,
                     {'id': user_id, 'username': username, 'role': role, 'membershipRole': role},
-                    cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+                    cookies=[('session_id', token, {
+                        'expires': expires_ts,
+                        'path': '/',
+                        'samesite': 'None',
+                        'httponly': True,
+                        'secure': SESSION_COOKIE_SECURE,
+                    })]
                 )
         except (sqlite3.OperationalError, Psycopg2Error, RuntimeError) as e:
             logging.exception('Database connection failed during registration: %s', e)
@@ -1173,7 +1185,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                             'isAdmin': row['role'] == 'admin',
                         },
                     },
-                    cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+                    cookies=[('session_id', token, {
+                        'expires': expires_ts,
+                        'path': '/',
+                        'samesite': 'None',
+                        'httponly': True,
+                        'secure': SESSION_COOKIE_SECURE,
+                    })]
                 )
                 return
             token = generate_session(row['id'], group_id)
@@ -1193,7 +1211,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         'isAdmin': row['role'] == 'admin',
                     },
                 },
-                cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+                cookies=[('session_id', token, {
+                    'expires': expires_ts,
+                    'path': '/',
+                    'samesite': 'None',
+                    'httponly': True,
+                    'secure': SESSION_COOKIE_SECURE,
+                })]
             )
 
     def api_logout(self, session_token: str):
@@ -1205,7 +1229,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
             self,
             HTTPStatus.OK,
             {'message': 'Logged out'},
-            cookies=[('session_id', '', {'expires': past_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+            cookies=[('session_id', '', {
+                'expires': past_ts,
+                'path': '/',
+                'samesite': 'None',
+                'httponly': True,
+                'secure': SESSION_COOKIE_SECURE,
+            })]
         )
 
     def api_me(self, user: dict | None):
@@ -1264,7 +1294,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 self,
                 HTTPStatus.OK,
                 {'message': 'Account deleted'},
-                cookies=[('session_id', '', {'expires': past_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})]
+                cookies=[('session_id', '', {
+                    'expires': past_ts,
+                    'path': '/',
+                    'samesite': 'None',
+                    'httponly': True,
+                    'secure': SESSION_COOKIE_SECURE,
+                })]
             )
 
     def api_webauthn_register(self, body: dict, user: dict):
@@ -1325,7 +1361,13 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 self,
                 HTTPStatus.OK,
                 {'message': 'Logged in', 'user': payload},
-                cookies=[('session_id', token, {'expires': expires_ts, 'path': '/', 'samesite': 'Lax', 'httponly': True})],
+                cookies=[('session_id', token, {
+                    'expires': expires_ts,
+                    'path': '/',
+                    'samesite': 'None',
+                    'httponly': True,
+                    'secure': SESSION_COOKIE_SECURE,
+                })],
             )
 
     def api_update_password(self, body: dict, user: dict):
