@@ -42,7 +42,7 @@ def migrate(db_path: str | None = None) -> bool:
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                user_id INTEGER NOT NULL,
                group_id INTEGER NOT NULL,
-               role TEXT NOT NULL,
+               role TEXT NOT NULL DEFAULT 'user',
                nickname TEXT,
                joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                active INTEGER NOT NULL DEFAULT 1,

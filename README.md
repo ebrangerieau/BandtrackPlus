@@ -129,6 +129,16 @@ Aucun environnement Node.js n'est nécessaire.
 Le script supprime `bandtrack.db` puis recrée les tables et applique les
 migrations nécessaires.
 
+Pour mettre à jour une base existante vers ce schéma (ajout de `nickname`,
+`joined_at`, `active` et contrainte d'unicité dans `memberships` ainsi que la
+normalisation du rôle par défaut à `user`), exécutez d'abord :
+
+```bash
+python3 scripts/migrate_legacy_group_members.py
+```
+
+Puis relancez `reset-db.sh` pour repartir d'une base propre si besoin.
+
 ## Sauvegardes
 
 Un script `backup.sh` copie la base et les éventuels fichiers audio dans
