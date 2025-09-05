@@ -330,7 +330,11 @@ def init_db():
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                    user_id INTEGER NOT NULL,
                    group_id INTEGER NOT NULL,
-                   role TEXT NOT NULL DEFAULT 'member',
+                   role TEXT NOT NULL DEFAULT 'user',
+                   nickname TEXT,
+                   joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                   active INTEGER NOT NULL DEFAULT 1,
+                   UNIQUE(user_id, group_id),
                    FOREIGN KEY (user_id) REFERENCES users(id),
                    FOREIGN KEY (group_id) REFERENCES groups(id)
                );'''
@@ -378,8 +382,7 @@ def init_db():
                );'''
         )
         if new_db:
-            # Insert default settings row and default group
-            execute_write(cur, 'INSERT INTO groups (name, invitation_code, owner_id) VALUES ("Default", "DEF123", 1)')
+            # Insert default user, group and settings row
             if not admin_password:
                 alphabet = string.ascii_letters + string.digits
                 admin_password = ''.join(secrets.choice(alphabet) for _ in range(12))
@@ -389,6 +392,7 @@ def init_db():
                 'INSERT INTO users (username, salt, password_hash) VALUES (?, ?, ?)',
                 ('admin', salt, pwd_hash)
             )
+            execute_write(cur, 'INSERT INTO groups (name, invitation_code, owner_id) VALUES ("Default", "DEF123", 1)')
             execute_write(cur,
                 'INSERT INTO settings (id, group_name, dark_mode, template, group_id) VALUES (1, "Band", 0, "classic", 1)'
             )
