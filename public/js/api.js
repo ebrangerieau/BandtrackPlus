@@ -1,6 +1,7 @@
 import { state } from './state.js';
 
-export async function api(path, method = 'GET', data) {
+export async function api(path, method = 'GET', data, opts = {}) {
+  const { silent401 = false } = opts;
   const options = {
     method,
     credentials: 'include',
@@ -18,6 +19,10 @@ export async function api(path, method = 'GET', data) {
   }
   if (res.status === 401) {
     state.currentUser = null;
+    if (silent401) {
+      console.debug(`API ${method} ${path} returned 401`);
+      return null;
+    }
     throw new Error(json?.error || 'Non authentifié');
   }
   if (res.status === 403 && json && json.error === 'No membership') {
