@@ -3,7 +3,11 @@ import { api } from './api.js';
 
 export async function checkSession() {
   try {
-    const user = await api('/me');
+    const user = await api('/me', 'GET', undefined, { silent401: true });
+    if (!user) {
+      state.currentUser = null;
+      return;
+    }
     state.currentUser = user;
     if (!user.needsGroup) {
       const settings = await api('/settings');
@@ -14,6 +18,7 @@ export async function checkSession() {
       if (groupNameEl) groupNameEl.textContent = settings.groupName;
     }
   } catch (err) {
+    console.debug('checkSession failed', err);
     state.currentUser = null;
   }
 }
