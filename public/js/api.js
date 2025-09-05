@@ -3,7 +3,7 @@ import { state } from './state.js';
 export async function api(path, method = 'GET', data) {
   const options = {
     method,
-    credentials: 'same-origin',
+    credentials: 'include',
   };
   if (data !== undefined) {
     options.headers = { 'Content-Type': 'application/json' };
@@ -48,7 +48,7 @@ export async function uploadPartition(songId, file, displayName) {
   const res = await fetch(`/api/rehearsals/${songId}/partitions`, {
     method: 'POST',
     body: form,
-    credentials: 'same-origin',
+    credentials: 'include',
   });
   let json;
   try {
