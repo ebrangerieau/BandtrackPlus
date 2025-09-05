@@ -93,6 +93,15 @@ installez aussi la bibliothèque `psycopg2` :
 pip install psycopg2-binary
 ```
 
+### Cookies de session et HTTPS
+
+Par défaut, le cookie de session reçoit l'attribut `Secure` uniquement si la
+requête est effectuée en HTTPS (détection via les en-têtes `X-Forwarded-Proto`
+ou `Forwarded`). Pour forcer cet attribut, définissez
+`SESSION_COOKIE_SECURE=1`, utile si un proxy TLS ne transmet pas ces en-têtes.
+En développement sans HTTPS, laissez cette variable non définie pour que le
+cookie soit accepté par le navigateur.
+
 ### Installation en mode développement
 
 Pour rendre le paquet `bandtrack` importable depuis n'importe quel

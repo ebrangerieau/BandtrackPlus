@@ -55,11 +55,10 @@ and inserts a default settings row if none exists.  Data persists in
 
 Note: Because this server runs on the same domain as the frontend, no
 CORS headers are necessary.  The session cookie is marked ``HttpOnly``
-with ``SameSite=None`` and, by default, ``Secure`` to mitigate cross‑site
-scripting and request forgery attacks.  The ``Secure`` flag can be
-disabled in non‑HTTPS environments via the ``SESSION_COOKIE_SECURE``
-environment variable.  HTTPS termination should be handled by an upstream
-proxy in production.
+with ``SameSite=None``.  The ``Secure`` flag is added only when the
+request is served over HTTPS (detected via standard proxy headers),
+unless forced by the ``SESSION_COOKIE_SECURE`` environment variable.
+HTTPS termination should be handled by an upstream proxy in production.
 """
 
 import argparse
@@ -131,13 +130,41 @@ MAX_PARTITION_SIZE = int(os.environ.get('MAX_PARTITION_SIZE', 5 * 1024 * 1024))
 # Maximum allowed size for HTTP request bodies (default 1 MB)
 MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', 1 * 1024 * 1024))
 
-# Whether to mark session cookies as ``Secure``. Set ``0`` to disable when
-# running over plain HTTP (e.g., in development environments).
-SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', '1') != '0'
+# Force the ``Secure`` flag on session cookies even if the request is not
+# detected as HTTPS.  By default the flag is only added when HTTPS is detected
+# via ``X-Forwarded-Proto`` or ``Forwarded`` headers.  Set
+# ``SESSION_COOKIE_SECURE=1`` to always include the flag.
+SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', '').lower() in (
+    '1', 'true', 'yes'
+)
 
 # WebSocket server state
 WS_CLIENTS: set = set()
 WS_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def request_is_https(handler: BaseHTTPRequestHandler) -> bool:
+    """Return True if the current request was made via HTTPS.
+
+    Detection relies on standard proxy headers such as ``X-Forwarded-Proto``
+    or ``Forwarded``.  If neither header is present, the request is assumed to
+    be plain HTTP."""
+
+    proto = handler.headers.get('X-Forwarded-Proto')
+    if proto:
+        return proto.lower() == 'https'
+    forwarded = handler.headers.get('Forwarded')
+    if forwarded:
+        m = re.search(r'proto=([^;]+)', forwarded, re.IGNORECASE)
+        if m and m.group(1).lower() == 'https':
+            return True
+    return False
+
+
+def cookie_secure(handler: BaseHTTPRequestHandler) -> bool:
+    """Return True if session cookies should include the ``Secure`` flag."""
+
+    return SESSION_COOKIE_SECURE or request_is_https(handler)
 
 
 async def ws_handler(websocket):
@@ -1115,7 +1142,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         'path': '/',
                         'samesite': 'None',
                         'httponly': True,
-                        'secure': SESSION_COOKIE_SECURE,
+                        'secure': cookie_secure(self),
                     })]
                 )
         except (sqlite3.OperationalError, Psycopg2Error, RuntimeError) as e:
@@ -1193,7 +1220,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                         'path': '/',
                         'samesite': 'None',
                         'httponly': True,
-                        'secure': SESSION_COOKIE_SECURE,
+                        'secure': cookie_secure(self),
                     })]
                 )
                 return
@@ -1219,7 +1246,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     'path': '/',
                     'samesite': 'None',
                     'httponly': True,
-                    'secure': SESSION_COOKIE_SECURE,
+                    'secure': cookie_secure(self),
                 })]
             )
 
@@ -1237,7 +1264,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                 'path': '/',
                 'samesite': 'None',
                 'httponly': True,
-                'secure': SESSION_COOKIE_SECURE,
+                'secure': cookie_secure(self),
             })]
         )
 
@@ -1302,7 +1329,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     'path': '/',
                     'samesite': 'None',
                     'httponly': True,
-                    'secure': SESSION_COOKIE_SECURE,
+                    'secure': cookie_secure(self),
                 })]
             )
 
@@ -1369,7 +1396,7 @@ class BandTrackHandler(BaseHTTPRequestHandler):
                     'path': '/',
                     'samesite': 'None',
                     'httponly': True,
-                    'secure': SESSION_COOKIE_SECURE,
+                    'secure': cookie_secure(self),
                 })],
             )
 
