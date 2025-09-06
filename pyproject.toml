@@ -13,7 +13,6 @@ dependencies = [
     "reportlab",
     "websockets",
     "psycopg2-binary",
-    "sqlparse",
 ]
 
 [project.optional-dependencies]
