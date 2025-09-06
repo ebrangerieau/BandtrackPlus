@@ -152,13 +152,15 @@ def init_db():
                    FOREIGN KEY (last_group_id) REFERENCES groups(id)
                );'''
         )
-        try:
+        cur.execute(
+            "SELECT 1 FROM information_schema.table_constraints "
+            "WHERE table_name='groups' AND constraint_name='fk_groups_owner'"
+        )
+        if not cur.fetchone():
             run(
                 'ALTER TABLE groups ADD CONSTRAINT fk_groups_owner '
                 'FOREIGN KEY (owner_id) REFERENCES users(id)'
             )
-        except Exception:
-            pass
 
         # WebAuthn credentials associated with users
         run(
