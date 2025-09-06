@@ -42,7 +42,14 @@ def execute_write(target, sql, params=()):
         raise
     if sql.lstrip().upper().startswith("INSERT") and not getattr(target, "lastrowid", None):
         target.execute("SELECT LASTVAL()")
-        target.lastrowid = target.fetchone()[0]
+        row = target.fetchone()
+        # RealDictCursor returns rows as dictionaries instead of tuples.
+        # Access the first value regardless of the row type to avoid
+        # KeyError when using dictionary-based rows.
+        if isinstance(row, dict):
+            target.lastrowid = next(iter(row.values()))
+        else:
+            target.lastrowid = row[0]
     return result
 
 
