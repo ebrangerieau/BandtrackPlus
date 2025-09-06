@@ -5,8 +5,8 @@ import bandtrack.api as server
 from test_api import start_test_server, stop_test_server, request, extract_cookie
 
 
-def test_group_member_can_leave_and_context_cleared(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_group_member_can_leave_and_context_cleared():
+    httpd, thread, port = start_test_server()
     try:
         # Register admin user and log in
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
@@ -48,7 +48,7 @@ def test_group_member_can_leave_and_context_cleared(tmp_path):
         # last_group_id in database is cleared
         with server.get_db_connection() as conn:
             cur = conn.cursor()
-            server.execute_write(cur, 'SELECT last_group_id FROM users WHERE id = ?', (bob_user_id,))
+            server.execute_write(cur, 'SELECT last_group_id FROM users WHERE id = %s', (bob_user_id,))
             row = cur.fetchone()
         assert row['last_group_id'] is None
     finally:

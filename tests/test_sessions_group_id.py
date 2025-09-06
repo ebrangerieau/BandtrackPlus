@@ -7,7 +7,7 @@ import time
 import bandtrack.api as server
 
 
-def start_test_server(tmp_db_path=None):
+def start_test_server():
     server.init_db()
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.BandTrackHandler)
     port = httpd.server_address[1]
@@ -44,8 +44,8 @@ def extract_cookie(headers):
     return cookie.split(";", 1)[0]
 
 
-def test_session_contains_group_id(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_session_contains_group_id():
+    httpd, thread, port = start_test_server()
     try:
         request("POST", port, "/api/register", {"username": "sam", "password": "pw"})
         status, headers, _ = request("POST", port, "/api/login", {"username": "sam", "password": "pw"})
@@ -54,7 +54,7 @@ def test_session_contains_group_id(tmp_path):
         token = cookie.split("=", 1)[1]
         with server.get_db_connection() as conn:
             cur = conn.cursor()
-            server.execute_write(cur, 'SELECT group_id FROM sessions WHERE token = ?', (token,))
+            server.execute_write(cur, 'SELECT group_id FROM sessions WHERE token = %s', (token,))
             row = cur.fetchone()
             assert row is not None
             assert row['group_id'] == 1

@@ -1,9 +1,12 @@
+import pytest
 from test_api import start_test_server, stop_test_server, request, extract_cookie
+
+pytest.importorskip("playwright")
 from playwright.sync_api import sync_playwright
 
 
-def test_ui_account_deletion(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_ui_account_deletion():
+    httpd, thread, port = start_test_server()
     try:
         # Register and login to create session
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
@@ -42,8 +45,8 @@ def test_ui_account_deletion(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_ui_account_deletion_from_group_setup(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_ui_account_deletion_from_group_setup():
+    httpd, thread, port = start_test_server()
     try:
         request('POST', port, '/api/register', {'username': 'bob', 'password': 'pw'})
         status, headers, _ = request('POST', port, '/api/login', {'username': 'bob', 'password': 'pw'})

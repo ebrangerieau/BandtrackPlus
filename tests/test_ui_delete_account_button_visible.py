@@ -1,9 +1,12 @@
+import pytest
 from test_api import start_test_server, stop_test_server, request, extract_cookie
+
+pytest.importorskip("playwright")
 from playwright.sync_api import sync_playwright
 
 
-def test_delete_account_button_visible(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_delete_account_button_visible():
+    httpd, thread, port = start_test_server()
     try:
         # register and login to obtain session cookie
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})

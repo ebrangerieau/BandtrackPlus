@@ -5,8 +5,8 @@ pytest.importorskip("playwright")
 from playwright.sync_api import sync_playwright
 
 
-def test_script_title_not_executed(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_script_title_not_executed():
+    httpd, thread, port = start_test_server()
     try:
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
         status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})

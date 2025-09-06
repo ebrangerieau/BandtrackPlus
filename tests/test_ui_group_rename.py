@@ -1,9 +1,12 @@
+import pytest
 from test_api import start_test_server, stop_test_server, request, extract_cookie
+
+pytest.importorskip("playwright")
 from playwright.sync_api import sync_playwright
 
 
-def test_dropdown_updates_after_group_rename(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_dropdown_updates_after_group_rename():
+    httpd, thread, port = start_test_server()
     try:
         # Register, login and create a group via API
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})

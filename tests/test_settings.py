@@ -5,8 +5,8 @@ import bandtrack.api as server
 from test_api import start_test_server, stop_test_server, request, extract_cookie
 
 
-def test_default_settings_creation(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_default_settings_creation():
+    httpd, thread, port = start_test_server()
     try:
         # register and login
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
@@ -32,7 +32,7 @@ def test_default_settings_creation(tmp_path):
         # delete settings row and ensure GET recreates defaults
         with server.get_db_connection() as conn:
             cur = conn.cursor()
-            server.execute_write(cur, 'DELETE FROM settings WHERE group_id = ?', (group_id,))
+            server.execute_write(cur, 'DELETE FROM settings WHERE group_id = %s', (group_id,))
 
         status, _, body = request('GET', port, f'/api/{group_id}/settings', headers=headers)
         assert status == 200
@@ -43,8 +43,8 @@ def test_default_settings_creation(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_settings_update(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_settings_update():
+    httpd, thread, port = start_test_server()
     try:
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
         status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})
@@ -77,8 +77,8 @@ def test_settings_update(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_group_rename(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_group_rename():
+    httpd, thread, port = start_test_server()
     try:
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
         status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})
@@ -102,8 +102,8 @@ def test_group_rename(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_group_rename_unauthorized(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_group_rename_unauthorized():
+    httpd, thread, port = start_test_server()
     try:
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
         status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})

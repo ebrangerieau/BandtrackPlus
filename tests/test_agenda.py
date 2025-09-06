@@ -4,8 +4,8 @@ from test_api import start_test_server, stop_test_server, request, extract_cooki
 import bandtrack.api as server
 
 
-def test_agenda_endpoint(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_agenda_endpoint():
+    httpd, thread, port = start_test_server()
     try:
         # Register and login to obtain session cookie
         status, headers, body = request(
@@ -20,12 +20,12 @@ def test_agenda_endpoint(tmp_path):
             cur = conn.cursor()
             server.execute_write(
                 cur,
-                "INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)",
+                "INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (%s, %s, %s, %s)",
                 ("2024-01-10T20:00", "Studio", 1, user_id),
             )
             server.execute_write(
                 cur,
-                "INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (?, ?, ?, ?)",
+                "INSERT INTO rehearsal_events (date, location, group_id, creator_id) VALUES (%s, %s, %s, %s)",
                 ("2024-02-05T20:00", "Studio B", 1, user_id),
             )
 
@@ -78,8 +78,8 @@ def test_agenda_endpoint(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_agenda_crud(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_agenda_crud():
+    httpd, thread, port = start_test_server()
     try:
         request("POST", port, "/api/register", {"username": "bob", "password": "pw"})
         status, headers, _ = request(

@@ -7,7 +7,7 @@ import json
 import bandtrack.api as server
 
 
-def start_test_server(tmp_db_path=None):
+def start_test_server():
     server.init_db()
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.BandTrackHandler)
     port = httpd.server_address[1]
@@ -54,8 +54,8 @@ def make_pdf_body(boundary, pdf_bytes, filename="sample.pdf"):
     ).encode() + pdf_bytes + f"\r\n--{boundary}--\r\n".encode()
 
 
-def test_upload_notifications_and_opt_out(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_upload_notifications_and_opt_out():
+    httpd, thread, port = start_test_server()
     try:
         # Register two users
         status, headers, _ = request("POST", port, "/api/register", {"username": "alice", "password": "pw"})

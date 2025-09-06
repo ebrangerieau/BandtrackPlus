@@ -2,8 +2,8 @@ import json
 from test_api import start_test_server, stop_test_server, request, extract_cookie
 
 
-def test_account_deletion(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_account_deletion():
+    httpd, thread, port = start_test_server()
     try:
         # Register initial admin user to set up default group
         request('POST', port, '/api/register', {'username': 'admin', 'password': 'pw'})
@@ -25,8 +25,8 @@ def test_account_deletion(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_cannot_delete_account_while_owning_group(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_cannot_delete_account_while_owning_group():
+    httpd, thread, port = start_test_server()
     try:
         # Register initial admin user to set up default group
         request('POST', port, '/api/register', {'username': 'admin', 'password': 'pw'})

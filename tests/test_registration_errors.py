@@ -1,13 +1,13 @@
 import concurrent.futures
 import json
-import sqlite3
+import psycopg2
 from unittest import mock
 
 from test_api import start_test_server, stop_test_server, request
 
 
-def test_duplicate_user_returns_conflict(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_duplicate_user_returns_conflict():
+    httpd, thread, port = start_test_server()
     try:
         status, _, _ = request("POST", port, "/api/register", {"username": "alice", "password": "pw"})
         assert status == 200
@@ -18,8 +18,8 @@ def test_duplicate_user_returns_conflict(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_simultaneous_duplicate_user_returns_conflict(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_simultaneous_duplicate_user_returns_conflict():
+    httpd, thread, port = start_test_server()
     try:
         def register():
             return request("POST", port, "/api/register", {"username": "alice", "password": "pw"})
@@ -36,10 +36,13 @@ def test_simultaneous_duplicate_user_returns_conflict(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_register_db_failure_returns_503(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_register_db_failure_returns_503():
+    httpd, thread, port = start_test_server()
     try:
-        with mock.patch("bandtrack.api.get_db_connection", side_effect=sqlite3.OperationalError("boom")):
+        with mock.patch(
+            "bandtrack.api.get_db_connection",
+            side_effect=psycopg2.OperationalError("boom"),
+        ):
             status, _, body = request("POST", port, "/api/register", {"username": "bob", "password": "pw"})
         assert status == 503
         assert json.loads(body) == {"error": "Database unavailable"}

@@ -8,7 +8,7 @@ import logging
 import bandtrack.api as server
 
 
-def start_test_server(tmp_db_path=None):
+def start_test_server():
     server.init_db()
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.BandTrackHandler)
     port = httpd.server_address[1]
@@ -55,8 +55,8 @@ def make_pdf_body(boundary, pdf_bytes, filename="sample.pdf"):
     ).encode() + pdf_bytes + f"\r\n--{boundary}--\r\n".encode()
 
 
-def test_partition_upload_list_download_and_delete(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_partition_upload_list_download_and_delete():
+    httpd, thread, port = start_test_server()
     try:
         status, headers, _ = request("POST", port, "/api/register", {"username": "alice", "password": "pw"})
         assert status == 200
@@ -116,8 +116,8 @@ def test_partition_upload_list_download_and_delete(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_partition_delete_missing_file_logs_warning(tmp_path, caplog):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_partition_delete_missing_file_logs_warning(caplog):
+    httpd, thread, port = start_test_server()
     try:
         status, headers, _ = request("POST", port, "/api/register", {"username": "alice", "password": "pw"})
         assert status == 200
