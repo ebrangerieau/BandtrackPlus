@@ -7,7 +7,7 @@ Elle repose sur une architecture simple et portable, conçue pour tourner dans u
 **Composants principaux :**
 - Frontend SPA (JavaScript vanilla)
 - Backend HTTP (Python)
-- Base de données SQLite
+- Base de données PostgreSQL
 - Conteneurisation via Docker
 - API REST interne pour la communication frontend ↔ backend
 
@@ -22,7 +22,7 @@ Elle repose sur une architecture simple et portable, conçue pour tourner dans u
         |
 [ Backend Python ]
         |
-[ SQLite Database ]
+[ PostgreSQL Database ]
 ```
 
 ---
@@ -50,19 +50,17 @@ Elle repose sur une architecture simple et portable, conçue pour tourner dans u
   - Hashage mots de passe (PBKDF2-SHA256)
 
 ### 3.3 Base de données
-- **Type :** SQLite (`bandtrack.db`)
+- **Type :** PostgreSQL
 - **Utilisation :**
   - Persistance des groupes, utilisateurs, suggestions, répétitions, prestations, paramètres
 - **Scripts :**
-  - `scripts/` → migrations exécutées au démarrage
   - `reset-db.sh` → réinitialisation
-  - `backup.sh` → sauvegarde/restauration
 
 ### 3.4 Conteneurisation
 - **Fichiers :** `Dockerfile`, `docker-compose.yml`
 - **Services :**
   - Backend Python
-  - SQLite monté en volume persistant
+  - Base PostgreSQL
 - **Objectif :**
   - Déploiement reproductible sur NAS/serveur
   - Sauvegardes automatisées
@@ -74,7 +72,7 @@ Elle repose sur une architecture simple et portable, conçue pour tourner dans u
 Exemple : un utilisateur vote pour une suggestion musicale.
 1. Le frontend envoie `POST /api/suggestions/{id}/vote`
 2. Le backend vérifie la session + droits utilisateur
-3. Mise à jour de la DB SQLite
+3. Mise à jour de la base PostgreSQL
 4. Réponse JSON envoyée au frontend (nouveau compteur de votes)
 5. UI se met à jour côté PWA
 
@@ -82,7 +80,7 @@ Exemple : un utilisateur vote pour une suggestion musicale.
 
 ## 5. Choix techniques
 
-- **SQLite** : simplicité et portabilité (un seul fichier DB)
+- **PostgreSQL** : base robuste et adaptée aux accès concurrents
 - **Backend Python minimaliste** : moins de dépendances externes, facile à maintenir
 - **Docker** : homogénéité entre développement, test et production
 - **PWA** : utilisable sur smartphone comme une app native (installation via navigateur)
@@ -94,7 +92,7 @@ Exemple : un utilisateur vote pour une suggestion musicale.
 - **Sessions** : gestion correcte des cookies
 - **Sécurité API** : validation stricte des entrées
 - **Sauvegardes DB** : planifier une stratégie régulière
-- **Scalabilité** : SQLite limite les accès concurrents (migration possible vers PostgreSQL/MySQL)
+- **Scalabilité** : nécessite une configuration appropriée de PostgreSQL pour gérer la charge
 
 ---
 
