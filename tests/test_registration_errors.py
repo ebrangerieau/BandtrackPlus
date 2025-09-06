@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import sqlite3
 from unittest import mock
@@ -13,6 +14,24 @@ def test_duplicate_user_returns_conflict(tmp_path):
         status, _, body = request("POST", port, "/api/register", {"username": "alice", "password": "pw"})
         assert status == 409
         assert json.loads(body)["error"] == "User already exists"
+    finally:
+        stop_test_server(httpd, thread)
+
+
+def test_simultaneous_duplicate_user_returns_conflict(tmp_path):
+    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    try:
+        def register():
+            return request("POST", port, "/api/register", {"username": "alice", "password": "pw"})
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(register) for _ in range(2)]
+            results = [f.result() for f in futures]
+
+        statuses = sorted(r[0] for r in results)
+        assert statuses == [200, 409]
+        error_body = json.loads(next(r[2] for r in results if r[0] == 409))
+        assert error_body["error"] == "User already exists"
     finally:
         stop_test_server(httpd, thread)
 
