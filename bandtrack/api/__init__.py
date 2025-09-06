@@ -19,9 +19,9 @@ Key features
 * Users can register and login.  Passwords are salted and hashed using
   PBKDF2 with SHA‑256 for security.  Sessions are stored in a
   ``sessions`` table and identified via a randomly generated cookie.
-* Suggestions, rehearsals and performances are persisted in a SQLite
-  database (`bandtrack.db`) with the same structure as an earlier
-  Node/Express prototype, which has since been retired.
+* Suggestions, rehearsals and performances are persisted in a PostgreSQL
+  database with a schema derived from an earlier Node/Express prototype,
+  which has since been retired.
 * A single settings row stores the group name and dark mode flag, which
   are applied at load time for all users.
 * The API endpoints mirror those used by the frontend so that the
@@ -49,9 +49,9 @@ the command line.  Example:
 python3 main.py --port 5000
 ```
 
-The server automatically creates the database and tables on first run,
-and inserts a default settings row if none exists.  Data persists in
-``bandtrack.db`` across restarts.
+The server automatically creates the tables on first run and inserts a
+default settings row if none exists.  Data persists in the configured
+PostgreSQL database across restarts.
 
 Note: Because this server runs on the same domain as the frontend, no
 CORS headers are necessary.  The session cookie is marked ``HttpOnly``

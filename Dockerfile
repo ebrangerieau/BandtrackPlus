@@ -13,15 +13,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the Python server, migration scripts and front-end assets. The
-# SQLite database will be created at runtime.
+# Copy the Python server and front-end assets.
 COPY main.py ./
 COPY bandtrack ./bandtrack
 COPY public ./public
 COPY scripts ./scripts
-
-# Create a volume for persistent database storage
-VOLUME ["/data"]
 
 # Set environment variables to configure host/port (optional)
 ENV HOST=0.0.0.0

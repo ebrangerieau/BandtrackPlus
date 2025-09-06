@@ -55,12 +55,6 @@ docker compose up --build
 
 Les variables d'environnement peuvent aussi être définies dans `docker-compose.yml`.
 
-Lors du démarrage du conteneur, `main.py` exécute automatiquement les
-scripts de migration Python présents dans le dossier `scripts/`
-(`migrate_to_multigroup.py`, `migrate_performance_location.py`,
-`migrate_suggestion_votes.py`). Ils assurent la compatibilité des anciennes
-bases de données sans dépendance à Node.js.
-
 ### Exécution locale sans Docker
 
 Installer les dépendances (``reportlab`` pour l'export PDF) puis démarrer le serveur :
@@ -70,7 +64,7 @@ pip install -r requirements.txt
 python3 main.py --port 8080
 ```
 
-Le serveur crée la base SQLite `bandtrack.db` au premier lancement.
+Le serveur initialise automatiquement les tables dans la base PostgreSQL configurée via `DATABASE_URL` ou les variables `DB_*`.
 
 ### Mot de passe administrateur
 
@@ -86,8 +80,8 @@ Si cette variable n'est pas fournie, l'application génère un mot de passe
 aléatoire et l'affiche dans la sortie standard. Tant qu'aucun mot de passe
 n'est défini, le serveur refuse de démarrer.
 
-Pour activer le mode PostgreSQL (`DATABASE_URL` ou variables `DB_*`),
-installez aussi la bibliothèque `psycopg2` :
+L'application utilise PostgreSQL (`DATABASE_URL` ou variables `DB_*`).
+Installez la bibliothèque `psycopg2` :
 
 ```bash
 pip install psycopg2-binary
@@ -135,40 +129,7 @@ Aucun environnement Node.js n'est nécessaire.
 ./reset-db.sh
 ```
 
-Le script supprime `bandtrack.db` puis recrée les tables et applique les
-migrations nécessaires.
-
-Pour mettre à jour une base existante vers ce schéma (ajout de `nickname`,
-`joined_at`, `active` et contrainte d'unicité dans `memberships` ainsi que la
-normalisation du rôle par défaut à `user`), exécutez d'abord :
-
-```bash
-python3 scripts/migrate_legacy_group_members.py
-```
-
-Puis relancez `reset-db.sh` pour repartir d'une base propre si besoin.
-
-## Sauvegardes
-
-Un script `backup.sh` copie la base et les éventuels fichiers audio dans
-`backups/DATE`. Seules les `MAX_BACKUPS` dernières sauvegardes sont conservées
-(7 par défaut).
-
-```bash
-./backup.sh            # créer une sauvegarde
-MAX_BACKUPS=10 ./backup.sh  # conserver 10 sauvegardes
-```
-
-Pour restaurer une sauvegarde :
-
-1. Arrêter le serveur.
-2. Copier les fichiers depuis le dossier voulu :
-   ```bash
-   cp backups/DATE/bandtrack.db .
-   rm -rf audios
-   cp -r backups/DATE/audios audios
-   ```
-3. Redémarrer le serveur.
+Le script réinitialise le schéma PostgreSQL `public` puis recrée les tables via `init_db`.
 
 ## Progressive Web App
 
