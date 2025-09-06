@@ -8,7 +8,7 @@ import time
 import bandtrack.api as server
 
 
-def start_test_server(tmp_db_path=None):
+def start_test_server():
     server.init_db()
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.BandTrackHandler)
     port = httpd.server_address[1]
@@ -45,8 +45,8 @@ def extract_cookie(headers):
     return cookie.split(";", 1)[0]
 
 
-def test_multiple_audio_notes_with_titles(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_multiple_audio_notes_with_titles():
+    httpd, thread, port = start_test_server()
     try:
         request("POST", port, "/api/register", {"username": "alice", "password": "pw"})
         status, headers, _ = request("POST", port, "/api/login", {"username": "alice", "password": "pw"})

@@ -2,8 +2,8 @@ import json
 from test_api import start_test_server, stop_test_server, request, extract_cookie
 
 
-def test_group_isolation_and_context(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_group_isolation_and_context():
+    httpd, thread, port = start_test_server()
     try:
         # Alice registers and logs in (admin of default group 1)
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})

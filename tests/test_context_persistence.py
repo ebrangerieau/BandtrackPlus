@@ -2,8 +2,8 @@ import json
 from test_api import start_test_server, stop_test_server, request, extract_cookie
 
 
-def test_group_context_persists_across_login(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_group_context_persists_across_login():
+    httpd, thread, port = start_test_server()
     try:
         request('POST', port, '/api/register', {'username': 'alice', 'password': 'pw'})
         status, headers, _ = request('POST', port, '/api/login', {'username': 'alice', 'password': 'pw'})

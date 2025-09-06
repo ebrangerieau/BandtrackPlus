@@ -2,8 +2,8 @@ import json
 from test_api import start_test_server, stop_test_server, request, extract_cookie
 
 
-def test_group_invite_new_user(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_group_invite_new_user():
+    httpd, thread, port = start_test_server()
     try:
         # Register admin user
         request('POST', port, '/api/register', {'username': 'admin@example.com', 'password': 'pw'})
@@ -26,8 +26,8 @@ def test_group_invite_new_user(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_group_invite_existing_user(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / 'test.db')
+def test_group_invite_existing_user():
+    httpd, thread, port = start_test_server()
     try:
         # Register admin user
         request('POST', port, '/api/register', {'username': 'admin@example.com', 'password': 'pw'})

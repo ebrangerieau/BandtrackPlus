@@ -7,18 +7,9 @@ import time
 import bandtrack.api as server
 
 
-def start_test_server(tmp_db_path=None):
-    if tmp_db_path is not None:
-        import bandtrack.db as db_module
-
-        httpd_old_db = db_module.DB_FILENAME
-        db_module.DB_FILENAME = str(tmp_db_path)
-    else:
-        httpd_old_db = None
+def start_test_server():
     server.init_db()
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.BandTrackHandler)
-    httpd.db_path = str(tmp_db_path) if tmp_db_path is not None else None
-    httpd.old_db_filename = httpd_old_db
     port = httpd.server_address[1]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -30,14 +21,6 @@ def start_test_server(tmp_db_path=None):
 def stop_test_server(httpd, thread):
     httpd.shutdown()
     thread.join()
-    db_path = getattr(httpd, "db_path", None)
-    if db_path and os.path.exists(db_path):
-        os.remove(db_path)
-    old_db = getattr(httpd, "old_db_filename", None)
-    if old_db is not None:
-        import bandtrack.db as db_module
-
-        db_module.DB_FILENAME = old_db
 
 
 def request(method, port, path, body=None, headers=None):
@@ -62,8 +45,8 @@ def extract_cookie(headers):
     return cookie.split(";", 1)[0]
 
 
-def test_register_and_login(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_register_and_login():
+    httpd, thread, port = start_test_server()
     try:
         status, headers, _ = request(
             "POST",
@@ -85,8 +68,8 @@ def test_register_and_login(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_login_without_group(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_login_without_group():
+    httpd, thread, port = start_test_server()
     try:
         request(
             "POST",
@@ -99,7 +82,7 @@ def test_login_without_group(tmp_path):
             cur = conn.cursor()
             server.execute_write(
                 cur,
-                "DELETE FROM memberships WHERE user_id = (SELECT id FROM users WHERE username = ?)",
+                "DELETE FROM memberships WHERE user_id = (SELECT id FROM users WHERE username = %s)",
                 ("dave",),
             )
         status, headers, body = request(
@@ -117,8 +100,8 @@ def test_login_without_group(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_suggestions_crud(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_suggestions_crud():
+    httpd, thread, port = start_test_server()
     try:
         request("POST", port, "/api/register", {"username": "bob", "password": "pw"})
         status, headers, _ = request("POST", port, "/api/login", {"username": "bob", "password": "pw"})
@@ -150,8 +133,8 @@ def test_suggestions_crud(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_rehearsals_crud(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_rehearsals_crud():
+    httpd, thread, port = start_test_server()
     try:
         request("POST", port, "/api/register", {"username": "carol", "password": "pw"})
         status, headers, _ = request("POST", port, "/api/login", {"username": "carol", "password": "pw"})
@@ -182,8 +165,8 @@ def test_rehearsals_crud(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_rehearsals_sorted_by_average(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_rehearsals_sorted_by_average():
+    httpd, thread, port = start_test_server()
     try:
         request("POST", port, "/api/register", {"username": "u1", "password": "pw"})
         status, headers, _ = request(
@@ -214,8 +197,8 @@ def test_rehearsals_sorted_by_average(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_roles_and_permissions(tmp_path):
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+def test_roles_and_permissions():
+    httpd, thread, port = start_test_server()
     try:
         # Register and login admin (first user)
         request("POST", port, "/api/register", {"username": "admin", "password": "pw"})
@@ -258,10 +241,10 @@ def test_roles_and_permissions(tmp_path):
         stop_test_server(httpd, thread)
 
 
-def test_request_body_limit(tmp_path):
+def test_request_body_limit():
     old_limit = server.MAX_REQUEST_SIZE
     server.MAX_REQUEST_SIZE = 1024
-    httpd, thread, port = start_test_server(tmp_path / "test.db")
+    httpd, thread, port = start_test_server()
     try:
         large_username = "x" * (server.MAX_REQUEST_SIZE * 2)
         status, _, body = request(
