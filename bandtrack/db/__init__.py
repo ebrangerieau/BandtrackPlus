@@ -16,6 +16,25 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
         pass
 
 
+if psycopg2_extras is not None:
+    class RealDictCursor(psycopg2_extras.RealDictCursor):
+        """RealDictCursor variant with a writable ``lastrowid`` attribute.
+
+        psycopg2's cursor exposes ``lastrowid`` as a read-only attribute, which
+        prevents helper functions from storing the last inserted id on the
+        cursor.  Subclasses override this behaviour by providing a setter that
+        stores the value in ``_lastrowid`` while still returning the original
+        value if none has been set."""
+
+        @property
+        def lastrowid(self):  # type: ignore[override]
+            return getattr(self, "_lastrowid", super().lastrowid)
+
+        @lastrowid.setter
+        def lastrowid(self, value):  # type: ignore[override]
+            self._lastrowid = value
+
+
 #############################
 # Database helpers
 #############################
@@ -68,7 +87,7 @@ def get_db_connection():
     """Yield a database connection."""
     if psycopg2 is None:
         raise RuntimeError("PostgreSQL support requires installing psycopg2")
-    conn = psycopg2.connect(_pg_dsn(), cursor_factory=psycopg2_extras.RealDictCursor)
+    conn = psycopg2.connect(_pg_dsn(), cursor_factory=RealDictCursor)
     try:
         yield conn
         safe_commit(conn)
@@ -80,7 +99,7 @@ def open_db_connection():
     """Return a new database connection."""
     if psycopg2 is None:
         raise RuntimeError("PostgreSQL support requires installing psycopg2")
-    return psycopg2.connect(_pg_dsn(), cursor_factory=psycopg2_extras.RealDictCursor)
+    return psycopg2.connect(_pg_dsn(), cursor_factory=RealDictCursor)
 
 
 class PartitionDAO:
