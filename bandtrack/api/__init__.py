@@ -1148,6 +1148,9 @@ class BandTrackHandler(BaseHTTPRequestHandler):
         except (sqlite3.OperationalError, Psycopg2Error, RuntimeError) as e:
             logging.exception('Database connection failed during registration: %s', e)
             send_json(self, HTTPStatus.SERVICE_UNAVAILABLE, {'error': 'Database unavailable'})
+        except sqlite3.IntegrityError as e:
+            logging.exception('Database integrity error during registration: %s', e)
+            send_json(self, HTTPStatus.CONFLICT, {'error': 'User already exists'})
         except sqlite3.Error as e:
             logging.exception('Database error during registration: %s', e)
             send_json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {'error': 'Registration failed'})
