@@ -21,3 +21,8 @@ dev = ["testcontainers"]
 
 [tool.setuptools]
 packages = ["bandtrack"]
+
+[tool.pytest.ini_options]
+markers = [
+    "nodb: test does not require a database connection",
+]

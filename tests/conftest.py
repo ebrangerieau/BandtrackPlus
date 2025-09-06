@@ -25,8 +25,13 @@ def _stop_container():
 
 
 @pytest.fixture(autouse=True)
-def reset_db():
+def reset_db(request):
     if not _docker_ready:
+        # Allow tests marked with "nodb" to run even when PostgreSQL is
+        # unavailable.  This is useful for unit tests that do not require a
+        # real database connection.
+        if "nodb" in request.keywords:
+            return
         pytest.skip("PostgreSQL container not available")
     with server.get_db_connection() as conn:  # type: ignore[union-attr]
         cur = conn.cursor()

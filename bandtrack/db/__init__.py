@@ -2,6 +2,7 @@ import os
 import secrets
 import string
 from contextlib import contextmanager
+from collections.abc import Mapping
 
 try:
     import psycopg2  # type: ignore
@@ -45,8 +46,8 @@ def execute_write(target, sql, params=()):
         row = target.fetchone()
         # RealDictCursor returns rows as dictionaries instead of tuples.
         # Access the first value regardless of the row type to avoid
-        # KeyError when using dictionary-based rows.
-        if isinstance(row, dict):
+        # KeyError when using dictionary-based rows or other mapping types.
+        if isinstance(row, Mapping):
             target.lastrowid = next(iter(row.values()))
         else:
             target.lastrowid = row[0]
